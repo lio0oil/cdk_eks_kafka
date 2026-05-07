@@ -41,7 +41,7 @@ class EksClusterConstruct(Construct):
         self.cluster.add_nodegroup_capacity(
             "SystemNodeGroup",
             nodegroup_name="system-nodegroup",
-            instance_types=[ec2.InstanceType("m5.xlarge")],
+            instance_types=[ec2.InstanceType("m5.large")],
             min_size=3,
             max_size=6,
             desired_size=3,
@@ -62,7 +62,7 @@ class EksClusterConstruct(Construct):
         self.cluster.add_nodegroup_capacity(
             "KafkaNodeGroup",
             nodegroup_name="kafka-nodegroup",
-            instance_types=[ec2.InstanceType("r5.xlarge")],
+            instance_types=[ec2.InstanceType("r5.large")],
             min_size=3,
             max_size=9,
             desired_size=3,
