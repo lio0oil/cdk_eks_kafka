@@ -81,7 +81,7 @@ class AddonsConstruct(Construct):
             },
         )
 
-        self._cluster.add_helm_chart(
+        argocd = self._cluster.add_helm_chart(
             "ArgoCD",
             chart="argo-cd",
             repository="https://argoproj.github.io/argo-helm",
@@ -111,3 +111,33 @@ class AddonsConstruct(Construct):
                 },
             },
         )
+
+        # Bootstrap Application（App of Apps）
+        # manifests/argocd/ 以下の Application を ArgoCD が自律管理する。
+        # git push するだけでクラスターへ反映される。
+        repo_url: str = self.node.get_context("repo-url")
+        bootstrap = self._cluster.add_manifest(
+            "BootstrapApp",
+            {
+                "apiVersion": "argoproj.io/v1alpha1",
+                "kind": "Application",
+                "metadata": {"name": "bootstrap", "namespace": "argocd"},
+                "spec": {
+                    "project": "default",
+                    "source": {
+                        "repoURL": repo_url,
+                        "targetRevision": "HEAD",
+                        "path": "manifests/argocd",
+                    },
+                    "destination": {
+                        "server": "https://kubernetes.default.svc",
+                        "namespace": "argocd",
+                    },
+                    "syncPolicy": {
+                        "automated": {"prune": True, "selfHeal": True},
+                        "syncOptions": ["CreateNamespace=true"],
+                    },
+                },
+            },
+        )
+        bootstrap.node.add_dependency(argocd)
