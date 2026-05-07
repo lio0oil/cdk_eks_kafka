@@ -55,20 +55,6 @@ class EksClusterConstruct(Construct):
             enable_node_auto_repair=True,
         )
 
-        # アプリケーションノードグループ: 一般ワークロード用
-        self.cluster.add_nodegroup_capacity(
-            "AppNodeGroup",
-            nodegroup_name="app-nodegroup",
-            instance_types=[ec2.InstanceType("m5.xlarge")],
-            min_size=3,
-            max_size=9,
-            desired_size=3,
-            capacity_type=eks.CapacityType.ON_DEMAND,
-            subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS),
-            labels={"role": "app"},
-            enable_node_auto_repair=True,
-        )
-
         # KafkaノードグループはStrimziが管理するKafkaブローカー専用
         self.cluster.add_nodegroup_capacity(
             "KafkaNodeGroup",
