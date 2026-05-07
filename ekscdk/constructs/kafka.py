@@ -6,6 +6,8 @@ class KafkaConstruct(Construct):
     """
     StrimziオペレーターをArgoCD Applicationとしてデプロイし、
     KafkaクラスターCRを3ブローカー/3AZ構成でPrivateSubnetに配置する。
+    外部接続はStrimziのloadbalancerリスナーを使用し、
+    AWS Load Balancer ControllerがNLBを自動管理する。
     """
 
     def __init__(self, scope: Construct, construct_id: str, cluster: eks.Cluster) -> None:
@@ -70,6 +72,37 @@ class KafkaConstruct(Construct):
                         "listeners": [
                             {"name": "plain", "port": 9092, "type": "internal", "tls": False},
                             {"name": "tls", "port": 9093, "type": "internal", "tls": True},
+                            {
+                                "name": "external",
+                                "port": 9094,
+                                "type": "loadbalancer",
+                                "tls": True,
+                                "configuration": {
+                                    "bootstrap": {
+                                        "annotations": {
+                                            # AWS Load Balancer ControllerでNLBを作成
+                                            "service.beta.kubernetes.io/aws-load-balancer-type": "external",
+                                            "service.beta.kubernetes.io/aws-load-balancer-nlb-target-type": "instance",
+                                            # PrivateLinkはPrivate NLBが前提
+                                            "service.beta.kubernetes.io/aws-load-balancer-scheme": "internal",
+                                            # AZ障害耐性のためcross-zone load balancingを有効化
+                                            "service.beta.kubernetes.io/aws-load-balancer-cross-zone-load-balancing-enabled": "true",
+                                        }
+                                    },
+                                    "brokers": [
+                                        {
+                                            "broker": i,
+                                            "annotations": {
+                                                "service.beta.kubernetes.io/aws-load-balancer-type": "external",
+                                                "service.beta.kubernetes.io/aws-load-balancer-nlb-target-type": "instance",
+                                                "service.beta.kubernetes.io/aws-load-balancer-scheme": "internal",
+                                                "service.beta.kubernetes.io/aws-load-balancer-cross-zone-load-balancing-enabled": "true",
+                                            },
+                                        }
+                                        for i in range(3)
+                                    ],
+                                },
+                            },
                         ],
                         "config": {
                             "offsets.topic.replication.factor": 3,

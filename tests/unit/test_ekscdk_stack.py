@@ -1,15 +1,10 @@
 import aws_cdk as core
 import aws_cdk.assertions as assertions
 
-from ekscdk.ekscdk_stack import EkscdkStack
+from ekscdk.ekscdk_stack import EksCdkStack
 
-# example tests. To run these tests, uncomment this file along with the example
-# resource in ekscdk/ekscdk_stack.py
-def test_sqs_queue_created():
+
+def test_stack_synthesizes():
     app = core.App()
-    stack = EkscdkStack(app, "ekscdk")
-    template = assertions.Template.from_stack(stack)
-
-#     template.has_resource_properties("AWS::SQS::Queue", {
-#         "VisibilityTimeout": 300
-#     })
+    stack = EksCdkStack(app, "ekscdk", env=core.Environment(account="123456789012", region="ap-northeast-1"))
+    assertions.Template.from_stack(stack)

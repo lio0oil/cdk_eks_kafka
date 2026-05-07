@@ -3,8 +3,13 @@
 - Stackは1つ。Constructの継承を利用する。
 - EKSのバージョン、KubectlLayerのバージョン等すべて最新を利用する。
 - EKSの作成はaws_eks_v2を利用する。
-- ManagedNodeGroups、Node Auto Repair
+- ManagedNodeGroups、Node Auto Repairを利用すること
 - インフラとArgo CDまではCDK
 - StrimziでKafkaを構築
 - AZは3
-- Kafkaはprivatesubnet
+- KafkaはprivateSubnet
+- KafkaはNLB経由で接続する。NLBはPrivateLinkと接続する。NLBは1つにしポートで振り分ける。
+- Strimzi loadbalancerリスナー（推奨）を使用する
+- AZ障害が起きてもシステムが継続できるようにする。
+- Argo CD(Strimzi)のyamlの設定ファイルを作成する
+- インフラ -> Argo CD(Strimzi) -> 残り(PrivateLink作成等)とStackの分割は許可する。

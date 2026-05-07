@@ -5,7 +5,6 @@ from aws_cdk.aws_eks_v2 import DefaultCapacityType
 from aws_cdk.lambda_layer_kubectl_v32 import KubectlV32Layer
 from constructs import Construct
 
-
 class EksClusterConstruct(Construct):
     def __init__(self, scope: Construct, construct_id: str, vpc: ec2.Vpc) -> None:
         super().__init__(scope, construct_id)
@@ -83,3 +82,4 @@ class EksClusterConstruct(Construct):
             labels={"role": "kafka"},
             enable_node_auto_repair=True,
         )
+
