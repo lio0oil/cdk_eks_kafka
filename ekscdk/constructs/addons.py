@@ -30,19 +30,13 @@ class AddonsConstruct(Construct):
             )
         )
 
-        # L2 Addon コンストラクトを使用
-        for addon_name in [
-            "vpc-cni",
-            "coredns",
-            "kube-proxy",
-            "eks-pod-identity-agent",
-        ]:
-            eks.Addon(
-                self,
-                addon_name.replace("-", "").capitalize(),
-                cluster=self._cluster,
-                addon_name=addon_name,
-            )
+        for addon_name, construct_id in {
+            "vpc-cni": "VpcCni",
+            "coredns": "CoreDns",
+            "kube-proxy": "KubeProxy",
+            "eks-pod-identity-agent": "PodIdentityAgent",
+        }.items():
+            eks.Addon(self, construct_id, cluster=self._cluster, addon_name=addon_name)
 
         eks.Addon(
             self,
@@ -59,7 +53,6 @@ class AddonsConstruct(Construct):
         )
 
     def _add_ack_controllers(self) -> None:
-        """ACK EC2 and ELBv2 Controllers をインストール"""
         region = Stack.of(self).region
 
         # 1. ACK EC2 Controller (VPC Endpoint Service 管理用)
@@ -68,11 +61,30 @@ class AddonsConstruct(Construct):
             name="ack-ec2-controller",
             namespace="ack-system",
         )
-        ack_ec2_sa.role.add_managed_policy(
-            iam.ManagedPolicy.from_aws_managed_policy_name("AmazonEC2FullAccess")
+        ack_ec2_sa.role.attach_inline_policy(
+            iam.Policy(
+                self,
+                "AckEc2Policy",
+                statements=[
+                    iam.PolicyStatement(
+                        actions=[
+                            "ec2:CreateVpcEndpointServiceConfiguration",
+                            "ec2:DeleteVpcEndpointServiceConfigurations",
+                            "ec2:DescribeVpcEndpointServiceConfigurations",
+                            "ec2:ModifyVpcEndpointServiceConfiguration",
+                            "ec2:ModifyVpcEndpointServicePermissions",
+                            "ec2:DescribeVpcEndpointServicePermissions",
+                            "ec2:DescribeVpcEndpointConnections",
+                            "ec2:AcceptVpcEndpointConnections",
+                            "ec2:RejectVpcEndpointConnections",
+                        ],
+                        resources=["*"],
+                    )
+                ],
+            )
         )
 
-        self._cluster.add_helm_chart(
+        ec2_helm = self._cluster.add_helm_chart(
             "AckEc2Controller",
             chart="ec2-chart",
             repository="oci://public.ecr.aws/aws-controllers-k8s/ec2-chart",
@@ -84,6 +96,7 @@ class AddonsConstruct(Construct):
                 "serviceAccount": {"create": False, "name": "ack-ec2-controller"},
             },
         )
+        ec2_helm.node.add_dependency(ack_ec2_sa)
 
         # 2. ACK ELBv2 Controller (Listener / TargetGroup 管理用)
         ack_elbv2_sa = self._cluster.add_service_account(
@@ -97,7 +110,7 @@ class AddonsConstruct(Construct):
             )
         )
 
-        self._cluster.add_helm_chart(
+        elbv2_helm = self._cluster.add_helm_chart(
             "AckElbv2Controller",
             chart="elbv2-chart",
             repository="oci://public.ecr.aws/aws-controllers-k8s/elbv2-chart",
@@ -108,6 +121,7 @@ class AddonsConstruct(Construct):
                 "serviceAccount": {"create": False, "name": "ack-elbv2-controller"},
             },
         )
+        elbv2_helm.node.add_dependency(ack_elbv2_sa)
 
     def _add_argocd(self) -> None:
         self._cluster.add_manifest(
