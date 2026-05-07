@@ -77,15 +77,19 @@ export CDK_DEFAULT_ACCOUNT=<AWSアカウントID>
 export CDK_DEFAULT_REGION=ap-northeast-1
 ```
 
+### Stack 0 デプロイ（IAM ロール）
+
+```bash
+cdk deploy IamStack
+```
+
+`eks-cluster-admin` ロールが作成されます。本番環境では `ekscdk/iam_stack.py` の `assumed_by` を SSO Permission Set や CI/CD ロールの ARN に変更してください。
+
 ### Stack 1 デプロイ
 
 ```bash
-cdk deploy EksCdkStack \
-  -c repo-url=https://github.com/<org>/<repo> \
-  -c admin-role-arn=arn:aws:iam::<account-id>:role/<OpsRole>
+cdk deploy EksCdkStack -c repo-url=https://github.com/<org>/<repo>
 ```
-
-`admin-role-arn` に EKS 管理者ロールの ARN を指定します（省略時はアカウントルートにフォールバック、本番では必須）。
 
 プライベートリポジトリの場合は、デプロイ後に GitHub PAT を ArgoCD に登録します。
 
@@ -118,6 +122,7 @@ ekscdk/
 │   ├── eks_cluster.py            # EKS クラスター + NodeGroup
 │   ├── addons.py                 # EKS アドオン + ArgoCD + Bootstrap App
 │   └── kafka_privatelink.py      # PrivateLink（VPC Endpoint Service）
+├── iam_stack.py                  # Stack 0: IAM ロール
 ├── ekscdk_stack.py               # Stack 1
 └── privatelink_stack.py          # Stack 2
 ```

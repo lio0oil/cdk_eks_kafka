@@ -7,24 +7,8 @@ from constructs import Construct
 
 
 class EksClusterConstruct(Construct):
-    def __init__(self, scope: Construct, construct_id: str, vpc: ec2.Vpc) -> None:
+    def __init__(self, scope: Construct, construct_id: str, vpc: ec2.Vpc, admin_role: iam.IRole) -> None:
         super().__init__(scope, construct_id)
-
-        # admin-role-arn コンテキストで assume 可能なプリンシパルを限定する
-        # 例: cdk deploy -c admin-role-arn=arn:aws:iam::123456789012:role/OpsRole
-        # 未指定時はアカウントルートにフォールバック（開発・初回デプロイ用）
-        admin_role_arn: str | None = self.node.try_get_context("admin-role-arn")
-        admin_principal: iam.IPrincipal = (
-            iam.ArnPrincipal(admin_role_arn)
-            if admin_role_arn
-            else iam.AccountRootPrincipal()  # type: ignore[assignment]
-        )
-
-        cluster_admin_role = iam.Role(
-            self,
-            "ClusterAdminRole",
-            assumed_by=admin_principal,  # type: ignore[arg-type]
-        )
 
         self.cluster = eks.Cluster(
             self,
@@ -38,7 +22,7 @@ class EksClusterConstruct(Construct):
             default_capacity=0,
             default_capacity_type=DefaultCapacityType.NODEGROUP,
             endpoint_access=eks.EndpointAccess.PUBLIC_AND_PRIVATE,
-            masters_role=cluster_admin_role,  # type: ignore[arg-type]
+            masters_role=admin_role,  # type: ignore[arg-type]
             alb_controller=eks.AlbControllerOptions(
                 version=eks.AlbControllerVersion.V2_8_2,
             ),
