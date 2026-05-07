@@ -1,3 +1,5 @@
+from typing import cast
+
 from aws_cdk import Stack
 from aws_cdk import aws_ec2 as ec2
 from aws_cdk import aws_eks_v2 as eks
@@ -16,8 +18,10 @@ class EksCdkStack(Stack):
 
         network = NetworkConstruct(self, "Network")
         eks_construct = EksClusterConstruct(self, "EksCluster", vpc=network.vpc)
-        addons = AddonsConstruct(self, "Addons", cluster=eks_construct.cluster)
+        cluster = cast(eks.ICluster, eks_construct.cluster)
+        vpc = cast(ec2.IVpc, network.vpc)
+        addons = AddonsConstruct(self, "Addons", cluster=cluster)
         addons.node.add_dependency(eks_construct)
 
-        self.cluster: eks.Cluster = eks_construct.cluster
-        self.vpc: ec2.Vpc = network.vpc
+        self.cluster: eks.ICluster = cluster
+        self.vpc: ec2.IVpc = vpc

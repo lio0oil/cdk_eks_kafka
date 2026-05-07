@@ -25,12 +25,12 @@ class KafkaConstruct(Construct):
         self,
         scope: Construct,
         construct_id: str,
-        cluster: eks.Cluster,
+        cluster: eks.ICluster,
         repo_url: str,
     ) -> None:
         super().__init__(scope, construct_id)
 
-        self._cluster = cluster
+        self._cluster: eks.ICluster = cluster
         self._repo_url = repo_url
 
         strimzi_app = self._add_strimzi_operator()

@@ -4,10 +4,10 @@ from constructs import Construct
 
 
 class AddonsConstruct(Construct):
-    def __init__(self, scope: Construct, construct_id: str, cluster: eks.Cluster) -> None:
+    def __init__(self, scope: Construct, construct_id: str, cluster: eks.ICluster) -> None:
         super().__init__(scope, construct_id)
 
-        self._cluster = cluster
+        self._cluster: eks.ICluster = cluster
 
         self._add_eks_addons()
         self._add_argocd()

@@ -19,7 +19,7 @@ class KafkaStack(Stack):
         self,
         scope: Construct,
         construct_id: str,
-        cluster: eks.Cluster,
+        cluster: eks.ICluster,
         **kwargs,
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)
