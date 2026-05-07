@@ -21,34 +21,23 @@ spec:
         tls: true
       - name: external
         port: 9094
-        type: loadbalancer
+        type: nodeport # LoadBalancer から NodePort に変更（共有NLBを使用するため）
         tls: true
         configuration:
           bootstrap:
-            annotations:
-              service.beta.kubernetes.io/aws-load-balancer-type: "external"
-              service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: "instance"
-              service.beta.kubernetes.io/aws-load-balancer-scheme: "internal"
-              service.beta.kubernetes.io/aws-load-balancer-cross-zone-load-balancing-enabled: "true"
+            # 共有NLBの9094番ポートからここへ転送される
+            nodePort: 30094
           brokers:
             - broker: 0
-              annotations:
-                service.beta.kubernetes.io/aws-load-balancer-type: "external"
-                service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: "instance"
-                service.beta.kubernetes.io/aws-load-balancer-scheme: "internal"
-                service.beta.kubernetes.io/aws-load-balancer-cross-zone-load-balancing-enabled: "true"
+              nodePort: 30095
+              # クライアントが個別ブローカーに繋ぎ直す際のポートを指定
+              advertisedPort: 9095
             - broker: 1
-              annotations:
-                service.beta.kubernetes.io/aws-load-balancer-type: "external"
-                service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: "instance"
-                service.beta.kubernetes.io/aws-load-balancer-scheme: "internal"
-                service.beta.kubernetes.io/aws-load-balancer-cross-zone-load-balancing-enabled: "true"
+              nodePort: 30096
+              advertisedPort: 9096
             - broker: 2
-              annotations:
-                service.beta.kubernetes.io/aws-load-balancer-type: "external"
-                service.beta.kubernetes.io/aws-load-balancer-nlb-target-type: "instance"
-                service.beta.kubernetes.io/aws-load-balancer-scheme: "internal"
-                service.beta.kubernetes.io/aws-load-balancer-cross-zone-load-balancing-enabled: "true"
+              nodePort: 30097
+              advertisedPort: 9097
     config:
       offsets.topic.replication.factor: 3
       transaction.state.log.replication.factor: 3

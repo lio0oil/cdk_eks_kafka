@@ -1,16 +1,20 @@
+from aws_cdk import Stack
 from aws_cdk import aws_eks_v2 as eks
 from aws_cdk import aws_iam as iam
 from constructs import Construct
 
 
 class AddonsConstruct(Construct):
-    def __init__(self, scope: Construct, construct_id: str, cluster: eks.ICluster) -> None:
+    def __init__(
+        self, scope: Construct, construct_id: str, cluster: eks.ICluster
+    ) -> None:
         super().__init__(scope, construct_id)
 
         self._cluster: eks.ICluster = cluster
 
         self._add_eks_addons()
         self._add_argocd()
+        self._add_ack_controllers()
 
     def _add_eks_addons(self) -> None:
         # EBS CSI Driver用 IRSA
@@ -19,49 +23,93 @@ class AddonsConstruct(Construct):
             name="ebs-csi-controller-sa",
             namespace="kube-system",
         )
+        ebs_csi_sa.node.add_dependency(self._cluster)
         ebs_csi_sa.role.add_managed_policy(
-            iam.ManagedPolicy.from_aws_managed_policy_name("service-role/AmazonEBSCSIDriverPolicy")
+            iam.ManagedPolicy.from_aws_managed_policy_name(
+                "service-role/AmazonEBSCSIDriverPolicy"
+            )
         )
 
         # L2 Addon コンストラクトを使用
-        eks.Addon(
-            self,
-            "VpcCni",
-            cluster=self._cluster,
-            addon_name="vpc-cni",
-        )
-
-        eks.Addon(
-            self,
-            "CoreDns",
-            cluster=self._cluster,
-            addon_name="coredns",
-        )
-
-        eks.Addon(
-            self,
-            "KubeProxy",
-            cluster=self._cluster,
-            addon_name="kube-proxy",
-        )
-
-        eks.Addon(
-            self,
-            "PodIdentityAgent",
-            cluster=self._cluster,
-            addon_name="eks-pod-identity-agent",
-        )
+        for addon_name in [
+            "vpc-cni",
+            "coredns",
+            "kube-proxy",
+            "eks-pod-identity-agent",
+        ]:
+            eks.Addon(
+                self,
+                addon_name.replace("-", "").capitalize(),
+                cluster=self._cluster,
+                addon_name=addon_name,
+            )
 
         eks.Addon(
             self,
             "EbsCsiDriver",
             cluster=self._cluster,
             addon_name="aws-ebs-csi-driver",
-            configuration_values={"serviceAccount": {"annotations": {"eks.amazonaws.com/role-arn": ebs_csi_sa.role.role_arn}}},
+            configuration_values={
+                "serviceAccount": {
+                    "annotations": {
+                        "eks.amazonaws.com/role-arn": ebs_csi_sa.role.role_arn
+                    }
+                }
+            },
+        )
+
+    def _add_ack_controllers(self) -> None:
+        """ACK EC2 and ELBv2 Controllers をインストール"""
+        region = Stack.of(self).region
+
+        # 1. ACK EC2 Controller (VPC Endpoint Service 管理用)
+        ack_ec2_sa = self._cluster.add_service_account(
+            "AckEc2Sa",
+            name="ack-ec2-controller",
+            namespace="ack-system",
+        )
+        ack_ec2_sa.role.add_managed_policy(
+            iam.ManagedPolicy.from_aws_managed_policy_name("AmazonEC2FullAccess")
+        )
+
+        self._cluster.add_helm_chart(
+            "AckEc2Controller",
+            chart="ec2-chart",
+            repository="oci://public.ecr.aws/aws-controllers-k8s/ec2-chart",
+            namespace="ack-system",
+            create_namespace=True,
+            version="v1.2.14",
+            values={
+                "aws": {"region": region},
+                "serviceAccount": {"create": False, "name": "ack-ec2-controller"},
+            },
+        )
+
+        # 2. ACK ELBv2 Controller (Listener / TargetGroup 管理用)
+        ack_elbv2_sa = self._cluster.add_service_account(
+            "AckElbv2Sa",
+            name="ack-elbv2-controller",
+            namespace="ack-system",
+        )
+        ack_elbv2_sa.role.add_managed_policy(
+            iam.ManagedPolicy.from_aws_managed_policy_name(
+                "ElasticLoadBalancingFullAccess"
+            )
+        )
+
+        self._cluster.add_helm_chart(
+            "AckElbv2Controller",
+            chart="elbv2-chart",
+            repository="oci://public.ecr.aws/aws-controllers-k8s/elbv2-chart",
+            namespace="ack-system",
+            version="v1.1.8",
+            values={
+                "aws": {"region": region},
+                "serviceAccount": {"create": False, "name": "ack-elbv2-controller"},
+            },
         )
 
     def _add_argocd(self) -> None:
-        # gp3 をデフォルトStorageClassとして設定（EBS CSI Driver依存）
         self._cluster.add_manifest(
             "Gp3StorageClass",
             {
@@ -69,7 +117,9 @@ class AddonsConstruct(Construct):
                 "kind": "StorageClass",
                 "metadata": {
                     "name": "gp3",
-                    "annotations": {"storageclass.kubernetes.io/is-default-class": "true"},
+                    "annotations": {
+                        "storageclass.kubernetes.io/is-default-class": "true"
+                    },
                 },
                 "provisioner": "ebs.csi.aws.com",
                 "volumeBindingMode": "WaitForFirstConsumer",
@@ -81,7 +131,7 @@ class AddonsConstruct(Construct):
             },
         )
 
-        repo_url: str = self.node.get_context("repo-url")  # 例: https://github.com/<org>/<repo>
+        repo_url: str = self.node.get_context("repo-url")
 
         argocd = self._cluster.add_helm_chart(
             "ArgoCD",
@@ -95,26 +145,31 @@ class AddonsConstruct(Construct):
                     "replicas": 2,
                     "autoscaling": {"enabled": True, "minReplicas": 2},
                     "service": {"type": "ClusterIP"},
-                    "tolerations": [{"key": "CriticalAddonsOnly", "operator": "Exists"}],
+                    "tolerations": [
+                        {"key": "CriticalAddonsOnly", "operator": "Exists"}
+                    ],
                     "nodeSelector": {"role": "system"},
                 },
                 "applicationSet": {"replicaCount": 2},
                 "controller": {
-                    "tolerations": [{"key": "CriticalAddonsOnly", "operator": "Exists"}],
+                    "tolerations": [
+                        {"key": "CriticalAddonsOnly", "operator": "Exists"}
+                    ],
                     "nodeSelector": {"role": "system"},
                 },
                 "redis": {
-                    "tolerations": [{"key": "CriticalAddonsOnly", "operator": "Exists"}],
+                    "tolerations": [
+                        {"key": "CriticalAddonsOnly", "operator": "Exists"}
+                    ],
                     "nodeSelector": {"role": "system"},
                 },
                 "repoServer": {
-                    "tolerations": [{"key": "CriticalAddonsOnly", "operator": "Exists"}],
+                    "tolerations": [
+                        {"key": "CriticalAddonsOnly", "operator": "Exists"}
+                    ],
                     "nodeSelector": {"role": "system"},
                 },
                 "configs": {
-                    # GitHub リポジトリを ArgoCD に登録
-                    # プライベートリポジトリの場合は deploy 後に
-                    # `argocd repo add <repo-url> --username x-token --password <PAT>` で認証設定
                     "repositories": {
                         "github": {
                             "type": "git",
@@ -125,10 +180,6 @@ class AddonsConstruct(Construct):
             },
         )
 
-        # ArgoCD Application はすべて CDK で管理する
-        # （ArgoCDのApplicationはインフラ設定。KafkaのCRのみGitで変更管理）
-
-        # Strimzi オペレーター
         strimzi = self._cluster.add_manifest(
             "StrimziOperatorApp",
             {
@@ -161,8 +212,6 @@ class AddonsConstruct(Construct):
         )
         strimzi.node.add_dependency(argocd)
 
-        # Kafka Cluster Application: manifests/kafka/ を監視
-        # git push するだけで Kafka 設定がクラスターに反映される
         kafka_app = self._cluster.add_manifest(
             "KafkaClusterApp",
             {

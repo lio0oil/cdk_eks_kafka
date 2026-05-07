@@ -23,9 +23,6 @@ class EksClusterConstruct(Construct):
             default_capacity_type=DefaultCapacityType.NODEGROUP,
             endpoint_access=eks.EndpointAccess.PUBLIC_AND_PRIVATE,
             masters_role=admin_role,  # type: ignore[arg-type]
-            alb_controller=eks.AlbControllerOptions(
-                version=eks.AlbControllerVersion.V2_8_2,
-            ),
             kubectl_provider_options=eks.KubectlProviderOptions(
                 kubectl_layer=KubectlV35Layer(self, "KubectlLayer"),
             ),

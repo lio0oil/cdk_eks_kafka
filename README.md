@@ -16,7 +16,7 @@ GitHub
     └── kafka-cluster     : Kafka CR（manifests/kafka/）
 
 外部接続
-└── Kafka ← NLB（Private / cross-zone） ← PrivateLink（VPC Endpoint Service）
+└── Kafka ← NLB（Shared / Fixed ARN） ← PrivateLink（VPC Endpoint Service）
 
 監視
 ├── ADOT DaemonSet  : メトリクス → AMP + CloudWatch、トレース → X-Ray
@@ -34,7 +34,7 @@ GitHub
 | EKS | Kubernetes 1.35 / Managed NodeGroup / Node Auto Repair |
 | GitOps | ArgoCD / GitHub |
 | Kafka | Strimzi 0.45.0 / Kafka 3.9.0（KRaft）/ 3 ブローカー 3AZ |
-| 外部接続 | NLB（Internal / cross-zone）+ PrivateLink |
+| 外部接続 | NLB（Internal / Shared）+ PrivateLink |
 | ストレージ | EBS gp3（EBS CSI Driver） |
 | メトリクス | ADOT + AMP + AMG |
 | ログ | Fluent Bit + CloudWatch Logs |
@@ -47,19 +47,17 @@ GitHub
 - EKS cluster-admin ロール（`eks-cluster-admin`）
 - `assumed_by` に運用者・CI/CD ロールの ARN を指定する（詳細は `ekscdk/iam_stack.py` のコメント参照）
 
-### Stack 1 — `EksCdkStack`（インフラ + ArgoCD + 監視）
+### Stack 1 — `EksCdkStack`（インフラ + ArgoCD + 監視 + ACK）
 
 - VPC（3AZ / Public・Private サブネット）
+- **Kafka 共有 NLB / Endpoint Service**（本体のみ CDK で作成。ARN を固定化）
 - EKS クラスター（`aws_eks_v2` / Kubernetes 1.35）
 - EKS マネージドアドオン（VPC CNI / CoreDNS / kube-proxy / Pod Identity Agent / EBS CSI Driver）
 - AWS Load Balancer Controller（`alb_controller` オプションで自動インストール）
 - ArgoCD（Helm / System NodeGroup）
+- **ACK EC2 / ELBv2 Controller**（PrivateLink と NLB リスナーをマニフェストで管理するために導入）
 - Strimzi Operator・Kafka Cluster ArgoCD Application（CDK 直接管理）
 - 監視環境（ADOT / Fluent Bit / kminion / AMP / AMG / CloudWatch Log Group）
-
-### Stack 2 — `PrivateLinkStack`（PrivateLink）
-
-Strimzi が NLB を作成した後にデプロイします。
 
 ## 管理の分担
 
@@ -68,20 +66,23 @@ Strimzi が NLB を作成した後にデプロイします。
 | IAM ロール | CDK（IamStack） | インフラ設定 |
 | ArgoCD Application（Strimzi、Kafka） | CDK（EksCdkStack） | インフラ設定。バージョン変更は CDK で行う |
 | 監視コンポーネント（ADOT / Fluent Bit / kminion） | CDK（EksCdkStack） | AMP エンドポイント等の動的値を注入するため |
+| **NLB リスナー / ターゲットグループ** | Git（ArgoCD 経由） | **ACK (ELBv2) を使用**。ブローカー増設に合わせて YAML を更新 |
+| PrivateLink（Endpoint Service） | Git（ArgoCD 経由） | **ACK (EC2) を使用**。マニフェストで固定 NLB ARN を参照 |
 | Kafka CR（`manifests/kafka/`） | Git（ArgoCD 経由） | ブローカースケール・バージョンアップ・設定チューニングを git push で反映 |
 
 ## GitOps フロー
 
 ```
 cdk deploy（初回のみ）
+  ├─ 共有 NLB / Endpoint Service 作成（ARN 固定）
+  ├─ ACK EC2 / ELBv2 Controller インストール
   ├─ Strimzi Operator Application 作成
   └─ kafka-cluster Application 作成（manifests/kafka/ を監視）
 
 git push → ArgoCD が自動検知
-  └─ manifests/kafka/ の変更 → Kafka クラスター設定に反映
+  ├─ manifests/kafka/kafka-cluster.yaml の変更 → Kafka 設定反映
+  └─ manifests/kafka/privatelink.yaml の変更 → AWS リスナー設定反映
 ```
-
-`manifests/kafka/` を編集して push するだけで Kafka 設定がクラスターに反映されます。
 
 ## デプロイ手順
 
@@ -102,35 +103,27 @@ export CDK_DEFAULT_REGION=ap-northeast-1
 cdk deploy IamStack
 ```
 
-`eks-cluster-admin` ロールが作成されます。本番環境では `ekscdk/iam_stack.py` の `assumed_by` を
-SSO Permission Set や CI/CD ロールの ARN に変更してください（複数指定は `CompositePrincipal` を使用）。
-
-### Stack 1 デプロイ
+### Stack 1 デプロイ（インフラ・基盤）
 
 ```bash
 cdk deploy EksCdkStack -c repo-url=https://github.com/<org>/<repo>
 ```
 
-AMG の認証方式はデフォルト `AWS_SSO`（IAM Identity Center が必要）です。
-SSO 未導入の環境では `-c amg-auth-provider=SAML` を追加してください。
+### PrivateLink / 接続設定のカスタマイズ
 
-プライベートリポジトリの場合は、デプロイ後に GitHub PAT を ArgoCD に登録します。
+本構成では、ブローカーの増設に合わせて **YAML（GitOps）だけで AWS のリスナー設定を拡張** できます。
 
-```bash
-argocd repo add https://github.com/<org>/<repo> \
-  --username x-token --password <GitHub PAT>
-```
+1. **必要な値を確認する**
+   `EksCdkStack` デプロイ時の出力（Outputs）から、以下の値を確認します。
+   - `VpcId`: `vpc-xxxxxx`
+   - `KafkaSharedNlbArn`: `arn:aws:elasticloadbalancing:...`
 
-### Stack 2 デプロイ（Strimzi が NLB を作成した後）
+2. **`manifests/kafka/privatelink.yaml` を編集**
+   上記で確認した値を、マニフェスト内の `vpcID` および `loadBalancerARN` フィールドに反映させます。
+   ブローカー増設時は、同様の手順で新しいポートの `Listener` と `TargetGroup` を追記します。
 
-```bash
-# NLB ARN を取得
-kubectl get svc kafka-cluster-kafka-external-bootstrap -n kafka \
-  -o jsonpath='{.metadata.annotations.service\.beta\.kubernetes\.io/aws-load-balancer-arn}'
-
-# PrivateLink をデプロイ
-cdk deploy PrivateLinkStack -c kafka-bootstrap-nlb-arn=<NLB ARN>
-```
+3. **git push**
+   ACK ELBv2 Controller が即座に AWS 側の NLB 設定を更新します。
 
 ## ディレクトリ構成
 
@@ -138,16 +131,15 @@ cdk deploy PrivateLinkStack -c kafka-bootstrap-nlb-arn=<NLB ARN>
 manifests/
 └── kafka/
     ├── kafka-cluster.yaml     # Kafka Cluster CR（git push で自動反映）
-    └── kafka-node-pool.yaml   # KafkaNodePool CR（ブローカースケール等）
+    ├── kafka-node-pool.yaml   # KafkaNodePool CR
+    └── privatelink.yaml       # AWS Listener / TargetGroup / VPCEndpointService（ACK 用）
 
 ekscdk/
 ├── constructs/
-│   ├── network.py             # VPC
+│   ├── network.py             # VPC + Shared NLB / Endpoint Service
 │   ├── eks_cluster.py         # EKS クラスター + NodeGroup
-│   ├── addons.py              # EKS アドオン + ArgoCD + Kafka Application
-│   ├── monitoring.py          # 監視環境（AMP / AMG / ADOT / Fluent Bit / kminion）
-│   └── kafka_privatelink.py   # PrivateLink（VPC Endpoint Service）
+│   ├── addons.py              # EKS アドオン + ArgoCD + ACK + Kafka Application
+│   └── monitoring.py          # 監視環境（AMP / AMG / ADOT / Fluent Bit / kminion）
 ├── iam_stack.py               # Stack 0: IAM ロール
-├── ekscdk_stack.py            # Stack 1
-└── privatelink_stack.py       # Stack 2
+└── ekscdk_stack.py            # Stack 1
 ```

@@ -1,6 +1,6 @@
 from typing import cast
 
-from aws_cdk import Stack
+from aws_cdk import Stack, CfnOutput
 from aws_cdk import aws_eks_v2 as eks
 from aws_cdk import aws_iam as iam
 from constructs import Construct
@@ -26,3 +26,8 @@ class EksCdkStack(Stack):
         addons = AddonsConstruct(self, "Addons", cluster=cast(eks.ICluster, eks_construct.cluster))
         addons.node.add_dependency(eks_construct)
         MonitoringConstruct(self, "Monitoring", cluster=cast(eks.ICluster, eks_construct.cluster))
+
+        # ── Outputs ──────────────────────────────────────────────────────────
+        # manifests/kafka/privatelink.yaml の書き換えに使用する値を出力
+        CfnOutput(self, "VpcId", value=network.vpc.vpc_id, description="VPC ID for privatelink.yaml")
+        CfnOutput(self, "KafkaSharedNlbArn", value=network.kafka_nlb.load_balancer_arn, description="Shared NLB ARN for privatelink.yaml")

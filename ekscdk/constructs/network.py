@@ -1,5 +1,6 @@
 from aws_cdk import Tags
 from aws_cdk import aws_ec2 as ec2
+from aws_cdk import aws_elasticloadbalancingv2 as elbv2
 from constructs import Construct
 
 
@@ -35,3 +36,23 @@ class NetworkConstruct(Construct):
 
         for subnet in self.vpc.private_subnets:
             Tags.of(subnet).add("kubernetes.io/role/internal-elb", "1")
+
+        # ── Kafka 共有 NLB ─────────────────────────────────────────────────────
+        # リスナーとターゲットグループは ACK (ELBv2 Controller) が YAML 経由で管理する
+        self.kafka_nlb = elbv2.NetworkLoadBalancer(
+            self,
+            "KafkaSharedNlb",
+            vpc=self.vpc,
+            internet_facing=False,
+            cross_zone_enabled=True,
+            load_balancer_name="kafka-shared-nlb",
+        )
+
+        # ── Kafka PrivateLink (Endpoint Service) ─────────────────────────────
+        # NLB本体はCDK管理なので、ここで作成してしまえば ARN は不変
+        self.endpoint_service = ec2.VpcEndpointService(
+            self,
+            "KafkaEndpointService",
+            vpc_endpoint_service_load_balancers=[self.kafka_nlb],
+            acceptance_required=False,
+        )
