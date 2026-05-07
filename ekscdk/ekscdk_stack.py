@@ -1,19 +1,20 @@
-from aws_cdk import (
-    # Duration,
-    Stack,
-    # aws_sqs as sqs,
-)
+from aws_cdk import Stack
 from constructs import Construct
 
-class EkscdkStack(Stack):
+from ekscdk.constructs.network import NetworkConstruct
+from ekscdk.constructs.eks_cluster import EksClusterConstruct
+from ekscdk.constructs.addons import AddonsConstruct
+from ekscdk.constructs.kafka import KafkaConstruct
 
+
+class EksCdkStack(Stack):
     def __init__(self, scope: Construct, construct_id: str, **kwargs) -> None:
         super().__init__(scope, construct_id, **kwargs)
 
-        # The code that defines your stack goes here
+        network = NetworkConstruct(self, "Network")
+        eks = EksClusterConstruct(self, "EksCluster", vpc=network.vpc)
+        addons = AddonsConstruct(self, "Addons", cluster=eks.cluster)
+        KafkaConstruct(self, "Kafka", cluster=eks.cluster)
 
-        # example resource
-        # queue = sqs.Queue(
-        #     self, "EkscdkQueue",
-        #     visibility_timeout=Duration.seconds(300),
-        # )
+        # KafkaのデプロイはArgoCDインストール後に行う
+        addons.node.add_dependency(eks)
