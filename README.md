@@ -47,11 +47,13 @@ Strimzi が NLB を作成した後にデプロイします。
 ## GitOps フロー
 
 ```
+cdk deploy（初回のみ）
+  └─ Bootstrap Application 作成（manifests/argocd/strimzi-*.yaml を監視）
+  └─ kafka-cluster Application 作成（manifests/kafka/ を監視、repoURL はコンテキストから設定）
+
 git push → ArgoCD が自動検知
-         → manifests/argocd/ を同期
-              ├── strimzi-operator Application を適用
-              └── kafka-cluster-app Application を適用
-                    └── manifests/kafka/kafka-cluster.yaml を同期
+  ├─ manifests/argocd/strimzi-*.yaml の変更 → Strimzi オペレーターに反映
+  └─ manifests/kafka/ の変更 → Kafka クラスター設定に反映
 ```
 
 `manifests/kafka/kafka-cluster.yaml` を編集して push するだけで Kafka 設定がクラスターに反映されます。
@@ -98,10 +100,9 @@ cdk deploy PrivateLinkStack -c kafka-bootstrap-nlb-arn=<NLB ARN>
 ```
 manifests/
 ├── argocd/
-│   ├── strimzi-operator.yaml     # Strimzi オペレーター ArgoCD Application
-│   └── kafka-cluster-app.yaml    # Kafka CR 管理 ArgoCD Application
+│   └── strimzi-operator.yaml     # Strimzi オペレーター ArgoCD Application（Bootstrap が Git 管理）
 └── kafka/
-    └── kafka-cluster.yaml        # Kafka Cluster CR（git で変更管理）
+    └── kafka-cluster.yaml        # Kafka Cluster CR（git push で自動反映）
 
 ekscdk/
 ├── constructs/

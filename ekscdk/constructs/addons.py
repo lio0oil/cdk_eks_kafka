@@ -125,9 +125,9 @@ class AddonsConstruct(Construct):
             },
         )
 
-        # Bootstrap Application（App of Apps）
-        # manifests/argocd/ 以下の Application を ArgoCD が自律管理する。
-        # git push するだけでクラスターへ反映される。
+        # Bootstrap Application: strimzi-operator.yaml のみを Git から管理
+        # include フィルタにより kafka-cluster-app.yaml は管理対象外にする
+        # （kafka-cluster Application は CDK が repoURL を設定して直接 apply する）
         bootstrap = self._cluster.add_manifest(
             "BootstrapApp",
             {
@@ -140,6 +140,7 @@ class AddonsConstruct(Construct):
                         "repoURL": repo_url,
                         "targetRevision": "HEAD",
                         "path": "manifests/argocd",
+                        "directory": {"include": "strimzi-*.yaml"},
                     },
                     "destination": {
                         "server": "https://kubernetes.default.svc",
@@ -153,3 +154,31 @@ class AddonsConstruct(Construct):
             },
         )
         bootstrap.node.add_dependency(argocd)
+
+        # Kafka Cluster Application: CDK が repoURL を設定して直接 apply
+        # manifests/kafka/ の変更は git push だけでクラスターに反映される
+        kafka_app = self._cluster.add_manifest(
+            "KafkaClusterApp",
+            {
+                "apiVersion": "argoproj.io/v1alpha1",
+                "kind": "Application",
+                "metadata": {"name": "kafka-cluster", "namespace": "argocd"},
+                "spec": {
+                    "project": "default",
+                    "source": {
+                        "repoURL": repo_url,
+                        "targetRevision": "HEAD",
+                        "path": "manifests/kafka",
+                    },
+                    "destination": {
+                        "server": "https://kubernetes.default.svc",
+                        "namespace": "kafka",
+                    },
+                    "syncPolicy": {
+                        "automated": {"prune": True, "selfHeal": True},
+                        "syncOptions": ["CreateNamespace=true"],
+                    },
+                },
+            },
+        )
+        kafka_app.node.add_dependency(bootstrap)
