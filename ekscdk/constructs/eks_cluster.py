@@ -2,8 +2,9 @@ from aws_cdk import aws_ec2 as ec2
 from aws_cdk import aws_eks_v2 as eks
 from aws_cdk import aws_iam as iam
 from aws_cdk.aws_eks_v2 import DefaultCapacityType
-from aws_cdk.lambda_layer_kubectl_v32 import KubectlV32Layer
+from aws_cdk.lambda_layer_kubectl_v35 import KubectlV35Layer
 from constructs import Construct
+
 
 class EksClusterConstruct(Construct):
     def __init__(self, scope: Construct, construct_id: str, vpc: ec2.Vpc) -> None:
@@ -20,8 +21,10 @@ class EksClusterConstruct(Construct):
             "Cluster",
             cluster_name="eks-cluster",
             vpc=vpc,
-            vpc_subnets=[ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS)],
-            version=eks.KubernetesVersion.V1_32,
+            vpc_subnets=[
+                ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS)
+            ],
+            version=eks.KubernetesVersion.V1_35,
             default_capacity=0,
             default_capacity_type=DefaultCapacityType.NODEGROUP,
             endpoint_access=eks.EndpointAccess.PUBLIC_AND_PRIVATE,
@@ -30,7 +33,7 @@ class EksClusterConstruct(Construct):
                 version=eks.AlbControllerVersion.V2_8_2,
             ),
             kubectl_provider_options=eks.KubectlProviderOptions(
-                kubectl_layer=KubectlV32Layer(self, "KubectlLayer"),
+                kubectl_layer=KubectlV35Layer(self, "KubectlLayer"),
             ),
         )
 
@@ -68,4 +71,3 @@ class EksClusterConstruct(Construct):
             labels={"role": "kafka"},
             enable_node_auto_repair=True,
         )
-

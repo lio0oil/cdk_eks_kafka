@@ -54,8 +54,8 @@ wheels = [
 ]
 
 [[package]]
-name = "aws-cdk-lambda-layer-kubectl-v32"
-version = "2.1.0"
+name = "aws-cdk-lambda-layer-kubectl-v35"
+version = "2.2.1"
 source = { registry = "https://pypi.org/simple" }
 dependencies = [
     { name = "aws-cdk-lib" },
@@ -64,9 +64,9 @@ dependencies = [
     { name = "publication" },
     { name = "typeguard" },
 ]
-sdist = { url = "https://files.pythonhosted.org/packages/49/39/38da737f875bdba6ac99277d36da85ec2cb4c64d91ed0b6f15fc7d58b567/aws_cdk_lambda_layer_kubectl_v32-2.1.0.tar.gz", hash = "sha256:5e854b759975827cdeb8edb0fdd8736d2d1c3c0eb3dd9715975e35923172948e", size = 34277013, upload-time = "2025-03-24T16:55:24.101Z" }
+sdist = { url = "https://files.pythonhosted.org/packages/c9/fe/de301fd079d85c0fa5687a68e924722b961012172ef8e1af5ca1c245dcaa/aws_cdk_lambda_layer_kubectl_v35-2.2.1.tar.gz", hash = "sha256:149de40c606589d0ec7f45f26bdd3e5b2616ebbfa1aebcea37322fc1682fb98f", size = 36605562, upload-time = "2026-04-01T07:35:14.516Z" }
 wheels = [
-    { url = "https://files.pythonhosted.org/packages/23/1d/1a268176f70a779a3cecf5c51c748e9d014e41e2a4669ceb090afd1d8b0e/aws_cdk_lambda_layer_kubectl_v32-2.1.0-py3-none-any.whl", hash = "sha256:dd44f22292e8e31b48bcd9edd8afe918ca2669abfa781a4fa169c84a69fe2f22", size = 34276103, upload-time = "2025-03-24T16:55:21.126Z" },
+    { url = "https://files.pythonhosted.org/packages/da/8b/fbcc83b2c264c1969837db656aa329cdb4c328f71c5a164a84ceca59da6a/aws_cdk_lambda_layer_kubectl_v35-2.2.1-py3-none-any.whl", hash = "sha256:58cd0019f13a91b39d945f4de5ebc1259f5696f50e805d94516b565229f38191", size = 36604617, upload-time = "2026-04-01T07:35:10.774Z" },
 ]
 
 [[package]]
@@ -128,7 +128,7 @@ name = "ekscdk"
 version = "0.1.0"
 source = { virtual = "." }
 dependencies = [
-    { name = "aws-cdk-lambda-layer-kubectl-v32" },
+    { name = "aws-cdk-lambda-layer-kubectl-v35" },
     { name = "aws-cdk-lib" },
     { name = "constructs" },
 ]
@@ -140,7 +140,7 @@ dev = [
 
 [package.metadata]
 requires-dist = [
-    { name = "aws-cdk-lambda-layer-kubectl-v32", specifier = ">=2.0.0" },
+    { name = "aws-cdk-lambda-layer-kubectl-v35", specifier = ">=2.0.0" },
     { name = "aws-cdk-lib", specifier = ">=2.247.0,<3.0.0" },
     { name = "constructs", specifier = ">=10.5.0,<11.0.0" },
 ]
