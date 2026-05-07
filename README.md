@@ -9,7 +9,8 @@
 - AZは3
 - KafkaはprivateSubnet
 - KafkaはNLB経由で接続する。NLBはPrivateLinkと接続する。NLBは1つにしポートで振り分ける。
-- Strimzi loadbalancerリスナー（推奨）を使用する
 - AZ障害が起きてもシステムが継続できるようにする。
-- Argo CD(Strimzi)のyamlの設定ファイルを作成する
 - インフラ -> Argo CD(Strimzi) -> 残り(PrivateLink作成等)とStackの分割は許可する。
+- gitの更新でシステムに反映されるようにする
+- Argo CD(Strimzi)の設定ファイルも作成する
+- apiVersionは正式版を使用する
