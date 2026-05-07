@@ -8,6 +8,7 @@ from constructs import Construct
 from ekscdk.constructs.network import NetworkConstruct
 from ekscdk.constructs.eks_cluster import EksClusterConstruct
 from ekscdk.constructs.addons import AddonsConstruct
+from ekscdk.constructs.monitoring import MonitoringConstruct
 
 
 class EksCdkStack(Stack):
@@ -24,3 +25,4 @@ class EksCdkStack(Stack):
         eks_construct = EksClusterConstruct(self, "EksCluster", vpc=network.vpc, admin_role=admin_role)
         addons = AddonsConstruct(self, "Addons", cluster=cast(eks.ICluster, eks_construct.cluster))
         addons.node.add_dependency(eks_construct)
+        MonitoringConstruct(self, "Monitoring", cluster=cast(eks.ICluster, eks_construct.cluster))
