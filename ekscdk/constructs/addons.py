@@ -81,6 +81,8 @@ class AddonsConstruct(Construct):
             },
         )
 
+        repo_url: str = self.node.get_context("repo-url")  # 例: https://github.com/<org>/<repo>
+
         argocd = self._cluster.add_helm_chart(
             "ArgoCD",
             chart="argo-cd",
@@ -109,13 +111,23 @@ class AddonsConstruct(Construct):
                     "tolerations": [{"key": "CriticalAddonsOnly", "operator": "Exists"}],
                     "nodeSelector": {"role": "system"},
                 },
+                "configs": {
+                    # GitHub リポジトリを ArgoCD に登録
+                    # プライベートリポジトリの場合は deploy 後に
+                    # `argocd repo add <repo-url> --username x-token --password <PAT>` で認証設定
+                    "repositories": {
+                        "github": {
+                            "type": "git",
+                            "url": repo_url,
+                        }
+                    }
+                },
             },
         )
 
         # Bootstrap Application（App of Apps）
         # manifests/argocd/ 以下の Application を ArgoCD が自律管理する。
         # git push するだけでクラスターへ反映される。
-        repo_url: str = self.node.get_context("repo-url")
         bootstrap = self._cluster.add_manifest(
             "BootstrapApp",
             {

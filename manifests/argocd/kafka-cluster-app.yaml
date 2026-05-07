@@ -8,7 +8,8 @@ metadata:
 spec:
   project: default
   source:
-    # CDK デプロイ時に -c repo-url=<GitリポジトリURL> で上書きされる
+    # CDK デプロイ時の -c repo-url と同じ GitHub リポジトリ URL を設定する
+    # 例: https://github.com/<org>/<repo>
     repoURL: REPO_URL_PLACEHOLDER
     targetRevision: HEAD
     path: manifests/kafka
