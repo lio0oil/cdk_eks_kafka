@@ -20,8 +20,6 @@ class MonitoringConstruct(Construct):
     Kubernetes リソース（CDK 管理 Helm）:
       - ADOT DaemonSet: メトリクス → AMP + CloudWatch、トレース → X-Ray
       - Fluent Bit DaemonSet: ログ → CloudWatch Logs
-
-    Kubernetes リソース（Git 管理 / manifests/monitoring/）:
       - kminion: Kafka Consumer Lag メトリクス → ADOT 経由で AMP へ
     """
 
@@ -29,7 +27,6 @@ class MonitoringConstruct(Construct):
         super().__init__(scope, construct_id)
 
         region = Stack.of(self).region
-        repo_url: str = self.node.get_context("repo-url")
 
         # ── AMP ──────────────────────────────────────────────────────────────
         amp_workspace = aps.CfnWorkspace(self, "AmpWorkspace", alias="eks-cluster")
@@ -254,28 +251,41 @@ class MonitoringConstruct(Construct):
         )
         fluent_bit.node.add_dependency(fluent_bit_sa)
 
-        # ── kminion（ArgoCD Application / manifests/monitoring/）─────────────
-        cluster.add_manifest(
-            "KminionApp",
-            {
-                "apiVersion": "argoproj.io/v1alpha1",
-                "kind": "Application",
-                "metadata": {"name": "kminion", "namespace": "argocd"},
-                "spec": {
-                    "project": "default",
-                    "source": {
-                        "repoURL": repo_url,
-                        "targetRevision": "HEAD",
-                        "path": "manifests/monitoring",
+        # ── kminion（Helm）────────────────────────────────────────────────────
+        cluster.add_helm_chart(
+            "Kminion",
+            chart="kminion",
+            repository="https://cloudhut.github.io/charts",
+            namespace="monitoring",
+            version="0.3.0",
+            values={
+                "resources": {
+                    "requests": {"memory": "128Mi", "cpu": "50m"},
+                    "limits": {"memory": "256Mi", "cpu": "200m"},
+                },
+                "affinity": {
+                    "nodeAffinity": {
+                        "requiredDuringSchedulingIgnoredDuringExecution": {
+                            "nodeSelectorTerms": [
+                                {
+                                    "matchExpressions": [
+                                        {"key": "role", "operator": "In", "values": ["system"]}
+                                    ]
+                                }
+                            ]
+                        }
+                    }
+                },
+                "kminion": {
+                    "kafka": {
+                        "brokers": ["kafka-cluster-kafka-bootstrap.kafka.svc.cluster.local:9092"],
+                        "tls": {"enabled": False},
                     },
-                    "destination": {
-                        "server": "https://kubernetes.default.svc",
-                        "namespace": "monitoring",
+                    "minion": {
+                        "consumerGroups": {"enabled": True, "allowedGroupIdExpr": ".*"},
+                        "topics": {"enabled": True},
                     },
-                    "syncPolicy": {
-                        "automated": {"prune": True, "selfHeal": True},
-                        "syncOptions": ["CreateNamespace=true"],
-                    },
+                    "exporter": {"port": 8080},
                 },
             },
         )
