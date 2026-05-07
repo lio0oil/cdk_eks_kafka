@@ -23,9 +23,9 @@ class EksCdkStack(Stack):
 
         network = NetworkConstruct(self, "Network")
         eks_construct = EksClusterConstruct(self, "EksCluster", vpc=network.vpc, admin_role=admin_role)
-        addons = AddonsConstruct(self, "Addons", cluster=cast(eks.ICluster, eks_construct.cluster))
+        addons = AddonsConstruct(self, "Addons", cluster=eks_construct.cluster)
         addons.node.add_dependency(eks_construct)
-        MonitoringConstruct(self, "Monitoring", cluster=cast(eks.ICluster, eks_construct.cluster))
+        MonitoringConstruct(self, "Monitoring", cluster=eks_construct.cluster)
 
         # ── Outputs ──────────────────────────────────────────────────────────
         # manifests/kafka/privatelink.yaml の書き換えに使用する値を出力

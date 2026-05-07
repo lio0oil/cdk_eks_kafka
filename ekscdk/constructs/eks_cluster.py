@@ -7,10 +7,10 @@ from constructs import Construct
 
 
 class EksClusterConstruct(Construct):
-    def __init__(self, scope: Construct, construct_id: str, vpc: ec2.Vpc, admin_role: iam.IRole) -> None:
+    def __init__(self, scope: Construct, construct_id: str, vpc: ec2.IVpc, admin_role: iam.IRole) -> None:
         super().__init__(scope, construct_id)
 
-        self.cluster = eks.Cluster(
+        self._cluster = eks.Cluster(
             self,
             "Cluster",
             cluster_name="eks-cluster",
@@ -29,7 +29,7 @@ class EksClusterConstruct(Construct):
         )
 
         # システムノードグループ: CoreDNS等のクリティカルアドオン専用
-        self.cluster.add_nodegroup_capacity(
+        self._cluster.add_nodegroup_capacity(
             "SystemNodeGroup",
             nodegroup_name="system-nodegroup",
             instance_types=[ec2.InstanceType("m5.large")],
@@ -50,7 +50,7 @@ class EksClusterConstruct(Construct):
         )
 
         # KafkaノードグループはStrimziが管理するKafkaブローカー専用
-        self.cluster.add_nodegroup_capacity(
+        self._cluster.add_nodegroup_capacity(
             "KafkaNodeGroup",
             nodegroup_name="kafka-nodegroup",
             instance_types=[ec2.InstanceType("r5.large")],
@@ -62,3 +62,7 @@ class EksClusterConstruct(Construct):
             labels={"role": "kafka"},
             enable_node_auto_repair=True,
         )
+
+    @property
+    def cluster(self) -> eks.ICluster:
+        return self._cluster

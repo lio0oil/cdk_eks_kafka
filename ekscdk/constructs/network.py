@@ -8,7 +8,7 @@ class NetworkConstruct(Construct):
     def __init__(self, scope: Construct, construct_id: str) -> None:
         super().__init__(scope, construct_id)
 
-        self.vpc = ec2.Vpc(
+        self._vpc = ec2.Vpc(
             self,
             "Vpc",
             ip_addresses=ec2.IpAddresses.cidr("10.0.0.0/16"),
@@ -31,18 +31,18 @@ class NetworkConstruct(Construct):
         )
 
         # EKS Load Balancer Controller用サブネットタグ
-        for subnet in self.vpc.public_subnets:
+        for subnet in self._vpc.public_subnets:
             Tags.of(subnet).add("kubernetes.io/role/elb", "1")
 
-        for subnet in self.vpc.private_subnets:
+        for subnet in self._vpc.private_subnets:
             Tags.of(subnet).add("kubernetes.io/role/internal-elb", "1")
 
         # ── Kafka 共有 NLB ─────────────────────────────────────────────────────
         # リスナーとターゲットグループは ACK (ELBv2 Controller) が YAML 経由で管理する
-        self.kafka_nlb = elbv2.NetworkLoadBalancer(
+        self._kafka_nlb = elbv2.NetworkLoadBalancer(
             self,
             "KafkaSharedNlb",
-            vpc=self.vpc,
+            vpc=self._vpc,
             internet_facing=False,
             cross_zone_enabled=True,
             load_balancer_name="kafka-shared-nlb",
@@ -53,6 +53,14 @@ class NetworkConstruct(Construct):
         self.endpoint_service = ec2.VpcEndpointService(
             self,
             "KafkaEndpointService",
-            vpc_endpoint_service_load_balancers=[self.kafka_nlb],
+            vpc_endpoint_service_load_balancers=[self._kafka_nlb],
             acceptance_required=False,
         )
+
+    @property
+    def vpc(self) -> ec2.IVpc:
+        return self._vpc
+
+    @property
+    def kafka_nlb(self) -> elbv2.INetworkLoadBalancer:
+        return self._kafka_nlb
