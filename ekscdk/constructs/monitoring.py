@@ -96,7 +96,10 @@ class MonitoringConstruct(Construct):
         )
 
         # ── AMG ──────────────────────────────────────────────────────────────
-        # AWS SSO が有効なアカウントで利用可能。SAML を使う場合は authentication_providers=["SAML"] に変更。
+        # デフォルトは AWS_SSO（IAM Identity Center が有効なアカウントで利用可能）。
+        # SSO 未導入の場合は -c amg-auth-provider=SAML を指定する。
+        amg_auth_provider: str = self.node.try_get_context("amg-auth-provider") or "AWS_SSO"
+
         amg_role = iam.Role(
             self,
             "AmgRole",
@@ -110,7 +113,7 @@ class MonitoringConstruct(Construct):
             "AmgWorkspace",
             name="eks-cluster-grafana",
             account_access_type="CURRENT_ACCOUNT",
-            authentication_providers=["AWS_SSO"],
+            authentication_providers=[amg_auth_provider],
             permission_type="SERVICE_MANAGED",
             role_arn=amg_role.role_arn,
             data_sources=["PROMETHEUS"],
@@ -278,6 +281,10 @@ class MonitoringConstruct(Construct):
                 },
                 "kminion": {
                     "kafka": {
+                        # クラスター内部通信のためプレーンテキスト（9092）を使用。
+                        # TLS を使う場合はポートを 9093 に変更し、Strimzi が管理する
+                        # Secret「kafka-cluster-cluster-ca-cert」の ca.crt を
+                        # kminion Pod にマウントして tls.caFilePath に指定する。
                         "brokers": ["kafka-cluster-kafka-bootstrap.kafka.svc.cluster.local:9092"],
                         "tls": {"enabled": False},
                     },
