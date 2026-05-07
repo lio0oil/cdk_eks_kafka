@@ -80,8 +80,12 @@ export CDK_DEFAULT_REGION=ap-northeast-1
 ### Stack 1 デプロイ
 
 ```bash
-cdk deploy EksCdkStack -c repo-url=https://github.com/<org>/<repo>
+cdk deploy EksCdkStack \
+  -c repo-url=https://github.com/<org>/<repo> \
+  -c admin-role-arn=arn:aws:iam::<account-id>:role/<OpsRole>
 ```
+
+`admin-role-arn` に EKS 管理者ロールの ARN を指定します（省略時はアカウントルートにフォールバック、本番では必須）。
 
 プライベートリポジトリの場合は、デプロイ後に GitHub PAT を ArgoCD に登録します。
 
