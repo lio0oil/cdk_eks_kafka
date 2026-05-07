@@ -44,15 +44,21 @@ GitHub
 
 Strimzi が NLB を作成した後にデプロイします。
 
+## 管理の分担
+
+| 管理対象 | 管理主体 | 理由 |
+|---|---|---|
+| ArgoCD Application（Strimzi、Kafka Cluster） | CDK | インフラ設定。バージョン変更はCDKコードで行う |
+| Kafka CR（`manifests/kafka/`） | Git（ArgoCD 経由） | 運用担当者が設定変更を git push で反映 |
+
 ## GitOps フロー
 
 ```
 cdk deploy（初回のみ）
-  └─ Bootstrap Application 作成（manifests/argocd/strimzi-*.yaml を監視）
-  └─ kafka-cluster Application 作成（manifests/kafka/ を監視、repoURL はコンテキストから設定）
+  ├─ Strimzi Operator Application 作成
+  └─ kafka-cluster Application 作成（manifests/kafka/ を監視）
 
 git push → ArgoCD が自動検知
-  ├─ manifests/argocd/strimzi-*.yaml の変更 → Strimzi オペレーターに反映
   └─ manifests/kafka/ の変更 → Kafka クラスター設定に反映
 ```
 
@@ -99,8 +105,6 @@ cdk deploy PrivateLinkStack -c kafka-bootstrap-nlb-arn=<NLB ARN>
 
 ```
 manifests/
-├── argocd/
-│   └── strimzi-operator.yaml     # Strimzi オペレーター ArgoCD Application（Bootstrap が Git 管理）
 └── kafka/
     └── kafka-cluster.yaml        # Kafka Cluster CR（git push で自動反映）
 

@@ -125,26 +125,32 @@ class AddonsConstruct(Construct):
             },
         )
 
-        # Bootstrap Application: strimzi-operator.yaml のみを Git から管理
-        # include フィルタにより kafka-cluster-app.yaml は管理対象外にする
-        # （kafka-cluster Application は CDK が repoURL を設定して直接 apply する）
-        bootstrap = self._cluster.add_manifest(
-            "BootstrapApp",
+        # ArgoCD Application はすべて CDK で管理する
+        # （ArgoCDのApplicationはインフラ設定。KafkaのCRのみGitで変更管理）
+
+        # Strimzi オペレーター
+        strimzi = self._cluster.add_manifest(
+            "StrimziOperatorApp",
             {
                 "apiVersion": "argoproj.io/v1alpha1",
                 "kind": "Application",
-                "metadata": {"name": "bootstrap", "namespace": "argocd"},
+                "metadata": {"name": "strimzi-operator", "namespace": "argocd"},
                 "spec": {
                     "project": "default",
                     "source": {
-                        "repoURL": repo_url,
-                        "targetRevision": "HEAD",
-                        "path": "manifests/argocd",
-                        "directory": {"include": "strimzi-*.yaml"},
+                        "repoURL": "https://strimzi.io/charts/",
+                        "chart": "strimzi-kafka-operator",
+                        "targetRevision": "0.45.0",
+                        "helm": {
+                            "valuesObject": {
+                                "watchNamespaces": ["kafka"],
+                                "replicas": 1,
+                            }
+                        },
                     },
                     "destination": {
                         "server": "https://kubernetes.default.svc",
-                        "namespace": "argocd",
+                        "namespace": "strimzi-operator",
                     },
                     "syncPolicy": {
                         "automated": {"prune": True, "selfHeal": True},
@@ -153,10 +159,10 @@ class AddonsConstruct(Construct):
                 },
             },
         )
-        bootstrap.node.add_dependency(argocd)
+        strimzi.node.add_dependency(argocd)
 
-        # Kafka Cluster Application: CDK が repoURL を設定して直接 apply
-        # manifests/kafka/ の変更は git push だけでクラスターに反映される
+        # Kafka Cluster Application: manifests/kafka/ を監視
+        # git push するだけで Kafka 設定がクラスターに反映される
         kafka_app = self._cluster.add_manifest(
             "KafkaClusterApp",
             {
@@ -181,4 +187,4 @@ class AddonsConstruct(Construct):
                 },
             },
         )
-        kafka_app.node.add_dependency(bootstrap)
+        kafka_app.node.add_dependency(strimzi)
