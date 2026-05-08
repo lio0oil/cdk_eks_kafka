@@ -60,6 +60,6 @@ class AddonsConstruct(Construct):
             version="1.0.0",
             values={
                 "watchNamespaces": ["kafka"],
-                "replicas": 1,
+                "replicas": 2,
             },
         )
