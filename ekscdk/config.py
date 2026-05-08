@@ -14,11 +14,10 @@ from aws_cdk import RemovalPolicy
 #       --query 'addons[0].addonVersions[0].addonVersion' --output text
 #   done
 _ADDON_VERSIONS_K8S_135: dict[str, str] = {
-    "vpc-cni":                "v1.21.1-eksbuild.8",
-    "coredns":                "v1.14.2-eksbuild.4",
-    "kube-proxy":             "v1.35.3-eksbuild.5",
-    "eks-pod-identity-agent": "v1.3.10-eksbuild.3",
-    "aws-ebs-csi-driver":     "v1.59.0-eksbuild.1",
+    "vpc-cni":            "v1.21.1-eksbuild.8",
+    "coredns":            "v1.14.2-eksbuild.4",
+    "kube-proxy":         "v1.35.3-eksbuild.5",
+    "aws-ebs-csi-driver": "v1.59.0-eksbuild.1",
 }
 
 

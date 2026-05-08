@@ -35,11 +35,10 @@ class AddonsConstruct(Construct):
         )
 
         for addon_name, construct_id in {
-            "vpc-cni":                "VpcCni",
-            "coredns":                "CoreDns",
-            "kube-proxy":             "KubeProxy",
-            "eks-pod-identity-agent": "PodIdentityAgent",
-            "aws-ebs-csi-driver":     "EbsCsiDriver",
+            "vpc-cni":            "VpcCni",
+            "coredns":            "CoreDns",
+            "kube-proxy":         "KubeProxy",
+            "aws-ebs-csi-driver": "EbsCsiDriver",
         }.items():
             eks.Addon(self, construct_id, cluster=self._cluster,
                       addon_name=addon_name, addon_version=self._config.addon_versions[addon_name])
