@@ -1,3 +1,5 @@
+from typing import cast
+
 from aws_cdk import aws_ec2 as ec2
 from aws_cdk import aws_eks_v2 as eks
 from aws_cdk import aws_iam as iam
@@ -7,7 +9,9 @@ from constructs import Construct
 
 
 class EksClusterConstruct(Construct):
-    def __init__(self, scope: Construct, construct_id: str, vpc: ec2.IVpc, admin_role: iam.IRole) -> None:
+    def __init__(
+        self, scope: Construct, construct_id: str, vpc: ec2.IVpc, admin_role: iam.IRole
+    ) -> None:
         super().__init__(scope, construct_id)
 
         self._cluster = eks.Cluster(
@@ -65,4 +69,4 @@ class EksClusterConstruct(Construct):
 
     @property
     def cluster(self) -> eks.ICluster:
-        return self._cluster
+        return cast(eks.ICluster, self._cluster)
