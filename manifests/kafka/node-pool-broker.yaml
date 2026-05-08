@@ -14,19 +14,19 @@ spec:
     volumes:
       - id: 0
         type: persistent-claim
-        size: 100Gi
+        size: 20Gi
         class: gp3
         deleteClaim: false
   resources:
     requests:
+      memory: 2Gi
+      cpu: "250m"
+    limits:
       memory: 4Gi
       cpu: "500m"
-    limits:
-      memory: 6Gi
-      cpu: "1200m"
   jvmOptions:
-    -Xms: "3072m"
-    -Xmx: "3072m"
+    -Xms: "1024m"
+    -Xmx: "2048m"
   template:
     pod:
       affinity:
