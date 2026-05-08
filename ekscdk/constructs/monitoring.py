@@ -20,7 +20,7 @@ class MonitoringConstruct(Construct):
     Kubernetes リソース（CDK 管理 Helm）:
       - ADOT DaemonSet: メトリクス → AMP + CloudWatch、トレース → X-Ray
       - Fluent Bit DaemonSet: ログ → CloudWatch Logs
-      - kminion: Kafka Consumer Lag メトリクス → ADOT 経由で AMP へ
+      - Kafka Exporter（Strimzi 組み込み）: Consumer Lag メトリクス → ADOT 経由で AMP へ
     """
 
     def __init__(self, scope: Construct, construct_id: str, cluster: eks.ICluster) -> None:
@@ -153,9 +153,9 @@ class MonitoringConstruct(Construct):
                             "config": {
                                 "scrape_configs": [
                                     {
-                                        "job_name": "kminion",
+                                        "job_name": "kafka-exporter",
                                         "static_configs": [
-                                            {"targets": ["kminion.monitoring.svc.cluster.local:8080"]}
+                                            {"targets": ["kafka-cluster-kafka-exporter.kafka.svc.cluster.local:9404"]}
                                         ],
                                     }
                                 ]
@@ -254,45 +254,3 @@ class MonitoringConstruct(Construct):
         )
         fluent_bit.node.add_dependency(fluent_bit_sa)
 
-        # ── kminion（Helm）────────────────────────────────────────────────────
-        cluster.add_helm_chart(
-            "Kminion",
-            chart="kminion",
-            repository="https://cloudhut.github.io/charts",
-            namespace="monitoring",
-            version="0.3.0",
-            values={
-                "resources": {
-                    "requests": {"memory": "128Mi", "cpu": "50m"},
-                    "limits": {"memory": "256Mi", "cpu": "200m"},
-                },
-                "affinity": {
-                    "nodeAffinity": {
-                        "requiredDuringSchedulingIgnoredDuringExecution": {
-                            "nodeSelectorTerms": [
-                                {
-                                    "matchExpressions": [
-                                        {"key": "role", "operator": "In", "values": ["system"]}
-                                    ]
-                                }
-                            ]
-                        }
-                    }
-                },
-                "kminion": {
-                    "kafka": {
-                        # クラスター内部通信のためプレーンテキスト（9092）を使用。
-                        # TLS を使う場合はポートを 9093 に変更し、Strimzi が管理する
-                        # Secret「kafka-cluster-cluster-ca-cert」の ca.crt を
-                        # kminion Pod にマウントして tls.caFilePath に指定する。
-                        "brokers": ["kafka-cluster-kafka-bootstrap.kafka.svc.cluster.local:9092"],
-                        "tls": {"enabled": False},
-                    },
-                    "minion": {
-                        "consumerGroups": {"enabled": True, "allowedGroupIdExpr": ".*"},
-                        "topics": {"enabled": True},
-                    },
-                    "exporter": {"port": 8080},
-                },
-            },
-        )
