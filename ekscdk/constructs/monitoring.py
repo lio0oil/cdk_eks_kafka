@@ -55,8 +55,13 @@ class MonitoringConstruct(Construct):
             "AdotRbac", *load_all(_DIR,"adot-rbac.yaml")
         )
 
-        # ── ADOT IRSA ─────────────────────────────────────────────────────────
-        adot_sa = cluster.add_service_account("AdotSa", name="adot-collector", namespace="monitoring")
+        # ── ADOT Pod Identity ─────────────────────────────────────────────────
+        adot_sa = cluster.add_service_account(
+            "AdotSa",
+            name="adot-collector",
+            namespace="monitoring",
+            identity_type=eks.IdentityType.POD_IDENTITY,
+        )
         adot_sa.node.add_dependency(namespace)
         for stmt in [
             iam.PolicyStatement(
@@ -88,8 +93,13 @@ class MonitoringConstruct(Construct):
         ]:
             cast(iam.Role, adot_sa.role).add_to_policy(stmt)
 
-        # ── Fluent Bit IRSA ───────────────────────────────────────────────────
-        fluent_bit_sa = cluster.add_service_account("FluentBitSa", name="fluent-bit", namespace="monitoring")
+        # ── Fluent Bit Pod Identity ───────────────────────────────────────────
+        fluent_bit_sa = cluster.add_service_account(
+            "FluentBitSa",
+            name="fluent-bit",
+            namespace="monitoring",
+            identity_type=eks.IdentityType.POD_IDENTITY,
+        )
         fluent_bit_sa.node.add_dependency(namespace)
         cast(iam.Role, fluent_bit_sa.role).add_to_policy(
             iam.PolicyStatement(

@@ -19,11 +19,12 @@ class AddonsConstruct(Construct):
         self._add_strimzi()
 
     def _add_eks_addons(self) -> None:
-        # EBS CSI Driver用 IRSA
+        # EBS CSI Driver 用 Pod Identity
         ebs_csi_sa = self._cluster.add_service_account(
             "EbsCsiSa",
             name="ebs-csi-controller-sa",
             namespace="kube-system",
+            identity_type=eks.IdentityType.POD_IDENTITY,
         )
         ebs_csi_sa.node.add_dependency(self._cluster)
         ebs_csi_sa.role.add_managed_policy(
@@ -45,13 +46,6 @@ class AddonsConstruct(Construct):
             "EbsCsiDriver",
             cluster=self._cluster,
             addon_name="aws-ebs-csi-driver",
-            configuration_values={
-                "serviceAccount": {
-                    "annotations": {
-                        "eks.amazonaws.com/role-arn": ebs_csi_sa.role.role_arn
-                    }
-                }
-            },
         )
 
     def _add_strimzi(self) -> None:
