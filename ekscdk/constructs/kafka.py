@@ -14,6 +14,8 @@ _BROKER_PORTS = [
     ("Broker2",   9097, 30097),
 ]
 
+BROKER_COUNT = len(_BROKER_PORTS) - 1  # Bootstrap を除いたブローカー数
+
 
 class KafkaConstruct(Construct):
     """Kafka 基盤 Construct

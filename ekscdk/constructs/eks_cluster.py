@@ -10,7 +10,7 @@ from constructs import Construct
 
 class EksClusterConstruct(Construct):
     def __init__(
-        self, scope: Construct, construct_id: str, vpc: ec2.IVpc, admin_role: iam.IRole
+        self, scope: Construct, construct_id: str, vpc: ec2.IVpc, admin_role: iam.IRole, broker_count: int = 3
     ) -> None:
         super().__init__(scope, construct_id)
 
@@ -58,9 +58,9 @@ class EksClusterConstruct(Construct):
             "KafkaNodeGroup",
             nodegroup_name="kafka-nodegroup",
             instance_types=[ec2.InstanceType("r8g.large")],
-            min_size=3,
-            max_size=6,
-            desired_size=3,
+            min_size=broker_count,
+            max_size=broker_count,
+            desired_size=broker_count,
             capacity_type=eks.CapacityType.ON_DEMAND,
             subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS),
             labels={"role": "kafka"},

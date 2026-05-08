@@ -4,7 +4,7 @@ from constructs import Construct
 
 from ekscdk.constructs.addons import AddonsConstruct
 from ekscdk.constructs.eks_cluster import EksClusterConstruct
-from ekscdk.constructs.kafka import KafkaConstruct
+from ekscdk.constructs.kafka import BROKER_COUNT, KafkaConstruct
 from ekscdk.constructs.monitoring import MonitoringConstruct
 from ekscdk.constructs.network import NetworkConstruct
 
@@ -19,7 +19,7 @@ class EksCdkStack(Stack):
 
         network = NetworkConstruct(self, "Network")
         eks_construct = EksClusterConstruct(
-            self, "EksCluster", vpc=network.vpc, admin_role=admin_role
+            self, "EksCluster", vpc=network.vpc, admin_role=admin_role, broker_count=BROKER_COUNT
         )
         addons = AddonsConstruct(self, "Addons", cluster=eks_construct.cluster)
         addons.node.add_dependency(eks_construct)
