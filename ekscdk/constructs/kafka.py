@@ -1,12 +1,13 @@
 import os
 
-import yaml
 from aws_cdk import aws_ec2 as ec2
 from aws_cdk import aws_elasticloadbalancingv2 as elbv2
 from aws_cdk import aws_eks_v2 as eks
 from constructs import Construct
 
-_MANIFESTS_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "manifests", "kafka")
+from ekscdk.constructs._manifest import load
+
+_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "manifests", "kafka")
 
 _BROKER_PORTS = [
     ("Bootstrap", 9094, 30094),
@@ -14,11 +15,6 @@ _BROKER_PORTS = [
     ("Broker1",   9096, 30096),
     ("Broker2",   9097, 30097),
 ]
-
-
-def _load(filename: str) -> dict:
-    with open(os.path.join(_MANIFESTS_DIR, filename)) as f:
-        return yaml.safe_load(f)
 
 
 class KafkaConstruct(Construct):
@@ -53,19 +49,19 @@ class KafkaConstruct(Construct):
         )
 
         # ── JMX メトリクス ConfigMap ──────────────────────────────────────────
-        cm = cluster.add_manifest("KafkaMetricsCm", _load("cm.yaml"))
+        cm = cluster.add_manifest("KafkaMetricsCm", load(os.path.join(_DIR, "cm.yaml")))
         cm.node.add_dependency(namespace)
 
         # ── KafkaNodePool: controller ─────────────────────────────────────────
-        controller_pool = cluster.add_manifest("KafkaControllerPool", _load("node-pool-controller.yaml"))
+        controller_pool = cluster.add_manifest("KafkaControllerPool", load(os.path.join(_DIR, "node-pool-controller.yaml")))
         controller_pool.node.add_dependency(namespace)
 
         # ── KafkaNodePool: broker ─────────────────────────────────────────────
-        broker_pool = cluster.add_manifest("KafkaBrokerPool", _load("node-pool-broker.yaml"))
+        broker_pool = cluster.add_manifest("KafkaBrokerPool", load(os.path.join(_DIR, "node-pool-broker.yaml")))
         broker_pool.node.add_dependency(namespace)
 
         # ── Kafka CR ──────────────────────────────────────────────────────────
-        kafka_cr = cluster.add_manifest("KafkaCluster", _load("kafka-cluster.yaml"))
+        kafka_cr = cluster.add_manifest("KafkaCluster", load(os.path.join(_DIR, "kafka-cluster.yaml")))
         kafka_cr.node.add_dependency(cm)
         kafka_cr.node.add_dependency(controller_pool)
         kafka_cr.node.add_dependency(broker_pool)

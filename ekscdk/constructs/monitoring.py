@@ -1,7 +1,6 @@
 import os
 from typing import cast
 
-import yaml
 from aws_cdk import Stack
 from aws_cdk import aws_aps as aps
 from aws_cdk import aws_eks_v2 as eks
@@ -10,15 +9,9 @@ from aws_cdk import aws_iam as iam
 from aws_cdk import aws_logs as logs
 from constructs import Construct
 
-_MANIFESTS_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "manifests", "monitoring")
+from ekscdk.constructs._manifest import load_with_subs
 
-
-def _load_with_subs(filename: str, **subs: str) -> dict:
-    with open(os.path.join(_MANIFESTS_DIR, filename)) as f:
-        text = f.read()
-    for placeholder, value in subs.items():
-        text = text.replace(f"<{placeholder}>", value)
-    return yaml.safe_load(text)
+_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "manifests", "monitoring")
 
 
 class MonitoringConstruct(Construct):
@@ -95,6 +88,7 @@ class MonitoringConstruct(Construct):
                 ],
             },
         )
+        adot_cluster_role_binding.node.add_dependency(adot_cluster_role)
 
         # ── ADOT IRSA ─────────────────────────────────────────────────────────
         adot_sa = cluster.add_service_account("AdotSa", name="adot-collector", namespace="monitoring")
@@ -176,8 +170,8 @@ class MonitoringConstruct(Construct):
             repository="https://open-telemetry.github.io/opentelemetry-helm-charts",
             namespace="monitoring",
             version="0.108.0",
-            values=_load_with_subs(
-                "adot-values.yaml",
+            values=load_with_subs(
+                os.path.join(_DIR, "adot-values.yaml"),
                 REGION=region,
                 AMP_REMOTE_WRITE_URL=amp_remote_write_url,
             ),
@@ -192,8 +186,8 @@ class MonitoringConstruct(Construct):
             repository="https://fluent.github.io/helm-charts",
             namespace="monitoring",
             version="0.47.9",
-            values=_load_with_subs(
-                "fluent-bit-values.yaml",
+            values=load_with_subs(
+                os.path.join(_DIR, "fluent-bit-values.yaml"),
                 REGION=region,
                 LOG_GROUP_NAME=log_group.log_group_name,
             ),
