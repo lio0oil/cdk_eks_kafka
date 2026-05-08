@@ -1,7 +1,7 @@
 apiVersion: kafka.strimzi.io/v1
 kind: KafkaNodePool
 metadata:
-  name: combined
+  name: controller
   namespace: kafka
   labels:
     strimzi.io/cluster: kafka-cluster
@@ -9,25 +9,24 @@ spec:
   replicas: 3
   roles:
     - controller
-    - broker
   storage:
     type: jbod
     volumes:
       - id: 0
         type: persistent-claim
-        size: 100Gi
+        size: 20Gi
         class: gp3
         deleteClaim: false
   resources:
     requests:
-      memory: 4Gi
-      cpu: "500m"
+      memory: 1Gi
+      cpu: "250m"
     limits:
-      memory: 6Gi
-      cpu: "1200m"
+      memory: 2Gi
+      cpu: "500m"
   jvmOptions:
-    -Xms: "3072m"
-    -Xmx: "3072m"
+    -Xms: "512m"
+    -Xmx: "1024m"
   template:
     pod:
       affinity:
@@ -46,5 +45,12 @@ spec:
                   - key: strimzi.io/name
                     operator: In
                     values:
-                      - kafka-cluster-combined
+                      - kafka-cluster-controller
               topologyKey: kubernetes.io/hostname
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: DoNotSchedule
+          labelSelector:
+            matchLabels:
+              strimzi.io/name: kafka-cluster-controller
