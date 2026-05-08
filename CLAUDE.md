@@ -5,53 +5,28 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 ## コマンド
 
 ```bash
-# 依存関係インストール
-uv sync
-
-# CDK synth（CloudFormation テンプレート生成）
-cdk synth -c repo-url=https://github.com/example/ekscdk
-
-# デプロイ
-cdk deploy IamStack
-cdk deploy EksCdkStack -c repo-url=<GitリポジトリURL>
-
-# テスト実行
-uv run pytest
-
-# 単一テスト実行
-uv run pytest tests/unit/test_ekscdk_stack.py::test_stack_synthesizes
+uv sync                      # 依存関係インストール
+uv run pytest                # テスト実行
+uv run pytest tests/unit/test_ekscdk_stack.py::test_stack_synthesizes  # 単一テスト
+cdk synth -c repo-url=https://github.com/example/ekscdk              # synth
 ```
 
-## アーキテクチャ
+## 非自明な設計判断
 
-2つの CDK スタックで構成される。
+### monitoring Namespace は CDK が管理する
+`MonitoringConstruct` 内の `monitoring` Namespace は `manifests/` ではなく `cluster.add_manifest()` で CDK が直接管理している。IRSA の `add_service_account()` は kubectl apply 時に Namespace が存在していないと失敗するため、ArgoCD に任せると順序が保証できない。
 
-**`IamStack`** — EKS cluster-admin ロール（`eks-cluster-admin`）のみを作成。`EksCdkStack` より先にデプロイする。
+### ADOT RBAC も CDK 管理（`monitoring.py`）
+`AdotClusterRole` / `AdotClusterRoleBinding` は `manifests/monitoring/` ではなく `monitoring.py` 内の `add_manifest()` で管理している。ADOT Helm chart の `node.add_dependency()` で依存関係を CDK 内で完結させるため。
 
-**`EksCdkStack`** — 以下の4つの Construct で構成される。
+### ADOT はノードローカルフィルターで重複スクレイプを防ぐ
+ADOT は DaemonSet（ノード 1 台に 1 Pod）で動くため、`kubernetes_sd_configs` でKafka Pod を全台が発見すると N×M の重複が発生する。`${K8S_NODE_NAME}` 環境変数（`spec.nodeName` を `fieldRef` で注入）を relabel_config の regex に使い、各 ADOT が自ノード上の Pod だけをスクレイプする。
 
-```
-EksCdkStack
-├── NetworkConstruct     VPC / Kafka 共有 NLB / VPC Endpoint Service
-├── EksClusterConstruct  EKS 1.35 / system ノードグループ(m8g.large) / kafka ノードグループ(r8g.large)
-├── AddonsConstruct      EKS アドオン / ArgoCD / Strimzi Operator / ACK(EC2・ELBv2)
-└── MonitoringConstruct  AMP / AMG / ADOT / Fluent Bit / IRSA
-```
+### Kafka 外部接続のポート設計
+`kafka-cluster.yaml` の external listener は NodePort 型。共有 NLB → NodePort → Kafka broker の経路で、bootstrap に 30094、broker 0〜2 に 30095〜30097 を使用する。advertised port（9095〜9097）はクライアントがブローカーに繋ぎ直す際のポートで NodePort とは別。
 
-`MonitoringConstruct` は `AddonsConstruct`（ArgoCD）の完了後に動作する依存関係は現在設定されていない。
+### Shared NLB の ARN 固定
+NLB 本体は CDK（`NetworkConstruct`）で作成して ARN を固定し、リスナーとターゲットグループは ACK ELBv2 Controller が `manifests/kafka/privatelink.yaml` で管理する。NLB を再作成すると ARN が変わって PrivateLink が壊れるため、`NetworkConstruct` の変更は慎重に行う。
 
-## CDK と ArgoCD の使い分け
-
-- **CDK 管理**: インフラ・監視スタック全体。AMP エンドポイントや CloudWatch Log Group 名など CloudFormation トークン（デプロイ後に確定する動的値）を設定に注入する必要があるため。
-- **ArgoCD 管理（`manifests/kafka/`）**: Kafka ブローカー設定・パーティション・Rebalance・PrivateLink。運用中に変更頻度が高く、CDK 再デプロイなしに git push だけで反映したいため。
-
-## Kafka 外部接続（PrivateLink）
-
-Shared NLB の本体は CDK（`NetworkConstruct`）で作成して ARN を固定化する。NLB のリスナーとターゲットグループは ACK（ELBv2 Controller）が `manifests/kafka/privatelink.yaml` を通じて管理する。デプロイ後に出力される `VpcId` と `KafkaSharedNlbArn` を `privatelink.yaml` に書き込んで push する。
-
-## 必須コンテキスト
-
-| キー | 説明 |
-|---|---|
-| `repo-url` | ArgoCD が `manifests/kafka/` を同期するための Git リポジトリ URL |
-| `amg-auth-provider` | AMG 認証方式（デフォルト: `AWS_SSO`、代替: `SAML`） |
+### `manifests/kafka/` のみ ArgoCD 管理
+監視スタック（ADOT・Fluent Bit）は AMP エンドポイントなど CloudFormation トークンを値に含むため CDK 直接管理。ArgoCD の GitOps 対象は Kafka 設定（変更頻度が高い）に限定している。
