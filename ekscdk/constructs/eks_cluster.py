@@ -26,10 +26,23 @@ class EksClusterConstruct(Construct):
             default_capacity=0,
             default_capacity_type=DefaultCapacityType.NODEGROUP,
             endpoint_access=eks.EndpointAccess.PUBLIC_AND_PRIVATE,
-            masters_role=admin_role,  # type: ignore[arg-type]
+            bootstrap_cluster_creator_admin_permissions=True,
             kubectl_provider_options=eks.KubectlProviderOptions(
                 kubectl_layer=KubectlV35Layer(self, "KubectlLayer"),
             ),
+        )
+
+        eks.AccessEntry(
+            self,
+            "AdminAccessEntry",
+            cluster=self._cluster,  # type: ignore[arg-type]
+            principal=admin_role.role_arn,
+            access_policies=[
+                eks.AccessPolicy.from_access_policy_name(
+                    "AmazonEKSClusterAdminPolicy",
+                    access_scope_type=eks.AccessScopeType.CLUSTER,
+                )
+            ],
         )
 
         # システムノードグループ: CoreDNS等のクリティカルアドオン専用
