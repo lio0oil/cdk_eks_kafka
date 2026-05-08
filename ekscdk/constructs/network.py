@@ -5,7 +5,7 @@ from constructs import Construct
 
 
 class NetworkConstruct(Construct):
-    def __init__(self, scope: Construct, construct_id: str) -> None:
+    def __init__(self, scope: Construct, construct_id: str, kafka_listener_ports: list[int]) -> None:
         super().__init__(scope, construct_id)
 
         self._vpc = ec2.Vpc(
@@ -40,7 +40,7 @@ class NetworkConstruct(Construct):
         # ── Kafka 共有 NLB ─────────────────────────────────────────────────────
         # リスナーとターゲットグループは KafkaConstruct が CDK で管理する
         kafka_nlb_sg = ec2.SecurityGroup(self, "KafkaNlbSg", vpc=self._vpc)
-        for port in [9094, 9095, 9096, 9097]:
+        for port in kafka_listener_ports:
             kafka_nlb_sg.add_ingress_rule(
                 ec2.Peer.ipv4(self._vpc.vpc_cidr_block),
                 ec2.Port.tcp(port),

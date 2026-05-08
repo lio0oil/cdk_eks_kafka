@@ -4,7 +4,7 @@ from constructs import Construct
 
 from ekscdk.constructs.addons import AddonsConstruct
 from ekscdk.constructs.eks_cluster import EksClusterConstruct
-from ekscdk.constructs.kafka import BROKER_COUNT, KafkaConstruct
+from ekscdk.constructs.kafka import BROKER_COUNT, KafkaConstruct, _NLB_PORTS
 from ekscdk.constructs.monitoring import MonitoringConstruct
 from ekscdk.constructs.network import NetworkConstruct
 
@@ -17,7 +17,10 @@ class EksCdkStack(Stack):
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)
 
-        network = NetworkConstruct(self, "Network")
+        network = NetworkConstruct(
+            self, "Network",
+            kafka_listener_ports=[lp for _, lp, _ in _NLB_PORTS],
+        )
         eks_construct = EksClusterConstruct(
             self, "EksCluster", vpc=network.vpc, admin_role=admin_role, broker_count=BROKER_COUNT
         )
