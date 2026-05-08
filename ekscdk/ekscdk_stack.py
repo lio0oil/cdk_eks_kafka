@@ -26,7 +26,8 @@ class EksCdkStack(Stack):
         )
         addons = AddonsConstruct(self, "Addons", cluster=eks_construct.cluster)
         addons.node.add_dependency(eks_construct)
-        MonitoringConstruct(self, "Monitoring", cluster=eks_construct.cluster)
+        monitoring = MonitoringConstruct(self, "Monitoring", cluster=eks_construct.cluster)
+        monitoring.node.add_dependency(addons)
 
         # ── Outputs ──────────────────────────────────────────────────────────
         # manifests/kafka/privatelink.yaml の書き換えに使用する値を出力
