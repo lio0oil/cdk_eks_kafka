@@ -47,6 +47,7 @@ class ClusterConfig:
     fluent_bit_chart_repo: str
     log_retention: logs.RetentionDays
     grafana_version: str
+    enable_interface_endpoints: bool
 
     @classmethod
     def for_dev(cls, cluster_name: str = "eks-cluster-dev") -> ClusterConfig:
@@ -68,6 +69,7 @@ class ClusterConfig:
             fluent_bit_chart_repo="https://fluent.github.io/helm-charts",
             log_retention=logs.RetentionDays.ONE_WEEK,
             grafana_version="12.0",
+            enable_interface_endpoints=False,
         )
 
     @classmethod
@@ -90,6 +92,7 @@ class ClusterConfig:
             fluent_bit_chart_repo="https://fluent.github.io/helm-charts",
             log_retention=logs.RetentionDays.ONE_MONTH,
             grafana_version="12.0",
+            enable_interface_endpoints=True,
         )
 
     @classmethod
@@ -112,4 +115,5 @@ class ClusterConfig:
             fluent_bit_chart_repo="https://fluent.github.io/helm-charts",
             log_retention=logs.RetentionDays.ONE_MONTH,
             grafana_version="12.0",
+            enable_interface_endpoints=True,
         )

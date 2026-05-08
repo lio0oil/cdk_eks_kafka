@@ -3,6 +3,8 @@ from aws_cdk import aws_ec2 as ec2
 from aws_cdk import aws_elasticloadbalancingv2 as elbv2
 from constructs import Construct
 
+from ekscdk.config import ClusterConfig
+
 
 class NetworkConstruct(Construct):
     def __init__(
@@ -10,7 +12,7 @@ class NetworkConstruct(Construct):
         scope: Construct,
         construct_id: str,
         nlb_ports: list[tuple[str, int, int]],
-        nat_gateways: int = 3,
+        config: ClusterConfig,
     ) -> None:
         super().__init__(scope, construct_id)
 
@@ -19,7 +21,7 @@ class NetworkConstruct(Construct):
             "Vpc",
             ip_addresses=ec2.IpAddresses.cidr("10.0.0.0/16"),
             max_azs=3,
-            nat_gateways=nat_gateways,
+            nat_gateways=config.nat_gateways,
             subnet_configuration=[
                 ec2.SubnetConfiguration(
                     name="Public",
@@ -35,6 +37,25 @@ class NetworkConstruct(Construct):
             enable_dns_hostnames=True,
             enable_dns_support=True,
         )
+
+        # ── VPC エンドポイント ─────────────────────────────────────────────────
+        # S3: Gateway 型（無料）。ECR イメージレイヤーはS3経由のため必須。
+        self._vpc.add_gateway_endpoint(
+            "S3Endpoint",
+            service=ec2.GatewayVpcEndpointAwsService.S3,
+        )
+        # ECR・CloudWatch Logs・STS: Interface 型（時間課金）。
+        # NAT Gateway のデータ処理コストを削減し、通信を AWS 網内に閉じる。
+        # dev は固定費が転送量コストを上回るため無効化する。
+        if config.enable_interface_endpoints:
+            private_subnets = ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS)
+            for endpoint_id, service in [
+                ("EcrApiEndpoint",         ec2.InterfaceVpcEndpointAwsService.ECR),
+                ("EcrDkrEndpoint",         ec2.InterfaceVpcEndpointAwsService.ECR_DOCKER),
+                ("CloudWatchLogsEndpoint", ec2.InterfaceVpcEndpointAwsService.CLOUDWATCH_LOGS),
+                ("StsEndpoint",            ec2.InterfaceVpcEndpointAwsService.STS),
+            ]:
+                self._vpc.add_interface_endpoint(endpoint_id, service=service, subnets=private_subnets)
 
         # EKS Load Balancer Controller用サブネットタグ
         for subnet in self._vpc.public_subnets:

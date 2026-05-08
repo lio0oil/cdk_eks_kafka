@@ -22,7 +22,7 @@ class EksCdkStack(Stack):
         nlb_ports = parse_kafka_nlb_ports(manifest_dir("kafka"))
         broker_count = len(nlb_ports) - 1
 
-        network = NetworkConstruct(self, "Network", nlb_ports=nlb_ports, nat_gateways=config.nat_gateways)
+        network = NetworkConstruct(self, "Network", nlb_ports=nlb_ports, config=config)
         eks_construct = EksClusterConstruct(
             self, "EksCluster", vpc=network.vpc, admin_role=admin_role, broker_count=broker_count, config=config
         )
