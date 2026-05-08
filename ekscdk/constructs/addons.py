@@ -225,29 +225,3 @@ class AddonsConstruct(Construct):
             },
         )
         strimzi.node.add_dependency(argocd)
-
-        kafka_app = self._cluster.add_manifest(
-            "KafkaClusterApp",
-            {
-                "apiVersion": "argoproj.io/v1alpha1",
-                "kind": "Application",
-                "metadata": {"name": "kafka-cluster", "namespace": "argocd"},
-                "spec": {
-                    "project": "default",
-                    "source": {
-                        "repoURL": repo_url,
-                        "targetRevision": "HEAD",
-                        "path": "manifests/kafka",
-                    },
-                    "destination": {
-                        "server": "https://kubernetes.default.svc",
-                        "namespace": "kafka",
-                    },
-                    "syncPolicy": {
-                        "automated": {"prune": True, "selfHeal": True},
-                        "syncOptions": ["CreateNamespace=true"],
-                    },
-                },
-            },
-        )
-        kafka_app.node.add_dependency(strimzi)

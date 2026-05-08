@@ -4,6 +4,7 @@ from constructs import Construct
 
 from ekscdk.constructs.addons import AddonsConstruct
 from ekscdk.constructs.eks_cluster import EksClusterConstruct
+from ekscdk.constructs.kafka import KafkaConstruct
 from ekscdk.constructs.monitoring import MonitoringConstruct
 from ekscdk.constructs.network import NetworkConstruct
 
@@ -27,6 +28,14 @@ class EksCdkStack(Stack):
         addons = AddonsConstruct(self, "Addons", cluster=eks_construct.cluster)
         addons.node.add_dependency(eks_construct)
         MonitoringConstruct(self, "Monitoring", cluster=eks_construct.cluster)
+        kafka = KafkaConstruct(
+            self,
+            "Kafka",
+            cluster=eks_construct.cluster,
+            vpc_id=network.vpc.vpc_id,
+            nlb_arn=network.kafka_nlb.load_balancer_arn,
+        )
+        kafka.node.add_dependency(addons)
 
         # ── Outputs ──────────────────────────────────────────────────────────
         # manifests/kafka/privatelink.yaml の書き換えに使用する値を出力
