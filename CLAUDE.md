@@ -28,5 +28,8 @@ ADOT は DaemonSet（ノード 1 台に 1 Pod）で動くため、`kubernetes_sd
 ### Shared NLB の ARN 固定
 NLB 本体と VPC Endpoint Service は CDK（`NetworkConstruct`）で作成して ARN を固定する。リスナーとターゲットグループは `KafkaConstruct` が CDK ELBv2 で直接管理する。NLB を再作成すると ARN が変わって PrivateLink が壊れるため、`NetworkConstruct` の変更は慎重に行う。
 
+### Strimzi の apiVersion は `kafka.strimzi.io/v1`
+Strimzi 1.0.0 で `v1` が正式 API として昇格し、`v1beta2` / `v1beta1` / `v1alpha1` は廃止された。`kafka-cluster.yaml`・`node-pool-*.yaml`・`kafka-rebalance.yaml` はすべて `apiVersion: kafka.strimzi.io/v1` が正しい。`v1beta2` への変更は誤り。
+
 ### `manifests/kafka/` は CDK がロードする静的 YAML
 `kafka.py` の `_load()` が `manifests/kafka/` の YAML をディスクからロードして `cluster.add_manifest()` に渡す。NLB Listener / TargetGroup は CDK ELBv2 構造体（`_BROKER_PORTS` リスト）で管理するため、YAML ではなく Python コードを編集する。
