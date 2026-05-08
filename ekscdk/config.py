@@ -2,6 +2,7 @@ from __future__ import annotations
 
 from dataclasses import dataclass
 from aws_cdk import aws_logs as logs
+from aws_cdk import aws_eks_v2 as eks
 
 # Kubernetes 1.35 向けアドオン最新バージョン（2026-05 時点）
 # 更新コマンド:
@@ -38,6 +39,7 @@ class ClusterConfig:
     system_max_size: int
     system_desired_size: int
     kafka_instance_type: str
+    nodegroup_ami_type: eks.NodegroupAmiType
     addon_versions: dict[str, str]
     strimzi_version: str
     strimzi_chart_repo: str
@@ -60,6 +62,7 @@ class ClusterConfig:
             system_max_size=3,
             system_desired_size=2,
             kafka_instance_type="r8g.large",
+            nodegroup_ami_type=eks.NodegroupAmiType.AL2023_ARM_64_STANDARD,
             addon_versions=dict(_ADDON_VERSIONS_K8S_135),
             strimzi_version="1.0.0",
             strimzi_chart_repo="https://strimzi.io/charts/",
@@ -83,6 +86,7 @@ class ClusterConfig:
             system_max_size=6,
             system_desired_size=3,
             kafka_instance_type="r8g.large",
+            nodegroup_ami_type=eks.NodegroupAmiType.AL2023_ARM_64_STANDARD,
             addon_versions=dict(_ADDON_VERSIONS_K8S_135),
             strimzi_version="1.0.0",
             strimzi_chart_repo="https://strimzi.io/charts/",
@@ -106,6 +110,7 @@ class ClusterConfig:
             system_max_size=6,
             system_desired_size=3,
             kafka_instance_type="r8g.large",
+            nodegroup_ami_type=eks.NodegroupAmiType.AL2023_ARM_64_STANDARD,
             addon_versions=dict(_ADDON_VERSIONS_K8S_135),
             strimzi_version="1.0.0",
             strimzi_chart_repo="https://strimzi.io/charts/",

@@ -52,6 +52,7 @@ class EksClusterConstruct(Construct):
             "SystemNodeGroup",
             nodegroup_name="system-nodegroup",
             instance_types=[ec2.InstanceType(config.system_instance_type)],
+            ami_type=config.nodegroup_ami_type,
             min_size=config.system_min_size,
             max_size=config.system_max_size,
             desired_size=config.system_desired_size,
@@ -73,6 +74,7 @@ class EksClusterConstruct(Construct):
             "KafkaNodeGroup",
             nodegroup_name="kafka-nodegroup",
             instance_types=[ec2.InstanceType(config.kafka_instance_type)],
+            ami_type=config.nodegroup_ami_type,
             min_size=broker_count,
             max_size=broker_count + 1,  # ローリングアップデート時に新ノードを起動できる余裕を確保
             desired_size=broker_count,
