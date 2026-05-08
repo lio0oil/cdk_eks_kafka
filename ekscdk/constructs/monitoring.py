@@ -44,6 +44,7 @@ class MonitoringConstruct(Construct):
             "ApplicationLogGroup",
             log_group_name=f"/aws/eks/{config.cluster_name}/application",
             retention=config.log_retention,
+            removal_policy=config.log_removal_policy,
         )
 
         # ── monitoring Namespace ──────────────────────────────────────────────

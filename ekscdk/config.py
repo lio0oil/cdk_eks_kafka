@@ -3,6 +3,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from aws_cdk import aws_logs as logs
 from aws_cdk import aws_eks_v2 as eks
+from aws_cdk import RemovalPolicy
 
 # Kubernetes 1.35 向けアドオン最新バージョン（2026-05 時点）
 # 更新コマンド:
@@ -48,6 +49,7 @@ class ClusterConfig:
     fluent_bit_chart_version: str
     fluent_bit_chart_repo: str
     log_retention: logs.RetentionDays
+    log_removal_policy: RemovalPolicy
     grafana_version: str
     enable_interface_endpoints: bool
 
@@ -71,6 +73,7 @@ class ClusterConfig:
             fluent_bit_chart_version="0.57.3",
             fluent_bit_chart_repo="https://fluent.github.io/helm-charts",
             log_retention=logs.RetentionDays.ONE_WEEK,
+            log_removal_policy=RemovalPolicy.DESTROY,
             grafana_version="12.4",
             enable_interface_endpoints=False,
         )
@@ -95,6 +98,7 @@ class ClusterConfig:
             fluent_bit_chart_version="0.57.3",
             fluent_bit_chart_repo="https://fluent.github.io/helm-charts",
             log_retention=logs.RetentionDays.ONE_MONTH,
+            log_removal_policy=RemovalPolicy.RETAIN,
             grafana_version="12.4",
             enable_interface_endpoints=True,
         )
@@ -119,6 +123,7 @@ class ClusterConfig:
             fluent_bit_chart_version="0.57.3",
             fluent_bit_chart_repo="https://fluent.github.io/helm-charts",
             log_retention=logs.RetentionDays.ONE_MONTH,
+            log_removal_policy=RemovalPolicy.RETAIN,
             grafana_version="12.4",
             enable_interface_endpoints=True,
         )
