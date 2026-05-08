@@ -3,18 +3,27 @@ from aws_cdk import aws_elasticloadbalancingv2 as elbv2
 from aws_cdk import aws_eks_v2 as eks
 from constructs import Construct
 
-from ekscdk.constructs._manifest import load, manifest_dir
+from ekscdk.constructs._manifest import load, load_with_subs, manifest_dir
 
 _DIR = manifest_dir("kafka")
 
-_BROKER_PORTS = [
-    ("Bootstrap", 9094, 30094),
-    ("Broker0",   9095, 30095),
-    ("Broker1",   9096, 30096),
-    ("Broker2",   9097, 30097),
-]
 
-BROKER_COUNT = len(_BROKER_PORTS) - 1  # Bootstrap を除いたブローカー数
+def _parse_nlb_ports() -> list[tuple[str, int, int]]:
+    """kafka-cluster.yaml の external listener 設定から (name, listener_port, node_port) を返す。"""
+    manifest = load(_DIR, "kafka-cluster.yaml")
+    external = next(
+        l for l in manifest["spec"]["kafka"]["listeners"]
+        if l["name"] == "external"
+    )
+    cfg = external["configuration"]
+    return [("Bootstrap", external["port"], cfg["bootstrap"]["nodePort"])] + [
+        (f"Broker{b['broker']}", b["advertisedPort"], b["nodePort"])
+        for b in cfg["brokers"]
+    ]
+
+
+_NLB_PORTS = _parse_nlb_ports()
+BROKER_COUNT: int = len(_NLB_PORTS) - 1  # Bootstrap を除いたブローカー数（kafka-cluster.yaml 由来）
 
 
 class KafkaConstruct(Construct):
@@ -56,7 +65,10 @@ class KafkaConstruct(Construct):
         controller_pool.node.add_dependency(namespace)
 
         # ── KafkaNodePool: broker ─────────────────────────────────────────────
-        broker_pool = cluster.add_manifest("KafkaBrokerPool", load(_DIR,"node-pool-broker.yaml"))
+        broker_pool = cluster.add_manifest(
+            "KafkaBrokerPool",
+            load_with_subs(_DIR, "node-pool-broker.yaml", BROKER_REPLICAS=str(BROKER_COUNT)),
+        )
         broker_pool.node.add_dependency(namespace)
 
         # ── Kafka CR ──────────────────────────────────────────────────────────
@@ -66,7 +78,7 @@ class KafkaConstruct(Construct):
         kafka_cr.node.add_dependency(broker_pool)
 
         # ── NLB TargetGroup + Listener ────────────────────────────────────────
-        for name, listener_port, node_port in _BROKER_PORTS:
+        for name, listener_port, node_port in _NLB_PORTS:
             tg = elbv2.NetworkTargetGroup(
                 self,
                 f"Kafka{name}Tg",
