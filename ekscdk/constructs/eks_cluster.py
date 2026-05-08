@@ -74,7 +74,7 @@ class EksClusterConstruct(Construct):
             nodegroup_name="kafka-nodegroup",
             instance_types=[ec2.InstanceType(config.kafka_instance_type)],
             min_size=broker_count,
-            max_size=broker_count,
+            max_size=broker_count + 1,  # ローリングアップデート時に新ノードを起動できる余裕を確保
             desired_size=broker_count,
             capacity_type=eks.CapacityType.ON_DEMAND,
             subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS),
