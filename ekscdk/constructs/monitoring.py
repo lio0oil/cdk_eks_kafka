@@ -68,27 +68,26 @@ class MonitoringConstruct(Construct):
                 actions=["aps:RemoteWrite", "aps:GetSeries", "aps:GetLabels", "aps:GetMetricMetadata"],
                 resources=[amp_workspace.attr_arn],
             ),
+            # X-Ray / EC2 describe はサービス仕様上リソース指定不可のため * が必須
             iam.PolicyStatement(
                 actions=[
                     "xray:PutTraceSegments",
                     "xray:PutTelemetryRecords",
                     "xray:GetSamplingRules",
                     "xray:GetSamplingTargets",
-                ],
-                resources=["*"],
-            ),
-            iam.PolicyStatement(
-                actions=[
-                    "cloudwatch:PutMetricData",
-                    "logs:CreateLogGroup",
-                    "logs:CreateLogStream",
-                    "logs:PutLogEvents",
-                    "logs:DescribeLogGroups",
-                    "logs:DescribeLogStreams",
                     "ec2:DescribeVolumes",
                     "ec2:DescribeTags",
                 ],
                 resources=["*"],
+            ),
+            # CloudWatch: Container Insights が動的にロググループを作成するため CreateLogGroup は *
+            iam.PolicyStatement(
+                actions=["cloudwatch:PutMetricData", "logs:CreateLogGroup"],
+                resources=["*"],
+            ),
+            iam.PolicyStatement(
+                actions=["logs:CreateLogStream", "logs:PutLogEvents", "logs:DescribeLogGroups", "logs:DescribeLogStreams"],
+                resources=[log_group.log_group_arn, log_group.log_group_arn + ":*"],
             ),
         ]:
             cast(iam.Role, adot_sa.role).add_to_policy(stmt)
@@ -104,13 +103,12 @@ class MonitoringConstruct(Construct):
         cast(iam.Role, fluent_bit_sa.role).add_to_policy(
             iam.PolicyStatement(
                 actions=[
-                    "logs:CreateLogGroup",
                     "logs:CreateLogStream",
                     "logs:PutLogEvents",
                     "logs:DescribeLogGroups",
                     "logs:DescribeLogStreams",
                 ],
-                resources=["*"],
+                resources=[log_group.log_group_arn, log_group.log_group_arn + ":*"],
             )
         )
 
