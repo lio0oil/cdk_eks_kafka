@@ -1,11 +1,16 @@
-from aws_cdk import Tags
+from aws_cdk import Duration, Tags
 from aws_cdk import aws_ec2 as ec2
 from aws_cdk import aws_elasticloadbalancingv2 as elbv2
 from constructs import Construct
 
 
 class NetworkConstruct(Construct):
-    def __init__(self, scope: Construct, construct_id: str, kafka_listener_ports: list[int]) -> None:
+    def __init__(
+        self,
+        scope: Construct,
+        construct_id: str,
+        nlb_ports: list[tuple[str, int, int]],
+    ) -> None:
         super().__init__(scope, construct_id)
 
         self._vpc = ec2.Vpc(
@@ -38,12 +43,11 @@ class NetworkConstruct(Construct):
             Tags.of(subnet).add("kubernetes.io/role/internal-elb", "1")
 
         # ── Kafka 共有 NLB ─────────────────────────────────────────────────────
-        # リスナーとターゲットグループは KafkaConstruct が CDK で管理する
         kafka_nlb_sg = ec2.SecurityGroup(self, "KafkaNlbSg", vpc=self._vpc)
-        for port in kafka_listener_ports:
+        for _, listener_port, _ in nlb_ports:
             kafka_nlb_sg.add_ingress_rule(
                 ec2.Peer.ipv4(self._vpc.vpc_cidr_block),
-                ec2.Port.tcp(port),
+                ec2.Port.tcp(listener_port),
             )
 
         self._kafka_nlb = elbv2.NetworkLoadBalancer(
@@ -55,6 +59,33 @@ class NetworkConstruct(Construct):
             load_balancer_name="kafka-shared-nlb",
             security_groups=[kafka_nlb_sg],
         )
+
+        # ── NLB TargetGroup + Listener ────────────────────────────────────────
+        # リスナーとターゲットグループは nlb_ports（kafka-cluster.yaml 由来）で決定する
+        for name, listener_port, node_port in nlb_ports:
+            tg = elbv2.NetworkTargetGroup(
+                self,
+                f"Kafka{name}Tg",
+                vpc=self._vpc,
+                port=node_port,
+                protocol=elbv2.Protocol.TCP,
+                target_type=elbv2.TargetType.INSTANCE,
+                health_check=elbv2.HealthCheck(
+                    port=str(node_port),
+                    protocol=elbv2.Protocol.TCP,
+                    healthy_threshold_count=2,
+                    unhealthy_threshold_count=2,
+                    interval=Duration.seconds(10),
+                ),
+            )
+            elbv2.NetworkListener(
+                self,
+                f"Kafka{name}Listener",
+                load_balancer=self._kafka_nlb,
+                port=listener_port,
+                protocol=elbv2.Protocol.TCP,
+                default_target_groups=[tg],
+            )
 
         # ── Kafka PrivateLink (Endpoint Service) ─────────────────────────────
         # NLB本体はCDK管理なので、ここで作成してしまえば ARN は不変

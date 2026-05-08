@@ -26,3 +26,20 @@ def load(base_dir: str, filename: str) -> dict:
 def load_all(base_dir: str, filename: str) -> list[dict]:
     with open(os.path.join(base_dir, filename)) as f:
         return [doc for doc in yaml.safe_load_all(f) if doc is not None]
+
+
+def parse_kafka_nlb_ports(base_dir: str) -> list[tuple[str, int, int]]:
+    """kafka-cluster.yaml の external listener から (name, listener_port, node_port) を返す。
+
+    host プレースホルダーが残っていても yaml.safe_load は文字列として読めるため問題ない。
+    """
+    manifest = load(base_dir, "kafka-cluster.yaml")
+    external = next(
+        l for l in manifest["spec"]["kafka"]["listeners"]
+        if l["name"] == "external"
+    )
+    cfg = external["configuration"]
+    return [("Bootstrap", external["port"], cfg["bootstrap"]["nodePort"])] + [
+        (f"Broker{b['broker']}", b["advertisedPort"], b["nodePort"])
+        for b in cfg["brokers"]
+    ]
