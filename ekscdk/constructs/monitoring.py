@@ -28,20 +28,20 @@ class MonitoringConstruct(Construct):
       - JMX Prometheus Exporter（Strimzi 組み込み）: ブローカー内部メトリクス → ADOT kubernetes_sd 経由で AMP へ
     """
 
-    def __init__(self, scope: Construct, construct_id: str, cluster: eks.ICluster) -> None:
+    def __init__(self, scope: Construct, construct_id: str, cluster: eks.ICluster, cluster_name: str = "eks-cluster") -> None:
         super().__init__(scope, construct_id)
 
         region = Stack.of(self).region
 
         # ── AMP ──────────────────────────────────────────────────────────────
-        amp_workspace = aps.CfnWorkspace(self, "AmpWorkspace", alias="eks-cluster")
+        amp_workspace = aps.CfnWorkspace(self, "AmpWorkspace", alias=cluster_name)
         amp_remote_write_url = f"{amp_workspace.attr_prometheus_endpoint}api/v1/remote_write"
 
         # ── CloudWatch Log Group ──────────────────────────────────────────────
         log_group = logs.LogGroup(
             self,
             "ApplicationLogGroup",
-            log_group_name="/aws/eks/eks-cluster/application",
+            log_group_name=f"/aws/eks/{cluster_name}/application",
             retention=logs.RetentionDays.ONE_MONTH,
         )
 
@@ -127,7 +127,7 @@ class MonitoringConstruct(Construct):
         grafana.CfnWorkspace(
             self,
             "AmgWorkspace",
-            name="eks-cluster-grafana",
+            name=f"{cluster_name}-grafana",
             account_access_type="CURRENT_ACCOUNT",
             authentication_providers=[amg_auth_provider],
             permission_type="SERVICE_MANAGED",

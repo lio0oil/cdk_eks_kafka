@@ -10,14 +10,14 @@ from constructs import Construct
 
 class EksClusterConstruct(Construct):
     def __init__(
-        self, scope: Construct, construct_id: str, vpc: ec2.IVpc, admin_role: iam.IRole, broker_count: int = 3
+        self, scope: Construct, construct_id: str, vpc: ec2.IVpc, admin_role: iam.IRole, broker_count: int = 3, cluster_name: str = "eks-cluster"
     ) -> None:
         super().__init__(scope, construct_id)
 
         self._cluster = eks.Cluster(
             self,
             "Cluster",
-            cluster_name="eks-cluster",
+            cluster_name=cluster_name,
             vpc=vpc,
             vpc_subnets=[
                 ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS)
