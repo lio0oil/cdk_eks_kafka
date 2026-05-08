@@ -68,7 +68,7 @@ class ClusterConfig:
             fluent_bit_chart_version="0.57.3",
             fluent_bit_chart_repo="https://fluent.github.io/helm-charts",
             log_retention=logs.RetentionDays.ONE_WEEK,
-            grafana_version="12.0",
+            grafana_version="12.4",
             enable_interface_endpoints=False,
         )
 
@@ -91,7 +91,7 @@ class ClusterConfig:
             fluent_bit_chart_version="0.57.3",
             fluent_bit_chart_repo="https://fluent.github.io/helm-charts",
             log_retention=logs.RetentionDays.ONE_MONTH,
-            grafana_version="12.0",
+            grafana_version="12.4",
             enable_interface_endpoints=True,
         )
 
@@ -114,6 +114,6 @@ class ClusterConfig:
             fluent_bit_chart_version="0.57.3",
             fluent_bit_chart_repo="https://fluent.github.io/helm-charts",
             log_retention=logs.RetentionDays.ONE_MONTH,
-            grafana_version="12.0",
+            grafana_version="12.4",
             enable_interface_endpoints=True,
         )
