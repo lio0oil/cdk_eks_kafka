@@ -16,7 +16,13 @@ env = cdk.Environment(
 )
 
 # Stack 0: IAM ロール（EksCdkStack より先にデプロイ）
-iam_stack = IamStack(app, "IamStack", env=env)
+# 本番環境では CompositePrincipal で運用者・CI/CD ロールの ARN を明示的に列挙すること
+iam_stack = IamStack(
+    app,
+    "IamStack",
+    admin_principal=iam.AccountRootPrincipal(),  # type: ignore[arg-type]
+    env=env,
+)
 
 # Stack 1: VPC / EKS / アドオン / Kafka / 監視
 # Kubernetes リソースは CDK が直接 apply する。

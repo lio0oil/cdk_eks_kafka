@@ -47,12 +47,12 @@ class MonitoringConstruct(Construct):
 
         # ── monitoring Namespace ──────────────────────────────────────────────
         namespace = cluster.add_manifest(
-            "MonitoringNamespace", load(_DIR,"namespace.yaml")
+            "MonitoringNamespace", load(_DIR, "namespace.yaml")
         )
 
         # ── ADOT RBAC（Pod ディスカバリ用）────────────────────────────────────
         adot_rbac = cluster.add_manifest(
-            "AdotRbac", *load_all(_DIR,"adot-rbac.yaml")
+            "AdotRbac", *load_all(_DIR, "adot-rbac.yaml")
         )
 
         # ── ADOT Pod Identity ─────────────────────────────────────────────────
@@ -124,6 +124,8 @@ class MonitoringConstruct(Construct):
         amg_role.add_managed_policy(
             iam.ManagedPolicy.from_aws_managed_policy_name("AmazonPrometheusQueryAccess")
         )
+        # ワークスペース名を変更すると CloudFormation がリソースを再作成するため、
+        # 手動インポート済みのダッシュボードが失われる点に注意。
         grafana.CfnWorkspace(
             self,
             "AmgWorkspace",

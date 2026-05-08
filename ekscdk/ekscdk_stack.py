@@ -9,9 +9,6 @@ from ekscdk.constructs.kafka import KafkaConstruct
 from ekscdk.constructs.monitoring import MonitoringConstruct
 from ekscdk.constructs.network import NetworkConstruct
 
-_NLB_PORTS = parse_kafka_nlb_ports(manifest_dir("kafka"))
-_BROKER_COUNT = len(_NLB_PORTS) - 1
-
 
 class EksCdkStack(Stack):
     """インフラスタック（VPC / EKS / アドオン / Kafka）"""
@@ -21,9 +18,12 @@ class EksCdkStack(Stack):
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)
 
-        network = NetworkConstruct(self, "Network", nlb_ports=_NLB_PORTS)
+        nlb_ports = parse_kafka_nlb_ports(manifest_dir("kafka"))
+        broker_count = len(nlb_ports) - 1
+
+        network = NetworkConstruct(self, "Network", nlb_ports=nlb_ports)
         eks_construct = EksClusterConstruct(
-            self, "EksCluster", vpc=network.vpc, admin_role=admin_role, broker_count=_BROKER_COUNT, cluster_name=cluster_name
+            self, "EksCluster", vpc=network.vpc, admin_role=admin_role, broker_count=broker_count, cluster_name=cluster_name
         )
         addons = AddonsConstruct(self, "Addons", cluster=eks_construct.cluster)
         addons.node.add_dependency(eks_construct)
@@ -32,7 +32,7 @@ class EksCdkStack(Stack):
             self,
             "Kafka",
             cluster=eks_construct.cluster,
-            broker_count=_BROKER_COUNT,
+            broker_count=broker_count,
             nlb_dns_name=network.kafka_nlb.load_balancer_dns_name,
         )
         kafka.node.add_dependency(addons)

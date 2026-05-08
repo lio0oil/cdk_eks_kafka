@@ -61,7 +61,9 @@ class NetworkConstruct(Construct):
         )
 
         # ── NLB TargetGroup + Listener ────────────────────────────────────────
-        # リスナーとターゲットグループは nlb_ports（kafka-cluster.yaml 由来）で決定する
+        # リスナーとターゲットグループは nlb_ports（kafka-cluster.yaml 由来）で決定する。
+        # TargetType.INSTANCE はターゲットを明示登録せず、EKS ノードが NodePort 経由で
+        # ヘルスチェックを通過した時点で自動的にトラフィックを受け取る。
         for name, listener_port, node_port in nlb_ports:
             tg = elbv2.NetworkTargetGroup(
                 self,

@@ -35,7 +35,7 @@ def parse_kafka_nlb_ports(base_dir: str) -> list[tuple[str, int, int]]:
     """
     manifest = load(base_dir, "kafka-cluster.yaml")
     listeners = manifest["spec"]["kafka"]["listeners"]
-    external = next((l for l in listeners if l["name"] == "external"), None)
+    external = next((listener for listener in listeners if listener["name"] == "external"), None)
     if external is None:
         raise ValueError(
             "kafka-cluster.yaml に 'external' リスナーが見つかりません。"

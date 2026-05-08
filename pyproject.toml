@@ -1,7 +1,7 @@
 [project]
 name = "ekscdk"
 version = "0.1.0"
-description = "Add your description here"
+description = "AWS CDK (Python) で EKS 上に Kafka 基盤を構築するプロジェクト"
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
