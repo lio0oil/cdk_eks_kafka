@@ -39,6 +39,13 @@ class NetworkConstruct(Construct):
 
         # ── Kafka 共有 NLB ─────────────────────────────────────────────────────
         # リスナーとターゲットグループは KafkaConstruct が CDK で管理する
+        kafka_nlb_sg = ec2.SecurityGroup(self, "KafkaNlbSg", vpc=self._vpc)
+        for port in [9094, 9095, 9096, 9097]:
+            kafka_nlb_sg.add_ingress_rule(
+                ec2.Peer.ipv4(self._vpc.vpc_cidr_block),
+                ec2.Port.tcp(port),
+            )
+
         self._kafka_nlb = elbv2.NetworkLoadBalancer(
             self,
             "KafkaSharedNlb",
@@ -46,6 +53,7 @@ class NetworkConstruct(Construct):
             internet_facing=False,
             cross_zone_enabled=True,
             load_balancer_name="kafka-shared-nlb",
+            security_groups=[kafka_nlb_sg],
         )
 
         # ── Kafka PrivateLink (Endpoint Service) ─────────────────────────────
