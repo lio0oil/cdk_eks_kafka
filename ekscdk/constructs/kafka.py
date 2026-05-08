@@ -1,3 +1,4 @@
+from aws_cdk import Duration
 from aws_cdk import aws_ec2 as ec2
 from aws_cdk import aws_elasticloadbalancingv2 as elbv2
 from aws_cdk import aws_eks_v2 as eks
@@ -92,6 +93,13 @@ class KafkaConstruct(Construct):
                 port=node_port,
                 protocol=elbv2.Protocol.TCP,
                 target_type=elbv2.TargetType.INSTANCE,
+                health_check=elbv2.HealthCheck(
+                    port=str(node_port),
+                    protocol=elbv2.Protocol.TCP,
+                    healthy_threshold_count=2,
+                    unhealthy_threshold_count=2,
+                    interval=Duration.seconds(10),
+                ),
             )
             elbv2.NetworkListener(
                 self,

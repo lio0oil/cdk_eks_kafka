@@ -64,6 +64,13 @@ class EksClusterConstruct(Construct):
             capacity_type=eks.CapacityType.ON_DEMAND,
             subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS),
             labels={"role": "kafka"},
+            taints=[
+                eks.TaintSpec(
+                    key="DedicatedKafka",
+                    value="true",
+                    effect=eks.TaintEffect.NO_SCHEDULE,
+                )
+            ],
             enable_node_auto_repair=True,
         )
 

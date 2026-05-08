@@ -30,6 +30,11 @@ spec:
     -Xmx: "2048m"
   template:
     pod:
+      tolerations:
+        - key: "DedicatedKafka"
+          operator: "Equal"
+          value: "true"
+          effect: "NoSchedule"
       affinity:
         nodeAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:

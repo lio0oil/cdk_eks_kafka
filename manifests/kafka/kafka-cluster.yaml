@@ -41,6 +41,7 @@ spec:
               nodePort: 30097
               advertisedPort: 9097
     config:
+      inter.broker.protocol.version: "4.2-IV1"
       offsets.topic.replication.factor: 3
       transaction.state.log.replication.factor: 3
       transaction.state.log.min.isr: 2
