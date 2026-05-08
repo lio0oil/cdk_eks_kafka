@@ -63,7 +63,7 @@ class AddonsConstruct(Construct):
             repository="https://strimzi.io/charts/",
             namespace="strimzi-system",
             create_namespace=True,
-            version="0.45.0",
+            version="1.0.0",
             values={
                 "watchNamespaces": ["kafka"],
                 "replicas": 1,
