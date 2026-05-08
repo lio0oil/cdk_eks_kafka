@@ -54,7 +54,7 @@ EKS cluster-admin ロール（`eks-cluster-admin`）を作成する。`EksCdkSta
 - EKS クラスター（Kubernetes 1.35）
 - EKS マネージドアドオン（VPC CNI / CoreDNS / kube-proxy / Pod Identity Agent / EBS CSI Driver）
 - **Strimzi Operator**（Helm 直接管理）
-- **ACK ELBv2 Controller**（NLB リスナー / TargetGroup を管理）
+- **NLB Listener / TargetGroup**（CDK ELBv2 で直接管理）
 - **Kafka Cluster**（manifests/kafka/ の YAML を CDK でロードして apply）
 - 監視環境（ADOT / Fluent Bit / AMP / AMG / CloudWatch Log Group）
 
@@ -66,7 +66,7 @@ EKS cluster-admin ロール（`eks-cluster-admin`）を作成する。`EksCdkSta
 | EKS / ノードグループ / アドオン | CDK（EksCdkStack） | インフラ設定 |
 | Strimzi Operator | CDK（EksCdkStack） | バージョン管理をコードで一元化 |
 | 監視コンポーネント（ADOT / Fluent Bit / AMP / AMG） | CDK（EksCdkStack） | AMP エンドポイント等の動的値（CloudFormation トークン）を注入するため |
-| **NLB リスナー / TargetGroup** | CDK（EksCdkStack）| ACK ELBv2 を使用。ブローカー増設時は `manifests/kafka/privatelink.yaml` を編集して `cdk deploy` |
+| **NLB リスナー / TargetGroup** | CDK（EksCdkStack） | `KafkaConstruct` が CDK ELBv2 で直接管理。ブローカー増設時は `kafka.py` の `_BROKER_PORTS` を編集して `cdk deploy` |
 | **Kafka CR（kafka-cluster.yaml 等）** | CDK（EksCdkStack） | `manifests/kafka/` の YAML を CDK がロードして apply。設定変更は YAML 編集 → `cdk deploy` |
 
 ## デプロイ手順
@@ -98,11 +98,11 @@ cdk deploy EksCdkStack
 
 ### 3. Kafka 設定変更
 
-ブローカー設定・リスナー設定は `manifests/kafka/` の YAML を編集して `cdk deploy` する。
+ブローカー設定は `manifests/kafka/kafka-cluster.yaml` を、NLB ポートマッピングは `ekscdk/constructs/kafka.py` の `_BROKER_PORTS` を編集して `cdk deploy` する。
 
 ```bash
-vi manifests/kafka/kafka-cluster.yaml   # ブローカー設定
-vi manifests/kafka/privatelink.yaml     # NLB リスナー / TargetGroup（ブローカー増設時）
+vi manifests/kafka/kafka-cluster.yaml        # ブローカー設定
+vi ekscdk/constructs/kafka.py                # NLB ポートマッピング（ブローカー増設時）
 cdk deploy EksCdkStack
 ```
 
@@ -160,7 +160,6 @@ manifests/
 │   ├── node-pool-controller.yaml # KafkaNodePool（controller）
 │   ├── cm.yaml                   # JMX メトリクス設定 ConfigMap
 │   ├── kafka-rebalance.yaml      # Cruise Control リバランス定義（手動 kubectl 用）
-│   └── privatelink.yaml          # NLB リスナー / TargetGroup（ACK 管理）
 └── monitoring/
     └── dashboards/               # AMG インポート用 Grafana ダッシュボード JSON
 ```

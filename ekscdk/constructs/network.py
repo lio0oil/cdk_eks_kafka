@@ -38,7 +38,7 @@ class NetworkConstruct(Construct):
             Tags.of(subnet).add("kubernetes.io/role/internal-elb", "1")
 
         # ── Kafka 共有 NLB ─────────────────────────────────────────────────────
-        # リスナーとターゲットグループは ACK (ELBv2 Controller) が YAML 経由で管理する
+        # リスナーとターゲットグループは KafkaConstruct が CDK で管理する
         self._kafka_nlb = elbv2.NetworkLoadBalancer(
             self,
             "KafkaSharedNlb",

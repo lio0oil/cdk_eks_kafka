@@ -1,4 +1,3 @@
-from aws_cdk import Stack
 from aws_cdk import aws_eks_v2 as eks
 from aws_cdk import aws_iam as iam
 from constructs import Construct
@@ -14,7 +13,6 @@ class AddonsConstruct(Construct):
 
         self._add_eks_addons()
         self._add_strimzi()
-        self._add_ack_controllers()
 
     def _add_eks_addons(self) -> None:
         # EBS CSI Driver用 IRSA
@@ -51,34 +49,6 @@ class AddonsConstruct(Construct):
                 }
             },
         )
-
-    def _add_ack_controllers(self) -> None:
-        region = Stack.of(self).region
-
-        # ACK ELBv2 Controller (Listener / TargetGroup 管理用)
-        ack_elbv2_sa = self._cluster.add_service_account(
-            "AckElbv2Sa",
-            name="ack-elbv2-controller",
-            namespace="ack-system",
-        )
-        ack_elbv2_sa.role.add_managed_policy(
-            iam.ManagedPolicy.from_aws_managed_policy_name(
-                "ElasticLoadBalancingFullAccess"
-            )
-        )
-
-        elbv2_helm = self._cluster.add_helm_chart(
-            "AckElbv2Controller",
-            chart="elbv2-chart",
-            repository="oci://public.ecr.aws/aws-controllers-k8s/elbv2-chart",
-            namespace="ack-system",
-            version="v1.1.8",
-            values={
-                "aws": {"region": region},
-                "serviceAccount": {"create": False, "name": "ack-elbv2-controller"},
-            },
-        )
-        elbv2_helm.node.add_dependency(ack_elbv2_sa)
 
     def _add_strimzi(self) -> None:
         self._cluster.add_manifest(

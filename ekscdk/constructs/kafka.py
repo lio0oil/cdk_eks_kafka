@@ -1,28 +1,24 @@
 import os
 
 import yaml
+from aws_cdk import aws_ec2 as ec2
+from aws_cdk import aws_elasticloadbalancingv2 as elbv2
 from aws_cdk import aws_eks_v2 as eks
 from constructs import Construct
 
 _MANIFESTS_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "manifests", "kafka")
 
+_BROKER_PORTS = [
+    ("Bootstrap", 9094, 30094),
+    ("Broker0",   9095, 30095),
+    ("Broker1",   9096, 30096),
+    ("Broker2",   9097, 30097),
+]
+
 
 def _load(filename: str) -> dict:
     with open(os.path.join(_MANIFESTS_DIR, filename)) as f:
         return yaml.safe_load(f)
-
-
-def _load_all_with_subs(filename: str, **subs: str) -> list[dict]:
-    with open(os.path.join(_MANIFESTS_DIR, filename)) as f:
-        text = f.read()
-    for placeholder, value in subs.items():
-        text = text.replace(f"<REPLACE_WITH_CDK_OUTPUT_{placeholder}>", value)
-    return [doc for doc in yaml.safe_load_all(text) if doc is not None]
-
-
-def _manifest_id(name: str) -> str:
-    """'kafka-bootstrap-tg' → 'KafkaBootstrapTg'"""
-    return "".join(part.capitalize() for part in name.replace("-", " ").split())
 
 
 class KafkaConstruct(Construct):
@@ -33,7 +29,9 @@ class KafkaConstruct(Construct):
       - JMX メトリクス ConfigMap
       - KafkaNodePool（controller x3 / broker x3）
       - Kafka CR（KRaft モード / 外部リスナー NodePort）
-      - ACK TargetGroup + Listener（Shared NLB のリスナー設定）
+
+    AWS リソース（CDK 管理）:
+      - NLB TargetGroup + Listener（bootstrap / broker 0〜2）
 
     VPC Endpoint Service 本体は NetworkConstruct が管理する。
     """
@@ -43,8 +41,8 @@ class KafkaConstruct(Construct):
         scope: Construct,
         construct_id: str,
         cluster: eks.ICluster,
-        vpc_id: str,
-        nlb_arn: str,
+        vpc: ec2.IVpc,
+        nlb: elbv2.INetworkLoadBalancer,
     ) -> None:
         super().__init__(scope, construct_id)
 
@@ -72,28 +70,21 @@ class KafkaConstruct(Construct):
         kafka_cr.node.add_dependency(controller_pool)
         kafka_cr.node.add_dependency(broker_pool)
 
-        # ── ACK TargetGroup / Listener（NLB リスナー設定）────────────────────
-        # VPCEndpointService は NetworkConstruct で CDK 管理済みのため除外する
-        pl_docs = _load_all_with_subs(
-            "privatelink.yaml",
-            VpcId=vpc_id,
-            KafkaSharedNlbArn=nlb_arn,
-        )
-        tg_by_name = {}
-        listener_queue = []
-        for doc in pl_docs:
-            if doc["kind"] == "VPCEndpointService":
-                continue
-            cdk_id = _manifest_id(doc["metadata"]["name"])
-            if doc["kind"] == "TargetGroup":
-                tg = cluster.add_manifest(cdk_id, doc)
-                tg.node.add_dependency(namespace)
-                tg_by_name[doc["metadata"]["name"]] = tg
-            elif doc["kind"] == "Listener":
-                listener_queue.append((cdk_id, doc))
-
-        for cdk_id, doc in listener_queue:
-            listener = cluster.add_manifest(cdk_id, doc)
-            tg_ref = doc["spec"]["defaultActions"][0]["targetGroupRef"]["from"]["name"]
-            if tg_ref in tg_by_name:
-                listener.node.add_dependency(tg_by_name[tg_ref])
+        # ── NLB TargetGroup + Listener ────────────────────────────────────────
+        for name, listener_port, node_port in _BROKER_PORTS:
+            tg = elbv2.NetworkTargetGroup(
+                self,
+                f"Kafka{name}Tg",
+                vpc=vpc,
+                port=node_port,
+                protocol=elbv2.Protocol.TCP,
+                target_type=elbv2.TargetType.INSTANCE,
+            )
+            elbv2.NetworkListener(
+                self,
+                f"Kafka{name}Listener",
+                load_balancer=nlb,
+                port=listener_port,
+                protocol=elbv2.Protocol.TCP,
+                default_target_groups=[tg],
+            )

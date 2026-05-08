@@ -1,4 +1,4 @@
-from aws_cdk import CfnOutput, Stack
+from aws_cdk import Stack
 from aws_cdk import aws_iam as iam
 from constructs import Construct
 
@@ -28,22 +28,7 @@ class EksCdkStack(Stack):
             self,
             "Kafka",
             cluster=eks_construct.cluster,
-            vpc_id=network.vpc.vpc_id,
-            nlb_arn=network.kafka_nlb.load_balancer_arn,
+            vpc=network.vpc,
+            nlb=network.kafka_nlb,
         )
         kafka.node.add_dependency(addons)
-
-        # ── Outputs ──────────────────────────────────────────────────────────
-        # manifests/kafka/privatelink.yaml の書き換えに使用する値を出力
-        CfnOutput(
-            self,
-            "VpcId",
-            value=network.vpc.vpc_id,
-            description="VPC ID for privatelink.yaml",
-        )
-        CfnOutput(
-            self,
-            "KafkaSharedNlbArn",
-            value=network.kafka_nlb.load_balancer_arn,
-            description="Shared NLB ARN for privatelink.yaml",
-        )
