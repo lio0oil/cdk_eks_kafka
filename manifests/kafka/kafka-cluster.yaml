@@ -46,6 +46,7 @@ spec:
       min.insync.replicas: 2
     rack:
       topologyKey: topology.kubernetes.io/zone
+  cruiseControl: {}
   entityOperator:
     topicOperator: {}
     userOperator: {}
