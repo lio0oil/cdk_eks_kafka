@@ -107,6 +107,7 @@ cdk deploy EksCdkStack
 
 | コンテキストキー | デフォルト | 説明 |
 |---|---|---|
+| `env` | `dev` | デプロイ環境（`dev` / `stg` / `prd`）。`ekscdk/config.py` の `ClusterConfig.for_<env>()` が選択される |
 | `amg-auth-provider` | `AWS_SSO` | AMG 認証方式（IAM Identity Center 未使用の場合は `SAML`） |
 
 ### 3. Kafka 設定変更
@@ -117,6 +118,17 @@ cdk deploy EksCdkStack
 vi manifests/kafka/kafka-cluster.yaml        # ブローカー設定（configuration.brokers を増減）
 cdk deploy EksCdkStack
 ```
+
+#### ブローカースケールアウト手順
+
+ブローカーを増設する場合は以下の順序で作業する。CDK は Kubernetes リソース（KafkaNodePool の replicas）と AWS リソース（EKS ノードグループの min/max_size、NLB Listener / TargetGroup）を同時に変更するため、`cdk deploy` が必須。
+
+1. `manifests/kafka/kafka-cluster.yaml` の `configuration.brokers` に新ブローカーのエントリを追加する（`broker`・`nodePort`・`advertisedPort` を既存と重複しない値で指定）
+2. `cdk deploy EksCdkStack` を実行する（ノードグループ拡張 → NLB Listener 追加 → KafkaNodePool replicas 更新 の順に適用される）
+3. Strimzi がブローカー Pod を新ノードにスケジュールし、クラスターに参加させる
+4. 必要に応じて Cruise Control でパーティションをリバランスする（[手順](#cruise-control-によるリバランス)参照）
+
+> **注意**: 手順 2 を省略して `kubectl` や ArgoCD だけで YAML を apply しても EKS ノードグループが拡張されないため、ブローカー Pod が Pending のままになる。
 
 ### 4. PrivateLink 経由の接続（クライアント側設定）
 

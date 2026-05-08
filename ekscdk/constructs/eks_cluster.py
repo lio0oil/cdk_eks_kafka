@@ -7,17 +7,19 @@ from aws_cdk.aws_eks_v2 import DefaultCapacityType
 from aws_cdk.lambda_layer_kubectl_v35 import KubectlV35Layer
 from constructs import Construct
 
+from ekscdk.config import ClusterConfig
+
 
 class EksClusterConstruct(Construct):
     def __init__(
-        self, scope: Construct, construct_id: str, vpc: ec2.IVpc, admin_role: iam.IRole, broker_count: int = 3, cluster_name: str = "eks-cluster"
+        self, scope: Construct, construct_id: str, vpc: ec2.IVpc, admin_role: iam.IRole, broker_count: int, config: ClusterConfig
     ) -> None:
         super().__init__(scope, construct_id)
 
         self._cluster = eks.Cluster(
             self,
             "Cluster",
-            cluster_name=cluster_name,
+            cluster_name=config.cluster_name,
             vpc=vpc,
             vpc_subnets=[
                 ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS)
@@ -49,10 +51,10 @@ class EksClusterConstruct(Construct):
         self._cluster.add_nodegroup_capacity(
             "SystemNodeGroup",
             nodegroup_name="system-nodegroup",
-            instance_types=[ec2.InstanceType("m8g.large")],
-            min_size=3,
-            max_size=6,
-            desired_size=3,
+            instance_types=[ec2.InstanceType(config.system_instance_type)],
+            min_size=config.system_min_size,
+            max_size=config.system_max_size,
+            desired_size=config.system_desired_size,
             capacity_type=eks.CapacityType.ON_DEMAND,
             subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS),
             labels={"role": "system"},
@@ -70,7 +72,7 @@ class EksClusterConstruct(Construct):
         self._cluster.add_nodegroup_capacity(
             "KafkaNodeGroup",
             nodegroup_name="kafka-nodegroup",
-            instance_types=[ec2.InstanceType("r8g.large")],
+            instance_types=[ec2.InstanceType(config.kafka_instance_type)],
             min_size=broker_count,
             max_size=broker_count,
             desired_size=broker_count,

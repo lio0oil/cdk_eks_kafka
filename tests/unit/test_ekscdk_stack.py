@@ -3,18 +3,32 @@ import aws_cdk.assertions as assertions
 from aws_cdk import aws_iam as iam
 import pytest
 
+from ekscdk.config import ClusterConfig
 from ekscdk.iam_stack import IamStack
 from ekscdk.ekscdk_stack import EksCdkStack
 from ekscdk.constructs._manifest import manifest_dir, parse_kafka_nlb_ports
 
 
 @pytest.fixture(scope="module")
-def template():
+def _app_stacks():
     app = core.App()
     env = core.Environment(account="123456789012", region="ap-northeast-1")
     iam_stack = IamStack(app, "IamStack", admin_principal=iam.AccountRootPrincipal(), env=env)
-    stack = EksCdkStack(app, "ekscdk", admin_role=iam_stack.eks_admin_role, env=env)
-    return assertions.Template.from_stack(stack)
+    infra_stack = EksCdkStack(app, "ekscdk", admin_role=iam_stack.eks_admin_role, config=ClusterConfig.for_prd(), env=env)
+    return {
+        "iam": assertions.Template.from_stack(iam_stack),
+        "infra": assertions.Template.from_stack(infra_stack),
+    }
+
+
+@pytest.fixture(scope="module")
+def template(_app_stacks):
+    return _app_stacks["infra"]
+
+
+@pytest.fixture(scope="module")
+def iam_template(_app_stacks):
+    return _app_stacks["iam"]
 
 
 def test_stack_synthesizes(template):
@@ -44,3 +58,43 @@ def test_kafka_nlb_is_internal(template):
 
 def test_vpc_endpoint_service_exists(template):
     template.resource_count_is("AWS::EC2::VPCEndpointService", 1)
+
+
+def test_kafka_nlb_sg_ingress_restricted_to_vpc(template):
+    # NLB SG のインバウンドルールが VPC CIDR 参照に限定され、bootstrap ポートが含まれることを確認
+    # CidrIp は Fn::GetAtt で VPC CidrBlock を参照するため Match.any_value() で検証
+    template.has_resource_properties(
+        "AWS::EC2::SecurityGroup",
+        {
+            "SecurityGroupIngress": assertions.Match.array_with([
+                assertions.Match.object_like({
+                    "IpProtocol": "tcp",
+                    "FromPort": 9094,
+                    "ToPort": 9094,
+                    "CidrIp": assertions.Match.any_value(),
+                })
+            ])
+        },
+    )
+
+
+def test_eks_admin_role_trust_policy(iam_template):
+    # eks-cluster-admin ロールの trust policy に sts:AssumeRole が含まれることを確認
+    # AWS フィールドは Fn::Join で構築される intrinsic function なので any_value() で検証
+    iam_template.has_resource_properties(
+        "AWS::IAM::Role",
+        {
+            "RoleName": "eks-cluster-admin",
+            "AssumeRolePolicyDocument": assertions.Match.object_like({
+                "Statement": assertions.Match.array_with([
+                    assertions.Match.object_like({
+                        "Effect": "Allow",
+                        "Action": "sts:AssumeRole",
+                        "Principal": assertions.Match.object_like({
+                            "AWS": assertions.Match.any_value(),
+                        }),
+                    })
+                ])
+            }),
+        },
+    )

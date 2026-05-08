@@ -1,0 +1,98 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from aws_cdk import aws_logs as logs
+
+# Kubernetes 1.35 向けアドオン最新バージョン（2026-05 時点）
+# 更新コマンド:
+#   for addon in vpc-cni coredns kube-proxy eks-pod-identity-agent aws-ebs-csi-driver; do
+#     echo -n "$addon: "
+#     aws eks describe-addon-versions --addon-name "$addon" \
+#       --kubernetes-version 1.35 \
+#       --query 'addons[0].addonVersions[0].addonVersion' --output text
+#   done
+_ADDON_VERSIONS_K8S_135: dict[str, str] = {
+    "vpc-cni":                "v1.21.1-eksbuild.8",
+    "coredns":                "v1.14.2-eksbuild.4",
+    "kube-proxy":             "v1.35.3-eksbuild.5",
+    "eks-pod-identity-agent": "v1.3.10-eksbuild.3",
+    "aws-ebs-csi-driver":     "v1.59.0-eksbuild.1",
+}
+
+
+@dataclass
+class ClusterConfig:
+    """EKS クラスター構成値の一元管理クラス。
+
+    環境ごとの差分は for_dev / for_stg / for_prd ファクトリで定義する。
+    バージョン・インスタンスタイプ・スケール設定をすべてここで管理し、
+    各 Construct へ引数として渡すことでハードコードを排除する。
+    """
+
+    cluster_name: str
+    nat_gateways: int
+    system_instance_type: str
+    system_min_size: int
+    system_max_size: int
+    system_desired_size: int
+    kafka_instance_type: str
+    addon_versions: dict[str, str]
+    strimzi_version: str
+    adot_chart_version: str
+    fluent_bit_chart_version: str
+    log_retention: logs.RetentionDays
+    grafana_version: str
+
+    @classmethod
+    def for_dev(cls, cluster_name: str = "eks-cluster-dev") -> ClusterConfig:
+        return cls(
+            cluster_name=cluster_name,
+            nat_gateways=1,
+            system_instance_type="m8g.large",
+            system_min_size=2,
+            system_max_size=3,
+            system_desired_size=2,
+            kafka_instance_type="r8g.large",
+            addon_versions=dict(_ADDON_VERSIONS_K8S_135),
+            strimzi_version="1.0.0",
+            adot_chart_version="0.153.0",
+            fluent_bit_chart_version="0.57.3",
+            log_retention=logs.RetentionDays.ONE_WEEK,
+            grafana_version="12.0",
+        )
+
+    @classmethod
+    def for_stg(cls, cluster_name: str = "eks-cluster-stg") -> ClusterConfig:
+        return cls(
+            cluster_name=cluster_name,
+            nat_gateways=1,
+            system_instance_type="m8g.large",
+            system_min_size=3,
+            system_max_size=6,
+            system_desired_size=3,
+            kafka_instance_type="r8g.large",
+            addon_versions=dict(_ADDON_VERSIONS_K8S_135),
+            strimzi_version="1.0.0",
+            adot_chart_version="0.153.0",
+            fluent_bit_chart_version="0.57.3",
+            log_retention=logs.RetentionDays.ONE_MONTH,
+            grafana_version="12.0",
+        )
+
+    @classmethod
+    def for_prd(cls, cluster_name: str = "eks-cluster") -> ClusterConfig:
+        return cls(
+            cluster_name=cluster_name,
+            nat_gateways=3,
+            system_instance_type="m8g.large",
+            system_min_size=3,
+            system_max_size=6,
+            system_desired_size=3,
+            kafka_instance_type="r8g.large",
+            addon_versions=dict(_ADDON_VERSIONS_K8S_135),
+            strimzi_version="1.0.0",
+            adot_chart_version="0.153.0",
+            fluent_bit_chart_version="0.57.3",
+            log_retention=logs.RetentionDays.ONE_MONTH,
+            grafana_version="12.0",
+        )

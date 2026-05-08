@@ -10,6 +10,7 @@ class NetworkConstruct(Construct):
         scope: Construct,
         construct_id: str,
         nlb_ports: list[tuple[str, int, int]],
+        nat_gateways: int = 3,
     ) -> None:
         super().__init__(scope, construct_id)
 
@@ -18,7 +19,7 @@ class NetworkConstruct(Construct):
             "Vpc",
             ip_addresses=ec2.IpAddresses.cidr("10.0.0.0/16"),
             max_azs=3,
-            nat_gateways=3,
+            nat_gateways=nat_gateways,
             subnet_configuration=[
                 ec2.SubnetConfiguration(
                     name="Public",

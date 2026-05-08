@@ -8,6 +8,7 @@ from aws_cdk import aws_iam as iam
 from aws_cdk import aws_logs as logs
 from constructs import Construct
 
+from ekscdk.config import ClusterConfig
 from ekscdk.constructs._manifest import load, load_all, load_with_subs, manifest_dir
 
 _DIR = manifest_dir("monitoring")
@@ -28,21 +29,21 @@ class MonitoringConstruct(Construct):
       - JMX Prometheus Exporter（Strimzi 組み込み）: ブローカー内部メトリクス → ADOT kubernetes_sd 経由で AMP へ
     """
 
-    def __init__(self, scope: Construct, construct_id: str, cluster: eks.ICluster, cluster_name: str = "eks-cluster") -> None:
+    def __init__(self, scope: Construct, construct_id: str, cluster: eks.ICluster, config: ClusterConfig) -> None:
         super().__init__(scope, construct_id)
 
         region = Stack.of(self).region
 
         # ── AMP ──────────────────────────────────────────────────────────────
-        amp_workspace = aps.CfnWorkspace(self, "AmpWorkspace", alias=cluster_name)
+        amp_workspace = aps.CfnWorkspace(self, "AmpWorkspace", alias=config.cluster_name)
         amp_remote_write_url = f"{amp_workspace.attr_prometheus_endpoint}api/v1/remote_write"
 
         # ── CloudWatch Log Group ──────────────────────────────────────────────
         log_group = logs.LogGroup(
             self,
             "ApplicationLogGroup",
-            log_group_name=f"/aws/eks/{cluster_name}/application",
-            retention=logs.RetentionDays.ONE_MONTH,
+            log_group_name=f"/aws/eks/{config.cluster_name}/application",
+            retention=config.log_retention,
         )
 
         # ── monitoring Namespace ──────────────────────────────────────────────
@@ -80,10 +81,15 @@ class MonitoringConstruct(Construct):
                 ],
                 resources=["*"],
             ),
-            # CloudWatch: Container Insights が動的にロググループを作成するため CreateLogGroup は *
+            # cloudwatch:PutMetricData はリソース指定不可のため * が必須
             iam.PolicyStatement(
-                actions=["cloudwatch:PutMetricData", "logs:CreateLogGroup"],
+                actions=["cloudwatch:PutMetricData"],
                 resources=["*"],
+            ),
+            # Container Insights が動的に作成するロググループを /aws/containerinsights/* に限定
+            iam.PolicyStatement(
+                actions=["logs:CreateLogGroup"],
+                resources=["arn:*:logs:*:*:log-group:/aws/containerinsights/*"],
             ),
             iam.PolicyStatement(
                 actions=["logs:CreateLogStream", "logs:PutLogEvents", "logs:DescribeLogGroups", "logs:DescribeLogStreams"],
@@ -129,13 +135,13 @@ class MonitoringConstruct(Construct):
         grafana.CfnWorkspace(
             self,
             "AmgWorkspace",
-            name=f"{cluster_name}-grafana",
+            name=f"{config.cluster_name}-grafana",
             account_access_type="CURRENT_ACCOUNT",
             authentication_providers=[amg_auth_provider],
             permission_type="SERVICE_MANAGED",
             role_arn=amg_role.role_arn,
             data_sources=["PROMETHEUS"],
-            grafana_version="12.0",
+            grafana_version=config.grafana_version,
         )
 
         # ── ADOT DaemonSet（Helm）────────────────────────────────────────────
@@ -144,7 +150,7 @@ class MonitoringConstruct(Construct):
             chart="opentelemetry-collector",
             repository="https://open-telemetry.github.io/opentelemetry-helm-charts",
             namespace="monitoring",
-            version="0.153.0",
+            version=config.adot_chart_version,
             values=load_with_subs(
                 _DIR, "adot-values.yaml",
                 REGION=region,
@@ -160,7 +166,7 @@ class MonitoringConstruct(Construct):
             chart="fluent-bit",
             repository="https://fluent.github.io/helm-charts",
             namespace="monitoring",
-            version="0.57.3",
+            version=config.fluent_bit_chart_version,
             values=load_with_subs(
                 _DIR, "fluent-bit-values.yaml",
                 REGION=region,
