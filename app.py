@@ -18,9 +18,10 @@ env = cdk.Environment(
 # Stack 0: IAM ロール（EksCdkStack より先にデプロイ）
 iam_stack = IamStack(app, "IamStack", env=env)
 
-# Stack 1: VPC / EKS / アドオン / ArgoCD + Bootstrap Application
-# 必須: -c repo-url=<GitリポジトリURL>
-# git push → ArgoCD が manifests/ を自動同期
+# Stack 1: VPC / EKS / アドオン / Kafka / 監視
+# Kubernetes リソースは CDK が直接 apply する。
+# ブローカー数変更時に EKS ノードグループ（AWS リソース）も連動するため
+# GitOps のみでは完結せず、cdk deploy が常に必要。（詳細は README 参照）
 infra_stack = EksCdkStack(
     app,
     "EksCdkStack",

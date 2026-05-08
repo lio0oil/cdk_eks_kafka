@@ -58,6 +58,19 @@ EKS cluster-admin ロール（`eks-cluster-admin`）を作成する。`EksCdkSta
 - **Kafka Cluster**（manifests/kafka/ の YAML を CDK でロードして apply）
 - 監視環境（ADOT / Fluent Bit / AMP / AMG / CloudWatch Log Group）
 
+## GitOps（ArgoCD）を採用しない理由
+
+Kubernetes リソースは ArgoCD ではなく CDK（`cluster.add_manifest()` / `add_helm_chart()`）が直接 apply する設計を採用している。
+
+GitOps の核心的なメリットは「git push だけで変更が完結する」点にある。しかし本構成では **ブローカー数の変更が Kubernetes リソースと AWS リソースを同時に変更する** ため、この前提が成立しない。
+
+具体的には、`kafka-cluster.yaml` の `configuration.brokers` を編集してブローカーを増減すると：
+
+1. `KafkaNodePool` の `replicas`（Kubernetes）が変わる
+2. EKS ノードグループの `min_size` / `max_size`（AWS CloudFormation）が変わる
+
+②は GitOps の管轄外であり `cdk deploy` が必ず必要になる。ArgoCD を導入しても git push だけでは完結しないため、GitOps のメリットが得られない。
+
 ## 管理の分担
 
 | 管理対象 | 管理主体 | 理由 |
