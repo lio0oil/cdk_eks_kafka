@@ -117,7 +117,7 @@ config:
     awscloudwatch:
       region: <REGION>
       namespace: EKS/ContainerInsights
-      log_group_name: /aws/eks/eks-cluster/performance
+      log_group_name: /aws/eks/<CLUSTER_NAME>/performance
 
   extensions:
     sigv4auth:

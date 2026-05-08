@@ -155,6 +155,7 @@ class MonitoringConstruct(Construct):
                 _DIR, "adot-values.yaml",
                 REGION=region,
                 AMP_REMOTE_WRITE_URL=amp_remote_write_url,
+                CLUSTER_NAME=config.cluster_name,
             ),
         )
         adot.node.add_dependency(adot_sa)
