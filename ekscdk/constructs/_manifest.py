@@ -34,11 +34,16 @@ def parse_kafka_nlb_ports(base_dir: str) -> list[tuple[str, int, int]]:
     host プレースホルダーが残っていても yaml.safe_load は文字列として読めるため問題ない。
     """
     manifest = load(base_dir, "kafka-cluster.yaml")
-    external = next(
-        l for l in manifest["spec"]["kafka"]["listeners"]
-        if l["name"] == "external"
-    )
-    cfg = external["configuration"]
+    listeners = manifest["spec"]["kafka"]["listeners"]
+    external = next((l for l in listeners if l["name"] == "external"), None)
+    if external is None:
+        raise ValueError(
+            "kafka-cluster.yaml に 'external' リスナーが見つかりません。"
+            f"定義済みリスナー: {[l['name'] for l in listeners]}"
+        )
+    cfg = external.get("configuration")
+    if cfg is None:
+        raise ValueError("kafka-cluster.yaml の external リスナーに configuration が定義されていません。")
     return [("Bootstrap", external["port"], cfg["bootstrap"]["nodePort"])] + [
         (f"Broker{b['broker']}", b["advertisedPort"], b["nodePort"])
         for b in cfg["brokers"]
