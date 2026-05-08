@@ -46,10 +46,22 @@ spec:
       min.insync.replicas: 2
     rack:
       topologyKey: topology.kubernetes.io/zone
+    metricsConfig:
+      type: jmxPrometheusExporter
+      valueFrom:
+        configMapKeyRef:
+          name: kafka-metrics
+          key: kafka-metrics-config.yml
   kafkaExporter:
     topicRegex: ".*"
     groupRegex: ".*"
-  cruiseControl: {}
+  cruiseControl:
+    metricsConfig:
+      type: jmxPrometheusExporter
+      valueFrom:
+        configMapKeyRef:
+          name: kafka-metrics
+          key: cruise-control-config.yml
   entityOperator:
     topicOperator: {}
     userOperator: {}

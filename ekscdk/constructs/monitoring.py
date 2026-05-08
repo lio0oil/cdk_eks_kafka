@@ -21,6 +21,7 @@ class MonitoringConstruct(Construct):
       - ADOT DaemonSet: メトリクス → AMP + CloudWatch、トレース → X-Ray
       - Fluent Bit DaemonSet: ログ → CloudWatch Logs
       - Kafka Exporter（Strimzi 組み込み）: Consumer Lag メトリクス → ADOT 経由で AMP へ
+      - JMX Prometheus Exporter（Strimzi 組み込み）: ブローカー内部メトリクス → ADOT kubernetes_sd 経由で AMP へ
     """
 
     def __init__(self, scope: Construct, construct_id: str, cluster: eks.ICluster) -> None:
@@ -44,6 +45,43 @@ class MonitoringConstruct(Construct):
         namespace = cluster.add_manifest(
             "MonitoringNamespace",
             {"apiVersion": "v1", "kind": "Namespace", "metadata": {"name": "monitoring"}},
+        )
+
+        # ── ADOT RBAC（Pod ディスカバリ用）────────────────────────────────────
+        adot_cluster_role = cluster.add_manifest(
+            "AdotClusterRole",
+            {
+                "apiVersion": "rbac.authorization.k8s.io/v1",
+                "kind": "ClusterRole",
+                "metadata": {"name": "adot-collector"},
+                "rules": [
+                    {
+                        "apiGroups": [""],
+                        "resources": ["nodes", "pods", "services", "endpoints", "namespaces"],
+                        "verbs": ["get", "list", "watch"],
+                    },
+                ],
+            },
+        )
+        adot_cluster_role_binding = cluster.add_manifest(
+            "AdotClusterRoleBinding",
+            {
+                "apiVersion": "rbac.authorization.k8s.io/v1",
+                "kind": "ClusterRoleBinding",
+                "metadata": {"name": "adot-collector"},
+                "roleRef": {
+                    "apiGroup": "rbac.authorization.k8s.io",
+                    "kind": "ClusterRole",
+                    "name": "adot-collector",
+                },
+                "subjects": [
+                    {
+                        "kind": "ServiceAccount",
+                        "name": "adot-collector",
+                        "namespace": "monitoring",
+                    }
+                ],
+            },
         )
 
         # ── ADOT IRSA ─────────────────────────────────────────────────────────
@@ -136,6 +174,12 @@ class MonitoringConstruct(Construct):
                 },
                 "serviceAccount": {"create": False, "name": "adot-collector"},
                 "tolerations": [{"operator": "Exists"}],
+                "extraEnvs": [
+                    {
+                        "name": "K8S_NODE_NAME",
+                        "valueFrom": {"fieldRef": {"fieldPath": "spec.nodeName"}},
+                    }
+                ],
                 "resources": {
                     "requests": {"memory": "256Mi", "cpu": "100m"},
                     "limits": {"memory": "512Mi", "cpu": "200m"},
@@ -157,7 +201,49 @@ class MonitoringConstruct(Construct):
                                         "static_configs": [
                                             {"targets": ["kafka-cluster-kafka-exporter.kafka.svc.cluster.local:9404"]}
                                         ],
-                                    }
+                                    },
+                                    {
+                                        "job_name": "kafka-jmx",
+                                        "kubernetes_sd_configs": [
+                                            {
+                                                "role": "pod",
+                                                "namespaces": {"names": ["kafka"]},
+                                            }
+                                        ],
+                                        "relabel_configs": [
+                                            {
+                                                "source_labels": ["__meta_kubernetes_pod_label_strimzi_io_kind"],
+                                                "action": "keep",
+                                                "regex": "Kafka",
+                                            },
+                                            {
+                                                "source_labels": ["__meta_kubernetes_pod_node_name"],
+                                                "action": "keep",
+                                                "regex": "${K8S_NODE_NAME}",
+                                            },
+                                            {
+                                                "source_labels": ["__meta_kubernetes_pod_container_port_name"],
+                                                "action": "keep",
+                                                "regex": "tcp-prometheus",
+                                            },
+                                            {
+                                                "source_labels": ["__meta_kubernetes_namespace"],
+                                                "target_label": "namespace",
+                                            },
+                                            {
+                                                "source_labels": ["__meta_kubernetes_pod_name"],
+                                                "target_label": "pod",
+                                            },
+                                            {
+                                                "source_labels": ["__meta_kubernetes_pod_label_strimzi_io_cluster"],
+                                                "target_label": "kafka_cluster",
+                                            },
+                                            {
+                                                "source_labels": ["__meta_kubernetes_pod_label_strimzi_io_pool_name"],
+                                                "target_label": "pool",
+                                            },
+                                        ],
+                                    },
                                 ]
                             }
                         },
@@ -205,6 +291,7 @@ class MonitoringConstruct(Construct):
             },
         )
         adot.node.add_dependency(adot_sa)
+        adot.node.add_dependency(adot_cluster_role_binding)
 
         # ── Fluent Bit DaemonSet（Helm）───────────────────────────────────────
         fluent_bit = cluster.add_helm_chart(

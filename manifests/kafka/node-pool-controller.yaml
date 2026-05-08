@@ -16,6 +16,7 @@ spec:
         type: persistent-claim
         size: 20Gi
         class: gp3
+        kraftMetadata: shared
         deleteClaim: false
   resources:
     requests:
@@ -50,7 +51,7 @@ spec:
       topologySpreadConstraints:
         - maxSkew: 1
           topologyKey: topology.kubernetes.io/zone
-          whenUnsatisfiable: DoNotSchedule
+          whenUnsatisfiable: ScheduleAnyway
           labelSelector:
             matchLabels:
               strimzi.io/name: kafka-cluster-controller
