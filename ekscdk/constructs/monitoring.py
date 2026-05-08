@@ -1,4 +1,3 @@
-import os
 from typing import cast
 
 from aws_cdk import Stack
@@ -9,9 +8,9 @@ from aws_cdk import aws_iam as iam
 from aws_cdk import aws_logs as logs
 from constructs import Construct
 
-from ekscdk.constructs._manifest import load, load_all, load_with_subs
+from ekscdk.constructs._manifest import load, load_all, load_with_subs, manifest_dir
 
-_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "manifests", "monitoring")
+_DIR = manifest_dir("monitoring")
 
 
 class MonitoringConstruct(Construct):
@@ -48,12 +47,12 @@ class MonitoringConstruct(Construct):
 
         # ── monitoring Namespace ──────────────────────────────────────────────
         namespace = cluster.add_manifest(
-            "MonitoringNamespace", load(os.path.join(_DIR, "namespace.yaml"))
+            "MonitoringNamespace", load(_DIR,"namespace.yaml")
         )
 
         # ── ADOT RBAC（Pod ディスカバリ用）────────────────────────────────────
         adot_rbac = cluster.add_manifest(
-            "AdotRbac", *load_all(os.path.join(_DIR, "adot-rbac.yaml"))
+            "AdotRbac", *load_all(_DIR,"adot-rbac.yaml")
         )
 
         # ── ADOT IRSA ─────────────────────────────────────────────────────────
@@ -137,7 +136,7 @@ class MonitoringConstruct(Construct):
             namespace="monitoring",
             version="0.108.0",
             values=load_with_subs(
-                os.path.join(_DIR, "adot-values.yaml"),
+                _DIR, "adot-values.yaml",
                 REGION=region,
                 AMP_REMOTE_WRITE_URL=amp_remote_write_url,
             ),
@@ -153,7 +152,7 @@ class MonitoringConstruct(Construct):
             namespace="monitoring",
             version="0.47.9",
             values=load_with_subs(
-                os.path.join(_DIR, "fluent-bit-values.yaml"),
+                _DIR, "fluent-bit-values.yaml",
                 REGION=region,
                 LOG_GROUP_NAME=log_group.log_group_name,
             ),
