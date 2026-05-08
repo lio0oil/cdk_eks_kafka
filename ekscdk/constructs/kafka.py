@@ -44,8 +44,7 @@ class KafkaConstruct(Construct):
 
         # ── Namespace ─────────────────────────────────────────────────────────
         namespace = cluster.add_manifest(
-            "KafkaNamespace",
-            {"apiVersion": "v1", "kind": "Namespace", "metadata": {"name": "kafka"}},
+            "KafkaNamespace", load(os.path.join(_DIR, "namespace.yaml"))
         )
 
         # ── JMX メトリクス ConfigMap ──────────────────────────────────────────

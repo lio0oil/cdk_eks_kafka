@@ -9,7 +9,7 @@ from aws_cdk import aws_iam as iam
 from aws_cdk import aws_logs as logs
 from constructs import Construct
 
-from ekscdk.constructs._manifest import load_with_subs
+from ekscdk.constructs._manifest import load, load_all, load_with_subs
 
 _DIR = os.path.join(os.path.dirname(__file__), "..", "..", "manifests", "monitoring")
 
@@ -48,47 +48,13 @@ class MonitoringConstruct(Construct):
 
         # ── monitoring Namespace ──────────────────────────────────────────────
         namespace = cluster.add_manifest(
-            "MonitoringNamespace",
-            {"apiVersion": "v1", "kind": "Namespace", "metadata": {"name": "monitoring"}},
+            "MonitoringNamespace", load(os.path.join(_DIR, "namespace.yaml"))
         )
 
         # ── ADOT RBAC（Pod ディスカバリ用）────────────────────────────────────
-        adot_cluster_role = cluster.add_manifest(
-            "AdotClusterRole",
-            {
-                "apiVersion": "rbac.authorization.k8s.io/v1",
-                "kind": "ClusterRole",
-                "metadata": {"name": "adot-collector"},
-                "rules": [
-                    {
-                        "apiGroups": [""],
-                        "resources": ["nodes", "pods", "services", "endpoints", "namespaces"],
-                        "verbs": ["get", "list", "watch"],
-                    },
-                ],
-            },
+        adot_rbac = cluster.add_manifest(
+            "AdotRbac", *load_all(os.path.join(_DIR, "adot-rbac.yaml"))
         )
-        adot_cluster_role_binding = cluster.add_manifest(
-            "AdotClusterRoleBinding",
-            {
-                "apiVersion": "rbac.authorization.k8s.io/v1",
-                "kind": "ClusterRoleBinding",
-                "metadata": {"name": "adot-collector"},
-                "roleRef": {
-                    "apiGroup": "rbac.authorization.k8s.io",
-                    "kind": "ClusterRole",
-                    "name": "adot-collector",
-                },
-                "subjects": [
-                    {
-                        "kind": "ServiceAccount",
-                        "name": "adot-collector",
-                        "namespace": "monitoring",
-                    }
-                ],
-            },
-        )
-        adot_cluster_role_binding.node.add_dependency(adot_cluster_role)
 
         # ── ADOT IRSA ─────────────────────────────────────────────────────────
         adot_sa = cluster.add_service_account("AdotSa", name="adot-collector", namespace="monitoring")
@@ -177,7 +143,7 @@ class MonitoringConstruct(Construct):
             ),
         )
         adot.node.add_dependency(adot_sa)
-        adot.node.add_dependency(adot_cluster_role_binding)
+        adot.node.add_dependency(adot_rbac)
 
         # ── Fluent Bit DaemonSet（Helm）───────────────────────────────────────
         fluent_bit = cluster.add_helm_chart(

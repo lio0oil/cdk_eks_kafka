@@ -1,6 +1,12 @@
+import os
+
 from aws_cdk import aws_eks_v2 as eks
 from aws_cdk import aws_iam as iam
 from constructs import Construct
+
+from ekscdk.constructs._manifest import load
+
+_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "manifests", "addons")
 
 
 class AddonsConstruct(Construct):
@@ -51,26 +57,7 @@ class AddonsConstruct(Construct):
         )
 
     def _add_strimzi(self) -> None:
-        self._cluster.add_manifest(
-            "Gp3StorageClass",
-            {
-                "apiVersion": "storage.k8s.io/v1",
-                "kind": "StorageClass",
-                "metadata": {
-                    "name": "gp3",
-                    "annotations": {
-                        "storageclass.kubernetes.io/is-default-class": "true"
-                    },
-                },
-                "provisioner": "ebs.csi.aws.com",
-                "volumeBindingMode": "WaitForFirstConsumer",
-                "reclaimPolicy": "Retain",
-                "parameters": {
-                    "type": "gp3",
-                    "encrypted": "true",
-                },
-            },
-        )
+        self._cluster.add_manifest("Gp3StorageClass", load(os.path.join(_DIR, "gp3-storageclass.yaml")))
 
         self._cluster.add_helm_chart(
             "StrimziOperator",
