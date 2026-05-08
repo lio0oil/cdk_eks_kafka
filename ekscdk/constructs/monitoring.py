@@ -244,6 +244,74 @@ class MonitoringConstruct(Construct):
                                             },
                                         ],
                                     },
+                                    {
+                                        "job_name": "strimzi-cluster-operator",
+                                        "kubernetes_sd_configs": [
+                                            {
+                                                "role": "pod",
+                                                "namespaces": {"names": ["strimzi-system"]},
+                                            }
+                                        ],
+                                        "relabel_configs": [
+                                            {
+                                                "source_labels": ["__meta_kubernetes_pod_label_strimzi_io_kind"],
+                                                "action": "keep",
+                                                "regex": "cluster-operator",
+                                            },
+                                            {
+                                                "source_labels": ["__meta_kubernetes_pod_node_name"],
+                                                "action": "keep",
+                                                "regex": "${K8S_NODE_NAME}",
+                                            },
+                                            {
+                                                "source_labels": ["__meta_kubernetes_pod_container_port_name"],
+                                                "action": "keep",
+                                                "regex": "http",
+                                            },
+                                            {
+                                                "source_labels": ["__meta_kubernetes_namespace"],
+                                                "target_label": "namespace",
+                                            },
+                                            {
+                                                "source_labels": ["__meta_kubernetes_pod_name"],
+                                                "target_label": "pod",
+                                            },
+                                        ],
+                                    },
+                                    {
+                                        "job_name": "strimzi-entity-operator",
+                                        "kubernetes_sd_configs": [
+                                            {
+                                                "role": "pod",
+                                                "namespaces": {"names": ["kafka"]},
+                                            }
+                                        ],
+                                        "relabel_configs": [
+                                            {
+                                                "source_labels": ["__meta_kubernetes_pod_label_app_kubernetes_io_name"],
+                                                "action": "keep",
+                                                "regex": "entity-operator",
+                                            },
+                                            {
+                                                "source_labels": ["__meta_kubernetes_pod_node_name"],
+                                                "action": "keep",
+                                                "regex": "${K8S_NODE_NAME}",
+                                            },
+                                            {
+                                                "source_labels": ["__meta_kubernetes_pod_container_port_name"],
+                                                "action": "keep",
+                                                "regex": "healthcheck",
+                                            },
+                                            {
+                                                "source_labels": ["__meta_kubernetes_namespace"],
+                                                "target_label": "namespace",
+                                            },
+                                            {
+                                                "source_labels": ["__meta_kubernetes_pod_name"],
+                                                "target_label": "pod",
+                                            },
+                                        ],
+                                    },
                                 ]
                             }
                         },
