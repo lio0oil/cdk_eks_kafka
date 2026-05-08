@@ -148,7 +148,7 @@ class MonitoringConstruct(Construct):
         adot = cluster.add_helm_chart(
             "AdotCollector",
             chart="opentelemetry-collector",
-            repository="https://open-telemetry.github.io/opentelemetry-helm-charts",
+            repository=config.adot_chart_repo,
             namespace="monitoring",
             version=config.adot_chart_version,
             values=load_with_subs(
@@ -164,7 +164,7 @@ class MonitoringConstruct(Construct):
         fluent_bit = cluster.add_helm_chart(
             "FluentBit",
             chart="fluent-bit",
-            repository="https://fluent.github.io/helm-charts",
+            repository=config.fluent_bit_chart_repo,
             namespace="monitoring",
             version=config.fluent_bit_chart_version,
             values=load_with_subs(

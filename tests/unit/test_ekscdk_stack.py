@@ -13,8 +13,9 @@ from ekscdk.constructs._manifest import manifest_dir, parse_kafka_nlb_ports
 def _app_stacks():
     app = core.App()
     env = core.Environment(account="123456789012", region="ap-northeast-1")
-    iam_stack = IamStack(app, "IamStack", admin_principal=iam.AccountRootPrincipal(), env=env)
-    infra_stack = EksCdkStack(app, "ekscdk", admin_role=iam_stack.eks_admin_role, config=ClusterConfig.for_prd(), env=env)
+    _config = ClusterConfig.for_prd()
+    iam_stack = IamStack(app, "IamStack", admin_principal=iam.AccountRootPrincipal(), role_name=_config.admin_role_name, env=env)
+    infra_stack = EksCdkStack(app, "ekscdk", admin_role=iam_stack.eks_admin_role, config=_config, env=env)
     return {
         "iam": assertions.Template.from_stack(iam_stack),
         "infra": assertions.Template.from_stack(infra_stack),

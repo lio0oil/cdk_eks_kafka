@@ -25,13 +25,20 @@ class IamStack(Stack):
     EKS Access Entry に登録）。
     """
 
-    def __init__(self, scope: Construct, construct_id: str, admin_principal: iam.IPrincipal, **kwargs) -> None:
+    def __init__(
+        self,
+        scope: Construct,
+        construct_id: str,
+        admin_principal: iam.IPrincipal,
+        role_name: str = "eks-cluster-admin",
+        **kwargs,
+    ) -> None:
         super().__init__(scope, construct_id, **kwargs)
 
         self.eks_admin_role = iam.Role(
             self,
             "EksAdminRole",
-            role_name="eks-cluster-admin",
+            role_name=role_name,
             description="EKS cluster-admin role (Kubernetes system:masters).",
             assumed_by=admin_principal,
         )

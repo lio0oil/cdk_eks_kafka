@@ -27,9 +27,11 @@ class ClusterConfig:
     環境ごとの差分は for_dev / for_stg / for_prd ファクトリで定義する。
     バージョン・インスタンスタイプ・スケール設定をすべてここで管理し、
     各 Construct へ引数として渡すことでハードコードを排除する。
+    prd が閉域網の場合など環境ごとに *_chart_repo フィールドで内部ミラーを指定できる。
     """
 
     cluster_name: str
+    admin_role_name: str
     nat_gateways: int
     system_instance_type: str
     system_min_size: int
@@ -38,8 +40,11 @@ class ClusterConfig:
     kafka_instance_type: str
     addon_versions: dict[str, str]
     strimzi_version: str
+    strimzi_chart_repo: str
     adot_chart_version: str
+    adot_chart_repo: str
     fluent_bit_chart_version: str
+    fluent_bit_chart_repo: str
     log_retention: logs.RetentionDays
     grafana_version: str
 
@@ -47,6 +52,7 @@ class ClusterConfig:
     def for_dev(cls, cluster_name: str = "eks-cluster-dev") -> ClusterConfig:
         return cls(
             cluster_name=cluster_name,
+            admin_role_name=f"eks-cluster-admin-{cluster_name}",
             nat_gateways=1,
             system_instance_type="m8g.large",
             system_min_size=2,
@@ -55,8 +61,11 @@ class ClusterConfig:
             kafka_instance_type="r8g.large",
             addon_versions=dict(_ADDON_VERSIONS_K8S_135),
             strimzi_version="1.0.0",
+            strimzi_chart_repo="https://strimzi.io/charts/",
             adot_chart_version="0.153.0",
+            adot_chart_repo="https://open-telemetry.github.io/opentelemetry-helm-charts",
             fluent_bit_chart_version="0.57.3",
+            fluent_bit_chart_repo="https://fluent.github.io/helm-charts",
             log_retention=logs.RetentionDays.ONE_WEEK,
             grafana_version="12.0",
         )
@@ -65,6 +74,7 @@ class ClusterConfig:
     def for_stg(cls, cluster_name: str = "eks-cluster-stg") -> ClusterConfig:
         return cls(
             cluster_name=cluster_name,
+            admin_role_name=f"eks-cluster-admin-{cluster_name}",
             nat_gateways=1,
             system_instance_type="m8g.large",
             system_min_size=3,
@@ -73,8 +83,11 @@ class ClusterConfig:
             kafka_instance_type="r8g.large",
             addon_versions=dict(_ADDON_VERSIONS_K8S_135),
             strimzi_version="1.0.0",
+            strimzi_chart_repo="https://strimzi.io/charts/",
             adot_chart_version="0.153.0",
+            adot_chart_repo="https://open-telemetry.github.io/opentelemetry-helm-charts",
             fluent_bit_chart_version="0.57.3",
+            fluent_bit_chart_repo="https://fluent.github.io/helm-charts",
             log_retention=logs.RetentionDays.ONE_MONTH,
             grafana_version="12.0",
         )
@@ -83,6 +96,7 @@ class ClusterConfig:
     def for_prd(cls, cluster_name: str = "eks-cluster") -> ClusterConfig:
         return cls(
             cluster_name=cluster_name,
+            admin_role_name="eks-cluster-admin",
             nat_gateways=3,
             system_instance_type="m8g.large",
             system_min_size=3,
@@ -91,8 +105,11 @@ class ClusterConfig:
             kafka_instance_type="r8g.large",
             addon_versions=dict(_ADDON_VERSIONS_K8S_135),
             strimzi_version="1.0.0",
+            strimzi_chart_repo="https://strimzi.io/charts/",
             adot_chart_version="0.153.0",
+            adot_chart_repo="https://open-telemetry.github.io/opentelemetry-helm-charts",
             fluent_bit_chart_version="0.57.3",
+            fluent_bit_chart_repo="https://fluent.github.io/helm-charts",
             log_retention=logs.RetentionDays.ONE_MONTH,
             grafana_version="12.0",
         )

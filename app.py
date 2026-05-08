@@ -33,6 +33,7 @@ iam_stack = IamStack(
     app,
     "IamStack",
     admin_principal=iam.AccountRootPrincipal(),  # type: ignore[arg-type]
+    role_name=config.admin_role_name,
     env=env,
 )
 

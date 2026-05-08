@@ -50,7 +50,7 @@ class AddonsConstruct(Construct):
         self._cluster.add_helm_chart(
             "StrimziOperator",
             chart="strimzi-kafka-operator",
-            repository="https://strimzi.io/charts/",
+            repository=self._config.strimzi_chart_repo,
             namespace="strimzi-system",
             create_namespace=True,
             version=self._config.strimzi_version,
