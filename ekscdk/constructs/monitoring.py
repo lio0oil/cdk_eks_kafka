@@ -125,7 +125,7 @@ class MonitoringConstruct(Construct):
             permission_type="SERVICE_MANAGED",
             role_arn=amg_role.role_arn,
             data_sources=["PROMETHEUS"],
-            grafana_version="10.4",
+            grafana_version="12.0",
         )
 
         # ── ADOT DaemonSet（Helm）────────────────────────────────────────────
@@ -134,7 +134,7 @@ class MonitoringConstruct(Construct):
             chart="opentelemetry-collector",
             repository="https://open-telemetry.github.io/opentelemetry-helm-charts",
             namespace="monitoring",
-            version="0.108.0",
+            version="0.153.0",
             values=load_with_subs(
                 _DIR, "adot-values.yaml",
                 REGION=region,
@@ -150,7 +150,7 @@ class MonitoringConstruct(Construct):
             chart="fluent-bit",
             repository="https://fluent.github.io/helm-charts",
             namespace="monitoring",
-            version="0.47.9",
+            version="0.57.3",
             values=load_with_subs(
                 _DIR, "fluent-bit-values.yaml",
                 REGION=region,
