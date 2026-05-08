@@ -1,4 +1,4 @@
-from aws_cdk import Stack
+from aws_cdk import CfnOutput, Stack
 from aws_cdk import aws_iam as iam
 from constructs import Construct
 
@@ -32,3 +32,5 @@ class EksCdkStack(Stack):
             nlb=network.kafka_nlb,
         )
         kafka.node.add_dependency(addons)
+
+        CfnOutput(self, "KafkaNlbDnsName", value=network.kafka_nlb.load_balancer_dns_name)

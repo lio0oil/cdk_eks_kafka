@@ -9,7 +9,10 @@ _DIR = manifest_dir("kafka")
 
 
 def _parse_nlb_ports() -> list[tuple[str, int, int]]:
-    """kafka-cluster.yaml の external listener 設定から (name, listener_port, node_port) を返す。"""
+    """kafka-cluster.yaml の external listener 設定から (name, listener_port, node_port) を返す。
+
+    host プレースホルダーが残っていても yaml.safe_load は文字列として読めるため問題ない。
+    """
     manifest = load(_DIR, "kafka-cluster.yaml")
     external = next(
         l for l in manifest["spec"]["kafka"]["listeners"]
@@ -72,7 +75,10 @@ class KafkaConstruct(Construct):
         broker_pool.node.add_dependency(namespace)
 
         # ── Kafka CR ──────────────────────────────────────────────────────────
-        kafka_cr = cluster.add_manifest("KafkaCluster", load(_DIR,"kafka-cluster.yaml"))
+        kafka_cr = cluster.add_manifest(
+            "KafkaCluster",
+            load_with_subs(_DIR, "kafka-cluster.yaml", KAFKA_ADVERTISED_HOST=nlb.load_balancer_dns_name),
+        )
         kafka_cr.node.add_dependency(cm)
         kafka_cr.node.add_dependency(controller_pool)
         kafka_cr.node.add_dependency(broker_pool)

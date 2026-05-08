@@ -25,17 +25,19 @@ spec:
         tls: true
         configuration:
           bootstrap:
-            # 共有NLBの9094番ポートからここへ転送される
+            host: <KAFKA_ADVERTISED_HOST>
             nodePort: 30094
           brokers:
             - broker: 0
+              host: <KAFKA_ADVERTISED_HOST>
               nodePort: 30095
-              # クライアントが個別ブローカーに繋ぎ直す際のポートを指定
               advertisedPort: 9095
             - broker: 1
+              host: <KAFKA_ADVERTISED_HOST>
               nodePort: 30096
               advertisedPort: 9096
             - broker: 2
+              host: <KAFKA_ADVERTISED_HOST>
               nodePort: 30097
               advertisedPort: 9097
     config:

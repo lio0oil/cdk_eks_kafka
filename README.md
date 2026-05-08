@@ -66,7 +66,7 @@ EKS cluster-admin ロール（`eks-cluster-admin`）を作成する。`EksCdkSta
 | EKS / ノードグループ / アドオン | CDK（EksCdkStack） | インフラ設定 |
 | Strimzi Operator | CDK（EksCdkStack） | バージョン管理をコードで一元化 |
 | 監視コンポーネント（ADOT / Fluent Bit / AMP / AMG） | CDK（EksCdkStack） | AMP エンドポイント等の動的値（CloudFormation トークン）を注入するため |
-| **NLB リスナー / TargetGroup** | CDK（EksCdkStack） | `KafkaConstruct` が CDK ELBv2 で直接管理。ブローカー増設時は `kafka.py` の `_BROKER_PORTS` を編集して `cdk deploy` |
+| **NLB リスナー / TargetGroup** | CDK（EksCdkStack） | `KafkaConstruct` が CDK ELBv2 で直接管理。ブローカー増設時は `kafka-cluster.yaml` の `configuration.brokers` を編集して `cdk deploy` |
 | **Kafka CR（kafka-cluster.yaml 等）** | CDK（EksCdkStack） | `manifests/kafka/` の YAML を CDK がロードして apply。設定変更は YAML 編集 → `cdk deploy` |
 
 ## デプロイ手順
@@ -98,13 +98,28 @@ cdk deploy EksCdkStack
 
 ### 3. Kafka 設定変更
 
-ブローカー設定は `manifests/kafka/kafka-cluster.yaml` を、NLB ポートマッピングは `ekscdk/constructs/kafka.py` の `_BROKER_PORTS` を編集して `cdk deploy` する。
+ブローカー数・ポート設定は `manifests/kafka/kafka-cluster.yaml` が唯一の変更箇所。`node-pool-broker.yaml` の `replicas` と NLB ポートマッピングは CDK が自動で導出する。
 
 ```bash
-vi manifests/kafka/kafka-cluster.yaml        # ブローカー設定
-vi ekscdk/constructs/kafka.py                # NLB ポートマッピング（ブローカー増設時）
+vi manifests/kafka/kafka-cluster.yaml        # ブローカー設定（configuration.brokers を増減）
 cdk deploy EksCdkStack
 ```
+
+### 4. PrivateLink 経由の接続（クライアント側設定）
+
+Kafka ブローカーの advertised host には NLB の DNS 名が自動的に設定される（`cdk deploy` 時に注入）。
+
+クライアント VPC での名前解決は以下の手順で設定する：
+
+1. **VPC Endpoint を作成する**  
+   `cdk deploy` の出力から Endpoint Service 名を取得し、クライアント VPC に Interface Endpoint を作成する。
+
+2. **Route53 エイリアスレコードを作成する**  
+   クライアント VPC の Route53 Private Hosted Zone に、NLB の DNS 名へのエイリアスレコードを作成する。  
+   エイリアス先は `EksCdkStack` の出力 `KafkaNlbDnsName` を参照する。
+
+3. **Kafka クライアントの設定**  
+   `bootstrap.servers` には VPC Endpoint の DNS 名（またはエイリアス先）とポート `9094` を指定する。
 
 ### 4. Grafana ダッシュボード
 
