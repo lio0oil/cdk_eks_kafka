@@ -40,8 +40,11 @@ class AddonsConstruct(Construct):
             "kube-proxy":         "KubeProxy",
             "aws-ebs-csi-driver": "EbsCsiDriver",
         }.items():
-            eks.Addon(self, construct_id, cluster=self._cluster,
-                      addon_name=addon_name, addon_version=self._config.addon_versions[addon_name])
+            addon = eks.Addon(self, construct_id, cluster=self._cluster,
+                              addon_name=addon_name, addon_version=self._config.addon_versions[addon_name])
+            # aws_eks_v2.Addon は ResolveConflicts を公開していないためエスケープハッチで設定する。
+            # OVERWRITE にしないと既存 SA のラベルと衝突してデプロイが失敗する。
+            addon.node.default_child.add_override("Properties.ResolveConflicts", "OVERWRITE")
 
     def _add_strimzi(self) -> None:
         self._cluster.add_manifest("Gp3StorageClass", load(_DIR, "gp3-storageclass.yaml"))
