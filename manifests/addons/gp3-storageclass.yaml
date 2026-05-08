@@ -10,3 +10,5 @@ reclaimPolicy: Retain
 parameters:
   type: gp3
   encrypted: "true"
+  iops: "3000"
+  throughput: "125"
