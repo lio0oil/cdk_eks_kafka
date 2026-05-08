@@ -1,0 +1,138 @@
+mode: daemonset
+image:
+  repository: amazon/aws-otel-collector
+  tag: v0.40.0
+serviceAccount:
+  create: false
+  name: adot-collector
+tolerations:
+  - operator: Exists
+extraEnvs:
+  - name: K8S_NODE_NAME
+    valueFrom:
+      fieldRef:
+        fieldPath: spec.nodeName
+resources:
+  requests:
+    memory: 256Mi
+    cpu: 100m
+  limits:
+    memory: 512Mi
+    cpu: 200m
+config:
+  receivers:
+    otlp:
+      protocols:
+        grpc:
+          endpoint: 0.0.0.0:4317
+        http:
+          endpoint: 0.0.0.0:4318
+    awscontainerinsightreceiver: {}
+    prometheus:
+      config:
+        scrape_configs:
+          - job_name: kafka-exporter
+            static_configs:
+              - targets:
+                  - kafka-cluster-kafka-exporter.kafka.svc.cluster.local:9404
+
+          - job_name: kafka-jmx
+            kubernetes_sd_configs:
+              - role: pod
+                namespaces:
+                  names: [kafka]
+            relabel_configs:
+              - source_labels: [__meta_kubernetes_pod_label_strimzi_io_kind]
+                action: keep
+                regex: Kafka
+              - source_labels: [__meta_kubernetes_pod_node_name]
+                action: keep
+                regex: "${K8S_NODE_NAME}"
+              - source_labels: [__meta_kubernetes_pod_container_port_name]
+                action: keep
+                regex: tcp-prometheus
+              - source_labels: [__meta_kubernetes_namespace]
+                target_label: namespace
+              - source_labels: [__meta_kubernetes_pod_name]
+                target_label: pod
+              - source_labels: [__meta_kubernetes_pod_label_strimzi_io_cluster]
+                target_label: kafka_cluster
+              - source_labels: [__meta_kubernetes_pod_label_strimzi_io_pool_name]
+                target_label: pool
+
+          - job_name: strimzi-cluster-operator
+            kubernetes_sd_configs:
+              - role: pod
+                namespaces:
+                  names: [strimzi-system]
+            relabel_configs:
+              - source_labels: [__meta_kubernetes_pod_label_strimzi_io_kind]
+                action: keep
+                regex: cluster-operator
+              - source_labels: [__meta_kubernetes_pod_node_name]
+                action: keep
+                regex: "${K8S_NODE_NAME}"
+              - source_labels: [__meta_kubernetes_pod_container_port_name]
+                action: keep
+                regex: http
+              - source_labels: [__meta_kubernetes_namespace]
+                target_label: namespace
+              - source_labels: [__meta_kubernetes_pod_name]
+                target_label: pod
+
+          - job_name: strimzi-entity-operator
+            kubernetes_sd_configs:
+              - role: pod
+                namespaces:
+                  names: [kafka]
+            relabel_configs:
+              - source_labels: [__meta_kubernetes_pod_label_app_kubernetes_io_name]
+                action: keep
+                regex: entity-operator
+              - source_labels: [__meta_kubernetes_pod_node_name]
+                action: keep
+                regex: "${K8S_NODE_NAME}"
+              - source_labels: [__meta_kubernetes_pod_container_port_name]
+                action: keep
+                regex: healthcheck
+              - source_labels: [__meta_kubernetes_namespace]
+                target_label: namespace
+              - source_labels: [__meta_kubernetes_pod_name]
+                target_label: pod
+
+  processors:
+    batch: {}
+    memory_limiter:
+      check_interval: 1s
+      limit_percentage: 75
+      spike_limit_percentage: 15
+
+  exporters:
+    awsxray:
+      region: <REGION>
+    prometheusremotewrite:
+      endpoint: <AMP_REMOTE_WRITE_URL>
+      auth:
+        authenticator: sigv4auth
+    awscloudwatch:
+      region: <REGION>
+      namespace: EKS/ContainerInsights
+      log_group_name: /aws/eks/eks-cluster/performance
+
+  extensions:
+    sigv4auth:
+      region: <REGION>
+      service: aps
+    health_check: {}
+
+  service:
+    extensions: [sigv4auth, health_check]
+    pipelines:
+      traces:
+        receivers: [otlp]
+        processors: [batch]
+        exporters: [awsxray]
+      metrics:
+        receivers: [awscontainerinsightreceiver, prometheus]
+        processors: [memory_limiter, batch]
+        exporters: [prometheusremotewrite, awscloudwatch]

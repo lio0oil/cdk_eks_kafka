@@ -1,5 +1,7 @@
+import os
 from typing import cast
 
+import yaml
 from aws_cdk import Stack
 from aws_cdk import aws_aps as aps
 from aws_cdk import aws_eks_v2 as eks
@@ -7,6 +9,16 @@ from aws_cdk import aws_grafana as grafana
 from aws_cdk import aws_iam as iam
 from aws_cdk import aws_logs as logs
 from constructs import Construct
+
+_MANIFESTS_DIR = os.path.join(os.path.dirname(__file__), "..", "..", "manifests", "monitoring")
+
+
+def _load_with_subs(filename: str, **subs: str) -> dict:
+    with open(os.path.join(_MANIFESTS_DIR, filename)) as f:
+        text = f.read()
+    for placeholder, value in subs.items():
+        text = text.replace(f"<{placeholder}>", value)
+    return yaml.safe_load(text)
 
 
 class MonitoringConstruct(Construct):
@@ -134,8 +146,7 @@ class MonitoringConstruct(Construct):
         )
 
         # ── AMG ──────────────────────────────────────────────────────────────
-        # デフォルトは AWS_SSO（IAM Identity Center が有効なアカウントで利用可能）。
-        # SSO 未導入の場合は -c amg-auth-provider=SAML を指定する。
+        # デフォルトは AWS_SSO。SSO 未導入の場合は -c amg-auth-provider=SAML を指定する。
         amg_auth_provider: str = self.node.try_get_context("amg-auth-provider") or "AWS_SSO"
 
         amg_role = iam.Role(
@@ -159,204 +170,17 @@ class MonitoringConstruct(Construct):
         )
 
         # ── ADOT DaemonSet（Helm）────────────────────────────────────────────
-        # amazon/aws-otel-collector イメージ: awscontainerinsightreceiver / awsxray exporter を内包
         adot = cluster.add_helm_chart(
             "AdotCollector",
             chart="opentelemetry-collector",
             repository="https://open-telemetry.github.io/opentelemetry-helm-charts",
             namespace="monitoring",
             version="0.108.0",
-            values={
-                "mode": "daemonset",
-                "image": {
-                    "repository": "amazon/aws-otel-collector",
-                    "tag": "v0.40.0",
-                },
-                "serviceAccount": {"create": False, "name": "adot-collector"},
-                "tolerations": [{"operator": "Exists"}],
-                "extraEnvs": [
-                    {
-                        "name": "K8S_NODE_NAME",
-                        "valueFrom": {"fieldRef": {"fieldPath": "spec.nodeName"}},
-                    }
-                ],
-                "resources": {
-                    "requests": {"memory": "256Mi", "cpu": "100m"},
-                    "limits": {"memory": "512Mi", "cpu": "200m"},
-                },
-                "config": {
-                    "receivers": {
-                        "otlp": {
-                            "protocols": {
-                                "grpc": {"endpoint": "0.0.0.0:4317"},
-                                "http": {"endpoint": "0.0.0.0:4318"},
-                            }
-                        },
-                        "awscontainerinsightreceiver": {},
-                        "prometheus": {
-                            "config": {
-                                "scrape_configs": [
-                                    {
-                                        "job_name": "kafka-exporter",
-                                        "static_configs": [
-                                            {"targets": ["kafka-cluster-kafka-exporter.kafka.svc.cluster.local:9404"]}
-                                        ],
-                                    },
-                                    {
-                                        "job_name": "kafka-jmx",
-                                        "kubernetes_sd_configs": [
-                                            {
-                                                "role": "pod",
-                                                "namespaces": {"names": ["kafka"]},
-                                            }
-                                        ],
-                                        "relabel_configs": [
-                                            {
-                                                "source_labels": ["__meta_kubernetes_pod_label_strimzi_io_kind"],
-                                                "action": "keep",
-                                                "regex": "Kafka",
-                                            },
-                                            {
-                                                "source_labels": ["__meta_kubernetes_pod_node_name"],
-                                                "action": "keep",
-                                                "regex": "${K8S_NODE_NAME}",
-                                            },
-                                            {
-                                                "source_labels": ["__meta_kubernetes_pod_container_port_name"],
-                                                "action": "keep",
-                                                "regex": "tcp-prometheus",
-                                            },
-                                            {
-                                                "source_labels": ["__meta_kubernetes_namespace"],
-                                                "target_label": "namespace",
-                                            },
-                                            {
-                                                "source_labels": ["__meta_kubernetes_pod_name"],
-                                                "target_label": "pod",
-                                            },
-                                            {
-                                                "source_labels": ["__meta_kubernetes_pod_label_strimzi_io_cluster"],
-                                                "target_label": "kafka_cluster",
-                                            },
-                                            {
-                                                "source_labels": ["__meta_kubernetes_pod_label_strimzi_io_pool_name"],
-                                                "target_label": "pool",
-                                            },
-                                        ],
-                                    },
-                                    {
-                                        "job_name": "strimzi-cluster-operator",
-                                        "kubernetes_sd_configs": [
-                                            {
-                                                "role": "pod",
-                                                "namespaces": {"names": ["strimzi-system"]},
-                                            }
-                                        ],
-                                        "relabel_configs": [
-                                            {
-                                                "source_labels": ["__meta_kubernetes_pod_label_strimzi_io_kind"],
-                                                "action": "keep",
-                                                "regex": "cluster-operator",
-                                            },
-                                            {
-                                                "source_labels": ["__meta_kubernetes_pod_node_name"],
-                                                "action": "keep",
-                                                "regex": "${K8S_NODE_NAME}",
-                                            },
-                                            {
-                                                "source_labels": ["__meta_kubernetes_pod_container_port_name"],
-                                                "action": "keep",
-                                                "regex": "http",
-                                            },
-                                            {
-                                                "source_labels": ["__meta_kubernetes_namespace"],
-                                                "target_label": "namespace",
-                                            },
-                                            {
-                                                "source_labels": ["__meta_kubernetes_pod_name"],
-                                                "target_label": "pod",
-                                            },
-                                        ],
-                                    },
-                                    {
-                                        "job_name": "strimzi-entity-operator",
-                                        "kubernetes_sd_configs": [
-                                            {
-                                                "role": "pod",
-                                                "namespaces": {"names": ["kafka"]},
-                                            }
-                                        ],
-                                        "relabel_configs": [
-                                            {
-                                                "source_labels": ["__meta_kubernetes_pod_label_app_kubernetes_io_name"],
-                                                "action": "keep",
-                                                "regex": "entity-operator",
-                                            },
-                                            {
-                                                "source_labels": ["__meta_kubernetes_pod_node_name"],
-                                                "action": "keep",
-                                                "regex": "${K8S_NODE_NAME}",
-                                            },
-                                            {
-                                                "source_labels": ["__meta_kubernetes_pod_container_port_name"],
-                                                "action": "keep",
-                                                "regex": "healthcheck",
-                                            },
-                                            {
-                                                "source_labels": ["__meta_kubernetes_namespace"],
-                                                "target_label": "namespace",
-                                            },
-                                            {
-                                                "source_labels": ["__meta_kubernetes_pod_name"],
-                                                "target_label": "pod",
-                                            },
-                                        ],
-                                    },
-                                ]
-                            }
-                        },
-                    },
-                    "processors": {
-                        "batch": {},
-                        "memory_limiter": {
-                            "check_interval": "1s",
-                            "limit_percentage": 75,
-                            "spike_limit_percentage": 15,
-                        },
-                    },
-                    "exporters": {
-                        "awsxray": {"region": region},
-                        "prometheusremotewrite": {
-                            "endpoint": amp_remote_write_url,
-                            "auth": {"authenticator": "sigv4auth"},
-                        },
-                        "awscloudwatch": {
-                            "region": region,
-                            "namespace": "EKS/ContainerInsights",
-                            "log_group_name": "/aws/eks/eks-cluster/performance",
-                        },
-                    },
-                    "extensions": {
-                        "sigv4auth": {"region": region, "service": "aps"},
-                        "health_check": {},
-                    },
-                    "service": {
-                        "extensions": ["sigv4auth", "health_check"],
-                        "pipelines": {
-                            "traces": {
-                                "receivers": ["otlp"],
-                                "processors": ["batch"],
-                                "exporters": ["awsxray"],
-                            },
-                            "metrics": {
-                                "receivers": ["awscontainerinsightreceiver", "prometheus"],
-                                "processors": ["memory_limiter", "batch"],
-                                "exporters": ["prometheusremotewrite", "awscloudwatch"],
-                            },
-                        },
-                    },
-                },
-            },
+            values=_load_with_subs(
+                "adot-values.yaml",
+                REGION=region,
+                AMP_REMOTE_WRITE_URL=amp_remote_write_url,
+            ),
         )
         adot.node.add_dependency(adot_sa)
         adot.node.add_dependency(adot_cluster_role_binding)
@@ -368,44 +192,10 @@ class MonitoringConstruct(Construct):
             repository="https://fluent.github.io/helm-charts",
             namespace="monitoring",
             version="0.47.9",
-            values={
-                "serviceAccount": {"create": False, "name": "fluent-bit"},
-                "tolerations": [{"operator": "Exists"}],
-                "resources": {
-                    "requests": {"memory": "128Mi", "cpu": "50m"},
-                    "limits": {"memory": "256Mi", "cpu": "200m"},
-                },
-                "config": {
-                    "inputs": (
-                        "[INPUT]\n"
-                        "    Name              tail\n"
-                        "    Tag               kube.*\n"
-                        "    Path              /var/log/containers/*.log\n"
-                        "    multiline.parser  docker, cri\n"
-                        "    DB                /var/log/flb_kube.db\n"
-                        "    Mem_Buf_Limit     5MB\n"
-                    ),
-                    "filters": (
-                        "[FILTER]\n"
-                        "    Name                kubernetes\n"
-                        "    Match               kube.*\n"
-                        "    Kube_URL            https://kubernetes.default.svc:443\n"
-                        "    Kube_CA_File        /var/run/secrets/kubernetes.io/serviceaccount/ca.crt\n"
-                        "    Kube_Token_File     /var/run/secrets/kubernetes.io/serviceaccount/token\n"
-                        "    Merge_Log           On\n"
-                        "    Keep_Log            Off\n"
-                    ),
-                    "outputs": (
-                        "[OUTPUT]\n"
-                        "    Name              cloudwatch_logs\n"
-                        "    Match             kube.*\n"
-                        f"    region            {region}\n"
-                        f"    log_group_name    {log_group.log_group_name}\n"
-                        "    log_stream_prefix from-fluent-bit-\n"
-                        "    auto_create_group false\n"
-                    ),
-                },
-            },
+            values=_load_with_subs(
+                "fluent-bit-values.yaml",
+                REGION=region,
+                LOG_GROUP_NAME=log_group.log_group_name,
+            ),
         )
         fluent_bit.node.add_dependency(fluent_bit_sa)
-
