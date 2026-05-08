@@ -5,7 +5,7 @@ description = "AWS CDK (Python) で EKS 上に Kafka 基盤を構築するプロ
 readme = "README.md"
 requires-python = ">=3.14"
 dependencies = [
-    "aws-cdk-lib>=2.247.0,<3.0.0",
+    "aws-cdk-lib>=2.253.1,<3.0.0",
     "constructs>=10.5.0,<11.0.0",
     "aws-cdk-lambda-layer-kubectl-v35>=2.0.0",
     "pyyaml>=6.0",
