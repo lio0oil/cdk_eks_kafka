@@ -26,7 +26,7 @@ ADOT は DaemonSet（ノード 1 台に 1 Pod）で動くため、`kubernetes_sd
 `kafka-cluster.yaml` の external listener は NodePort 型。共有 NLB → NodePort → Kafka broker の経路で、bootstrap に 30094、broker 0〜2 に 30095〜30097 を使用する。advertised port（9095〜9097）はクライアントがブローカーに繋ぎ直す際のポートで NodePort とは別。
 
 ### Shared NLB の ARN 固定
-NLB 本体は CDK（`NetworkConstruct`）で作成して ARN を固定し、リスナーとターゲットグループは ACK ELBv2 Controller が `manifests/kafka/privatelink.yaml` で管理する。NLB を再作成すると ARN が変わって PrivateLink が壊れるため、`NetworkConstruct` の変更は慎重に行う。
+NLB 本体と VPC Endpoint Service は CDK（`NetworkConstruct`）で作成して ARN を固定する。リスナーとターゲットグループは ACK ELBv2 Controller が `manifests/kafka/privatelink.yaml` の CRD を処理して管理する。NLB を再作成すると ARN が変わって PrivateLink が壊れるため、`NetworkConstruct` の変更は慎重に行う。
 
 ### `manifests/kafka/` は CDK がロードする静的 YAML
 `kafka.py` の `_load()` / `_load_all_with_subs()` が `manifests/kafka/` の YAML をディスクからロードして `cluster.add_manifest()` に渡す。`privatelink.yaml` は `<REPLACE_WITH_CDK_OUTPUT_VpcId>` / `<REPLACE_WITH_CDK_OUTPUT_KafkaSharedNlbArn>` プレースホルダを CDK トークン値で置換してからパースする。`VPCEndpointService` ドキュメントは `NetworkConstruct` で CDK 管理済みのためスキップ。

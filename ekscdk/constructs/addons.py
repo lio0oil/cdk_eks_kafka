@@ -55,50 +55,7 @@ class AddonsConstruct(Construct):
     def _add_ack_controllers(self) -> None:
         region = Stack.of(self).region
 
-        # 1. ACK EC2 Controller (VPC Endpoint Service 管理用)
-        ack_ec2_sa = self._cluster.add_service_account(
-            "AckEc2Sa",
-            name="ack-ec2-controller",
-            namespace="ack-system",
-        )
-        ack_ec2_sa.role.attach_inline_policy(
-            iam.Policy(
-                self,
-                "AckEc2Policy",
-                statements=[
-                    iam.PolicyStatement(
-                        actions=[
-                            "ec2:CreateVpcEndpointServiceConfiguration",
-                            "ec2:DeleteVpcEndpointServiceConfigurations",
-                            "ec2:DescribeVpcEndpointServiceConfigurations",
-                            "ec2:ModifyVpcEndpointServiceConfiguration",
-                            "ec2:ModifyVpcEndpointServicePermissions",
-                            "ec2:DescribeVpcEndpointServicePermissions",
-                            "ec2:DescribeVpcEndpointConnections",
-                            "ec2:AcceptVpcEndpointConnections",
-                            "ec2:RejectVpcEndpointConnections",
-                        ],
-                        resources=["*"],
-                    )
-                ],
-            )
-        )
-
-        ec2_helm = self._cluster.add_helm_chart(
-            "AckEc2Controller",
-            chart="ec2-chart",
-            repository="oci://public.ecr.aws/aws-controllers-k8s/ec2-chart",
-            namespace="ack-system",
-            create_namespace=True,
-            version="v1.2.14",
-            values={
-                "aws": {"region": region},
-                "serviceAccount": {"create": False, "name": "ack-ec2-controller"},
-            },
-        )
-        ec2_helm.node.add_dependency(ack_ec2_sa)
-
-        # 2. ACK ELBv2 Controller (Listener / TargetGroup 管理用)
+        # ACK ELBv2 Controller (Listener / TargetGroup 管理用)
         ack_elbv2_sa = self._cluster.add_service_account(
             "AckElbv2Sa",
             name="ack-elbv2-controller",

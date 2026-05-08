@@ -54,7 +54,7 @@ EKS cluster-admin ロール（`eks-cluster-admin`）を作成する。`EksCdkSta
 - EKS クラスター（Kubernetes 1.35）
 - EKS マネージドアドオン（VPC CNI / CoreDNS / kube-proxy / Pod Identity Agent / EBS CSI Driver）
 - **Strimzi Operator**（Helm 直接管理）
-- **ACK EC2 / ELBv2 Controller**（NLB リスナーと PrivateLink を管理）
+- **ACK ELBv2 Controller**（NLB リスナー / TargetGroup を管理）
 - **Kafka Cluster**（manifests/kafka/ の YAML を CDK でロードして apply）
 - 監視環境（ADOT / Fluent Bit / AMP / AMG / CloudWatch Log Group）
 

@@ -1,19 +1,4 @@
-# ── VPC Endpoint Service (ACK EC2) ──
-# networkLoadBalancerARNs: cdk deploy 後の出力 KafkaSharedNlbArn の値を設定する
-apiVersion: ec2.services.k8s.aws/v1alpha1
-kind: VPCEndpointService
-metadata:
-  name: kafka-privatelink
-  namespace: kafka
-spec:
-  networkLoadBalancerARNs:
-    - <REPLACE_WITH_CDK_OUTPUT_KafkaSharedNlbArn>
-  acceptanceRequired: false
-
----
 # ── Target Groups (ACK ELBv2) ──
-# vpcID: cdk deploy 後の出力 VpcId の値を設定する
-
 # Bootstrap (Port 9094 -> NodePort 30094)
 apiVersion: elbv2.services.k8s.aws/v1alpha1
 kind: TargetGroup
@@ -71,9 +56,6 @@ spec:
 
 ---
 # ── Listeners (ACK ELBv2) ──
-# loadBalancerARN: cdk deploy 後の出力 KafkaSharedNlbArn の値を設定する
-# targetGroupRef で同一ファイル内の TargetGroup CR を参照する（ARN 直接指定は不要）
-
 # Bootstrap Listener (9094)
 apiVersion: elbv2.services.k8s.aws/v1alpha1
 kind: Listener
