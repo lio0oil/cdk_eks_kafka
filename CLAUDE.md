@@ -8,7 +8,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 uv sync                      # 依存関係インストール
 uv run pytest                # テスト実行
 uv run pytest tests/unit/test_ekscdk_stack.py::test_stack_synthesizes  # 単一テスト
-cdk synth -c repo-url=https://github.com/example/ekscdk              # synth
+cdk synth                                                              # synth
 ```
 
 ## 非自明な設計判断
@@ -28,5 +28,5 @@ ADOT は DaemonSet（ノード 1 台に 1 Pod）で動くため、`kubernetes_sd
 ### Shared NLB の ARN 固定
 NLB 本体は CDK（`NetworkConstruct`）で作成して ARN を固定し、リスナーとターゲットグループは ACK ELBv2 Controller が `manifests/kafka/privatelink.yaml` で管理する。NLB を再作成すると ARN が変わって PrivateLink が壊れるため、`NetworkConstruct` の変更は慎重に行う。
 
-### `manifests/kafka/` のみ ArgoCD 管理
-監視スタック（ADOT・Fluent Bit）は AMP エンドポイントなど CloudFormation トークンを値に含むため CDK 直接管理。ArgoCD の GitOps 対象は Kafka 設定（変更頻度が高い）に限定している。
+### `manifests/kafka/` は CDK がロードする静的 YAML
+`kafka.py` の `_load()` / `_load_all_with_subs()` が `manifests/kafka/` の YAML をディスクからロードして `cluster.add_manifest()` に渡す。`privatelink.yaml` は `<REPLACE_WITH_CDK_OUTPUT_VpcId>` / `<REPLACE_WITH_CDK_OUTPUT_KafkaSharedNlbArn>` プレースホルダを CDK トークン値で置換してからパースする。`VPCEndpointService` ドキュメントは `NetworkConstruct` で CDK 管理済みのためスキップ。

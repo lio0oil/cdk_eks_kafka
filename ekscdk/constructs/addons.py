@@ -13,7 +13,7 @@ class AddonsConstruct(Construct):
         self._cluster: eks.ICluster = cluster
 
         self._add_eks_addons()
-        self._add_argocd()
+        self._add_strimzi()
         self._add_ack_controllers()
 
     def _add_eks_addons(self) -> None:
@@ -123,7 +123,7 @@ class AddonsConstruct(Construct):
         )
         elbv2_helm.node.add_dependency(ack_elbv2_sa)
 
-    def _add_argocd(self) -> None:
+    def _add_strimzi(self) -> None:
         self._cluster.add_manifest(
             "Gp3StorageClass",
             {
@@ -145,83 +145,15 @@ class AddonsConstruct(Construct):
             },
         )
 
-        repo_url: str = self.node.get_context("repo-url")
-
-        argocd = self._cluster.add_helm_chart(
-            "ArgoCD",
-            chart="argo-cd",
-            repository="https://argoproj.github.io/argo-helm",
-            namespace="argocd",
+        self._cluster.add_helm_chart(
+            "StrimziOperator",
+            chart="strimzi-kafka-operator",
+            repository="https://strimzi.io/charts/",
+            namespace="strimzi-system",
             create_namespace=True,
-            version="7.8.23",
+            version="0.45.0",
             values={
-                "server": {
-                    "replicas": 2,
-                    "autoscaling": {"enabled": True, "minReplicas": 2},
-                    "service": {"type": "ClusterIP"},
-                    "tolerations": [
-                        {"key": "CriticalAddonsOnly", "operator": "Exists"}
-                    ],
-                    "nodeSelector": {"role": "system"},
-                },
-                "applicationSet": {"replicaCount": 2},
-                "controller": {
-                    "tolerations": [
-                        {"key": "CriticalAddonsOnly", "operator": "Exists"}
-                    ],
-                    "nodeSelector": {"role": "system"},
-                },
-                "redis": {
-                    "tolerations": [
-                        {"key": "CriticalAddonsOnly", "operator": "Exists"}
-                    ],
-                    "nodeSelector": {"role": "system"},
-                },
-                "repoServer": {
-                    "tolerations": [
-                        {"key": "CriticalAddonsOnly", "operator": "Exists"}
-                    ],
-                    "nodeSelector": {"role": "system"},
-                },
-                "configs": {
-                    "repositories": {
-                        "github": {
-                            "type": "git",
-                            "url": repo_url,
-                        }
-                    }
-                },
+                "watchNamespaces": ["kafka"],
+                "replicas": 1,
             },
         )
-
-        strimzi = self._cluster.add_manifest(
-            "StrimziOperatorApp",
-            {
-                "apiVersion": "argoproj.io/v1alpha1",
-                "kind": "Application",
-                "metadata": {"name": "strimzi-operator", "namespace": "argocd"},
-                "spec": {
-                    "project": "default",
-                    "source": {
-                        "repoURL": "https://strimzi.io/charts/",
-                        "chart": "strimzi-kafka-operator",
-                        "targetRevision": "0.45.0",
-                        "helm": {
-                            "valuesObject": {
-                                "watchNamespaces": ["kafka"],
-                                "replicas": 1,
-                            }
-                        },
-                    },
-                    "destination": {
-                        "server": "https://kubernetes.default.svc",
-                        "namespace": "strimzi-operator",
-                    },
-                    "syncPolicy": {
-                        "automated": {"prune": True, "selfHeal": True},
-                        "syncOptions": ["CreateNamespace=true"],
-                    },
-                },
-            },
-        )
-        strimzi.node.add_dependency(argocd)

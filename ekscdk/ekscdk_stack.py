@@ -10,11 +10,7 @@ from ekscdk.constructs.network import NetworkConstruct
 
 
 class EksCdkStack(Stack):
-    """インフラ + ArgoCD Stack（VPC / EKS / アドオン / ArgoCD + Bootstrap Application）
-
-    必須コンテキスト:
-      repo-url: GitリポジトリのURL (例: https://github.com/org/ekscdk)
-    """
+    """インフラスタック（VPC / EKS / アドオン / Kafka）"""
 
     def __init__(
         self, scope: Construct, construct_id: str, admin_role: iam.IRole, **kwargs
