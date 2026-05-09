@@ -24,7 +24,7 @@ class AddonsConstruct(Construct):
 
         self._add_eks_addons()
         self._add_strimzi()
-        self._add_aws_lbc()
+        self._aws_lbc_chart = self._add_aws_lbc()
 
     def _add_eks_addons(self) -> None:
         # EBS CSI Driver 用 Pod Identity
@@ -71,7 +71,17 @@ class AddonsConstruct(Construct):
             },
         )
 
-    def _add_aws_lbc(self) -> None:
+    @property
+    def aws_lbc_chart(self) -> eks.HelmChart:
+        """AWS Load Balancer Controller の Helm chart リソース。
+
+        TargetGroupBinding 等、AWS LBC が提供する CRD を使う manifest からは
+        この chart リソースに add_dependency() して CRD インストール後に
+        kubectl apply されるよう順序を担保する。
+        """
+        return self._aws_lbc_chart
+
+    def _add_aws_lbc(self) -> eks.HelmChart:
         """AWS Load Balancer Controller を導入する。
 
         Strimzi の per-broker NodePort Service を NLB の TargetGroup に
@@ -113,3 +123,4 @@ class AddonsConstruct(Construct):
             },
         )
         chart.node.add_dependency(sa)
+        return chart

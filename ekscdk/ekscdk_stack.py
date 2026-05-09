@@ -45,6 +45,7 @@ class EksCdkStack(Stack):
             nlb_ports=nlb_ports,
             nlb_sg_id=network.kafka_nlb_sg.security_group_id,
             external_listener_name=external_listener_name,
+            aws_lbc_chart=addons.aws_lbc_chart,
         )
         kafka.node.add_dependency(addons)
 

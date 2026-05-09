@@ -30,6 +30,7 @@ class KafkaConstruct(Construct):
         nlb_ports: list[tuple[str, int, int]],
         nlb_sg_id: str,
         external_listener_name: str,
+        aws_lbc_chart: eks.HelmChart,
     ) -> None:
         super().__init__(scope, construct_id)
 
@@ -102,3 +103,7 @@ class KafkaConstruct(Construct):
                 ),
             )
             binding.node.add_dependency(kafka_cr)
+            # AWS LBC が提供する CRD (TargetGroupBinding) のインストール完了を待つ。
+            # construct レベルの add_dependency だけでは個別 manifest の DependsOn が
+            # 確実に伝搬しないため、リソース単位で明示する。
+            binding.node.add_dependency(aws_lbc_chart)
