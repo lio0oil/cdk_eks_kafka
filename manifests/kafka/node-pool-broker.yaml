@@ -52,7 +52,6 @@ spec:
                     operator: In
                     values:
                       - broker
-                      - controller
               topologyKey: kubernetes.io/hostname
       topologySpreadConstraints:
         - maxSkew: 1

@@ -51,7 +51,6 @@ spec:
                   - key: strimzi.io/pool-name
                     operator: In
                     values:
-                      - broker
                       - controller
               topologyKey: kubernetes.io/hostname
       topologySpreadConstraints:

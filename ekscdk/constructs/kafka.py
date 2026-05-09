@@ -55,3 +55,10 @@ class KafkaConstruct(Construct):
         kafka_cr.node.add_dependency(cm)
         kafka_cr.node.add_dependency(controller_pool)
         kafka_cr.node.add_dependency(broker_pool)
+
+        # ── Kafka Exporter Service ─────────────────────────────────────────────
+        # Strimzi 1.0.0 は kafka-exporter の Service を自動作成しないため CDK で管理する
+        exporter_svc = cluster.add_manifest(
+            "KafkaExporterService", load(_DIR, "kafka-exporter-service.yaml")
+        )
+        exporter_svc.node.add_dependency(kafka_cr)

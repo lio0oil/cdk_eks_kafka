@@ -59,5 +59,8 @@ class AddonsConstruct(Construct):
             values={
                 "watchNamespaces": ["kafka"],
                 "replicas": 2,
+                "tolerations": [
+                    {"key": "CriticalAddonsOnly", "operator": "Equal", "value": "true", "effect": "NoSchedule"}
+                ],
             },
         )

@@ -1,3 +1,5 @@
+import hashlib
+import json
 from typing import cast
 
 from aws_cdk import Stack
@@ -96,6 +98,14 @@ class MonitoringConstruct(Construct):
                 actions=["logs:CreateLogStream", "logs:PutLogEvents", "logs:DescribeLogGroups", "logs:DescribeLogStreams"],
                 resources=[log_group.log_group_arn, log_group.log_group_arn + ":*"],
             ),
+            # awsemf exporter が /aws/containerinsights/<cluster>/performance に書き込むための権限
+            iam.PolicyStatement(
+                actions=["logs:CreateLogStream", "logs:PutLogEvents", "logs:DescribeLogGroups", "logs:DescribeLogStreams"],
+                resources=[
+                    "arn:*:logs:*:*:log-group:/aws/containerinsights/*",
+                    "arn:*:logs:*:*:log-group:/aws/containerinsights/*:*",
+                ],
+            ),
         ]:
             cast(iam.Role, adot_sa.role).add_to_policy(stmt)
 
@@ -145,20 +155,33 @@ class MonitoringConstruct(Construct):
             grafana_version=config.grafana_version,
         )
 
+        # ── ADOT ConfigMap（Helm chart のデフォルト debug エクスポーターを回避するため直接管理）──
+        adot_configmap_manifest = load_with_subs(
+            _DIR, "adot-configmap.yaml",
+            REGION=region,
+            AMP_REMOTE_WRITE_URL=amp_remote_write_url,
+            CLUSTER_NAME=config.cluster_name,
+        )
+        adot_configmap = cluster.add_manifest("AdotConfigMap", adot_configmap_manifest)
+        adot_configmap.node.add_dependency(namespace)
+
         # ── ADOT DaemonSet（Helm）────────────────────────────────────────────
+        # ConfigMap の内容ハッシュを podAnnotations に仕込み、内容変更時に Pod を自動ロールアウトする
+        adot_config_hash = hashlib.md5(
+            json.dumps(adot_configmap_manifest["data"], sort_keys=True).encode()
+        ).hexdigest()
+        adot_values = load(_DIR, "adot-values.yaml")
+        adot_values.setdefault("podAnnotations", {})["checksum/config"] = adot_config_hash
+
         adot = cluster.add_helm_chart(
             "AdotCollector",
             chart="opentelemetry-collector",
             repository=config.adot_chart_repo,
             namespace="monitoring",
             version=config.adot_chart_version,
-            values=load_with_subs(
-                _DIR, "adot-values.yaml",
-                REGION=region,
-                AMP_REMOTE_WRITE_URL=amp_remote_write_url,
-                CLUSTER_NAME=config.cluster_name,
-            ),
+            values=adot_values,
         )
+        adot.node.add_dependency(adot_configmap)
         adot.node.add_dependency(adot_sa)
         adot.node.add_dependency(adot_rbac)
 

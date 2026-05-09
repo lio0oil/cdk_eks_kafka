@@ -34,18 +34,31 @@ class EksClusterConstruct(Construct):
             ),
         )
 
+        _cluster_admin_policy = [
+            eks.AccessPolicy.from_access_policy_name(
+                "AmazonEKSClusterAdminPolicy",
+                access_scope_type=eks.AccessScopeType.CLUSTER,
+            )
+        ]
+
         eks.AccessEntry(
             self,
             "AdminAccessEntry",
             cluster=self._cluster,  # type: ignore[arg-type]
             principal=admin_role.role_arn,
-            access_policies=[
-                eks.AccessPolicy.from_access_policy_name(
-                    "AmazonEKSClusterAdminPolicy",
-                    access_scope_type=eks.AccessScopeType.CLUSTER,
-                )
-            ],
+            access_policies=_cluster_admin_policy,
         )
+
+        # -c console-role-arns=arn1,arn2 で追加の管理者ロール（SSO等）を登録する
+        console_role_arns: str = self.node.try_get_context("console-role-arns") or ""
+        for i, arn in enumerate(filter(None, console_role_arns.split(","))):
+            eks.AccessEntry(
+                self,
+                f"ConsoleAccessEntry{i}",
+                cluster=self._cluster,  # type: ignore[arg-type]
+                principal=arn.strip(),
+                access_policies=_cluster_admin_policy,
+            )
 
         # システムノードグループ: CoreDNS等のクリティカルアドオン専用
         self._cluster.add_nodegroup_capacity(
