@@ -71,7 +71,7 @@ class EksClusterConstruct(Construct):
         # システムノードグループ: CoreDNS等のクリティカルアドオン専用
         self._cluster.add_nodegroup_capacity(
             "SystemNodeGroup",
-            nodegroup_name="system-nodegroup-v2",
+            nodegroup_name="system-nodegroup",
             instance_types=[ec2.InstanceType(config.system_instance_type)],
             ami_type=config.nodegroup_ami_type,
             min_size=config.system_min_size,
@@ -100,7 +100,7 @@ class EksClusterConstruct(Construct):
         kafka_nodes = broker_count + config.kafka_controller_count
         self._cluster.add_nodegroup_capacity(
             "KafkaNodeGroup",
-            nodegroup_name="kafka-nodegroup-v2",
+            nodegroup_name="kafka-nodegroup",
             instance_types=[ec2.InstanceType(config.kafka_instance_type)],
             ami_type=config.nodegroup_ami_type,
             min_size=kafka_nodes,
