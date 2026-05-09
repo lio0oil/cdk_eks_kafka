@@ -213,6 +213,151 @@ kubectl get pods -n monitoring
 # adot-collector-* / fluent-bit-* が Running であること
 ```
 
+### 7. NLB 経由の Kafka 接続確認
+
+NLB は internal なため、検証は **VPC 内（クラスタ Pod）から**行う。`system` / `kafka` ノードはそれぞれタイント付きのため、テスト Pod には toleration が必要。
+
+```bash
+# NLB DNS と CA cert を取得
+NLB_DNS=$(aws cloudformation describe-stacks --stack-name EksCdkStack \
+  --query 'Stacks[0].Outputs[?OutputKey==`KafkaNlbDnsName`].OutputValue' --output text)
+kubectl get secret -n kafka kafka-cluster-cluster-ca-cert \
+  -o jsonpath='{.data.ca\.crt}' | base64 -d > /tmp/ca.crt
+kubectl create configmap kafka-test-ca --from-file=/tmp/ca.crt -n default
+```
+
+検証用 Pod を起動して、TLS handshake → Kafka メタデータ取得 → topic 一覧取得を一気通貫で確認：
+
+```bash
+cat <<EOF | kubectl apply -f -
+apiVersion: v1
+kind: Pod
+metadata:
+  name: kafka-client-test
+  namespace: default
+spec:
+  restartPolicy: Never
+  tolerations:
+    - operator: Exists
+  volumes:
+    - name: ca
+      configMap:
+        name: kafka-test-ca
+    - name: workdir
+      emptyDir: {}
+  containers:
+    - name: kafka-client
+      image: quay.io/strimzi/kafka:1.0.0-kafka-4.2.0
+      command:
+        - sh
+        - -c
+        - |
+          set -e
+          echo "=== TLS handshake ==="
+          openssl s_client -connect ${NLB_DNS}:9094 -servername ${NLB_DNS} \
+            -CAfile /etc/ca/ca.crt -verify_return_error -brief </dev/null 2>&1 | head -10
+
+          echo "=== truststore 作成 ==="
+          keytool -import -trustcacerts -alias ca -file /etc/ca/ca.crt \
+            -keystore /work/truststore.jks -storepass changeit -noprompt
+
+          cat > /work/client.properties <<PROPS
+          security.protocol=SSL
+          ssl.truststore.location=/work/truststore.jks
+          ssl.truststore.password=changeit
+          PROPS
+
+          echo "=== broker メタデータ取得 ==="
+          /opt/kafka/bin/kafka-broker-api-versions.sh \
+            --bootstrap-server ${NLB_DNS}:9094 \
+            --command-config /work/client.properties | head -1
+
+          echo "=== topic 一覧 ==="
+          /opt/kafka/bin/kafka-topics.sh \
+            --bootstrap-server ${NLB_DNS}:9094 \
+            --command-config /work/client.properties --list
+      volumeMounts:
+        - name: ca
+          mountPath: /etc/ca
+        - name: workdir
+          mountPath: /work
+EOF
+
+# 完了まで待機（30〜60 秒）してログ確認
+kubectl wait --for=condition=Ready=False pod/kafka-client-test --timeout=120s
+kubectl logs kafka-client-test
+
+# クリーンアップ
+kubectl delete pod kafka-client-test
+kubectl delete configmap kafka-test-ca
+```
+
+期待される出力：
+
+```
+=== TLS handshake ===
+Protocol version: TLSv1.3
+Peer certificate: O=io.strimzi, CN=kafka-cluster-kafka
+Verification: OK
+
+=== broker メタデータ取得 ===
+kafka-shared-nlb-xxx.elb.ap-northeast-1.amazonaws.com:9095 (id: 0 rack: ap-northeast-1c isFenced: false) -> ...
+
+=== topic 一覧 ===
+strimzi.cruisecontrol.metrics
+strimzi.cruisecontrol.modeltrainingsamples
+strimzi.cruisecontrol.partitionmetricsamples
+```
+
+`broker` の advertised host/port が NLB DNS:9095/9096/9097 になっている点が確認できれば、**NLB → NodePort → broker pod** の経路が正しく機能している。
+
+### 8. Consumer Group ダッシュボードの動作確認（オプション）
+
+`Strimzi Kafka Exporter` ダッシュボードの以下のパネルは consumer group が稼働していないと `No data` になる：
+
+- Messages consumed per second
+- Lag by Consumer Group
+- Consumer Group Offsets
+- Consumer Group Lag
+
+> Cruise Control は Kafka を `assign` モードで読むため consumer group には登録されない。実 producer/consumer アプリが動くまで上記パネルは空のままで正常。
+
+ダッシュボード自体の動作確認をしたい場合はテストデータを流す：
+
+```bash
+# topic 作成
+kubectl exec -n kafka kafka-cluster-kafka-0 -c kafka -- bin/kafka-topics.sh \
+  --bootstrap-server localhost:9092 \
+  --create --topic test-topic --partitions 3 --replication-factor 3
+
+# 100 件 produce
+kubectl exec -n kafka kafka-cluster-kafka-0 -c kafka -- bash -c '
+  for i in $(seq 1 100); do echo "msg-$i"; done \
+    | bin/kafka-console-producer.sh --bootstrap-server localhost:9092 --topic test-topic'
+
+# 50 件だけ consume（lag を 50 残す）
+kubectl exec -n kafka kafka-cluster-kafka-0 -c kafka -- bin/kafka-console-consumer.sh \
+  --bootstrap-server localhost:9092 --topic test-topic \
+  --group test-group --from-beginning --max-messages 50 --timeout-ms 10000
+
+# consumer group の状態を確認
+kubectl exec -n kafka kafka-cluster-kafka-0 -c kafka -- bin/kafka-consumer-groups.sh \
+  --bootstrap-server localhost:9092 --describe --group test-group
+```
+
+数十秒後に kafka-exporter がメトリクスを公開し、Grafana ダッシュボードに値が表示される。
+
+クリーンアップ：
+
+```bash
+kubectl exec -n kafka kafka-cluster-kafka-0 -c kafka -- bin/kafka-topics.sh \
+  --bootstrap-server localhost:9092 --delete --topic test-topic
+kubectl exec -n kafka kafka-cluster-kafka-0 -c kafka -- bin/kafka-consumer-groups.sh \
+  --bootstrap-server localhost:9092 --delete --group test-group
+```
+
+> **注意**: consumer group を一度作ると Kafka が `__consumer_offsets` トピック（50 partitions）を自動作成する。これは Kafka 仕様で削除不可、永続的に残る。ダッシュボードの Topics / Partitions の総数がテスト前後で恒久的に増える点に留意。
+
 ### よくある問題
 
 | 症状 | 原因 |
@@ -220,6 +365,8 @@ kubectl get pods -n monitoring
 | ノードが `NotReady` | VPC エンドポイント / セキュリティグループの設定ミス |
 | Pod が `Pending` | ノードグループのキャパシティ不足 / Taint 未設定 |
 | Kafka が `READY: False` | Strimzi Operator が起動していない / PVC 未バインド |
+| NLB ターゲットが大半 `unhealthy` | `externalTrafficPolicy: Local` のため broker pod 不在ノードは正常に unhealthy（broker pod のあるノードのみ healthy 表示）|
+| TLS handshake で `verify error` | `kafka-cluster-cluster-ca-cert` Secret から CA を再取得（cluster CA はローテーションされる）|
 
 ## Cruise Control によるリバランス
 
