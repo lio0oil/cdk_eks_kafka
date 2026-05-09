@@ -31,6 +31,7 @@ class KafkaConstruct(Construct):
         nlb_sg_id: str,
         external_listener_name: str,
         aws_lbc_chart: eks.HelmChart,
+        delete_claim: bool,
     ) -> None:
         super().__init__(scope, construct_id)
 
@@ -44,14 +45,24 @@ class KafkaConstruct(Construct):
         cm = cluster.add_manifest("KafkaMetricsCm", load(_DIR, "cm.yaml"))
         cm.node.add_dependency(namespace)
 
+        # delete_claim を YAML の boolean リテラル文字列に変換（True → "true"）
+        delete_claim_str = "true" if delete_claim else "false"
+
         # ── KafkaNodePool: controller ─────────────────────────────────────────
-        controller_pool = cluster.add_manifest("KafkaControllerPool", load(_DIR, "node-pool-controller.yaml"))
+        controller_pool = cluster.add_manifest(
+            "KafkaControllerPool",
+            load_with_subs(_DIR, "node-pool-controller.yaml", DELETE_CLAIM=delete_claim_str),
+        )
         controller_pool.node.add_dependency(namespace)
 
         # ── KafkaNodePool: broker ─────────────────────────────────────────────
         broker_pool = cluster.add_manifest(
             "KafkaBrokerPool",
-            load_with_subs(_DIR, "node-pool-broker.yaml", BROKER_REPLICAS=str(broker_count)),
+            load_with_subs(
+                _DIR, "node-pool-broker.yaml",
+                BROKER_REPLICAS=str(broker_count),
+                DELETE_CLAIM=delete_claim_str,
+            ),
         )
         broker_pool.node.add_dependency(namespace)
 

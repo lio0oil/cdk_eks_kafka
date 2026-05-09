@@ -17,7 +17,7 @@ spec:
         size: 20Gi
         class: gp3
         kraftMetadata: shared
-        deleteClaim: false
+        deleteClaim: <DELETE_CLAIM>
   resources:
     requests:
       memory: 2Gi
