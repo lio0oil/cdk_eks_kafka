@@ -559,6 +559,110 @@ kubectl get secret kafka-cluster-cluster-ca-cert -n kafka \
   -o jsonpath='{.data.ca\.crt}' | base64 -d > new-ca.crt
 ```
 
+### 14. PrivateLink クロス VPC 接続（クライアント VPC 側手順）
+
+別 VPC や別アカウントから NLB へ接続する手順。実機検証はクライアント側 VPC が必要なため、本リポジトリ側では Endpoint Service の状態確認までを実施する。
+
+```bash
+# サービス側（このリポジトリ）の Endpoint Service 名を取得
+aws ec2 describe-vpc-endpoint-service-configurations \
+  --query "ServiceConfigurations[?starts_with(ServiceName, 'com.amazonaws.vpce') && contains(NetworkLoadBalancerArns[0], 'kafka-shared-nlb')].[ServiceName,ServiceState,AcceptanceRequired]" \
+  --output table
+# 例: com.amazonaws.vpce.ap-northeast-1.vpce-svc-xxxxxx | Available | False
+
+# NLB DNS（advertised host）取得
+aws cloudformation describe-stacks --stack-name EksCdkStack \
+  --query 'Stacks[0].Outputs[?OutputKey==`KafkaNlbDnsName`].OutputValue' --output text
+```
+
+**クライアント VPC 側の作業**
+
+1. **VPC Endpoint（Interface）作成**：上記 ServiceName を指定して接続。`AcceptanceRequired: false` のため即時接続。サブネットは Kafka が公開している 3 AZ と一致させる。
+2. **Route53 Private Hosted Zone**：NLB DNS（`kafka-shared-nlb-xxx.elb.ap-northeast-1.amazonaws.com`）を Endpoint の DNS 名に向けるエイリアスレコードを作成。これでクライアントの `bootstrap.servers=<NLB DNS>:9094` がクライアント VPC 内の Endpoint ENI に解決される。
+3. **Kafka client**：§7 の `kafka-client-test` 同様、cluster CA cert（`kafka-cluster-cluster-ca-cert` Secret）を取得した上で `bootstrap.servers=<NLB DNS>:9094` で接続。
+
+> **重要**: NLB の DNS 名は変えない。Strimzi が advertised host として broker 設定に焼き込んでいるため、クライアントは必ずこの DNS 名で接続を試みる。クライアント VPC では Route53 でこの DNS 名を Endpoint ENI に向け直す必要がある。
+
+### 15. Node Auto Repair 設定確認
+
+EKS Managed NodeGroup の `enable_node_auto_repair=True`（CDK）が有効か確認する。
+
+```bash
+for ng in system-nodegroup kafka-nodegroup; do
+  aws eks describe-nodegroup --cluster-name eks-cluster-dev --nodegroup-name $ng \
+    --query 'nodegroup.{NodeRepair:nodeRepairConfig.enabled, Health:health.issues}' --output yaml
+done
+```
+
+**トリガー条件（EKS が自動修復するケース）**
+
+| 条件 | EKS の対応 |
+|------|----------|
+| kubelet が `NotReady` 状態を一定時間継続 | ノードを drain → 終了 → ASG が新規ノード起動 |
+| 過剰な再起動 / kubelet 通信不能 | 同上 |
+| EC2 ヘルスチェック失敗 | ASG の標準動作で自動入れ替え |
+
+実発火の検証は kubelet 強制停止などの破壊的操作が必要なため、本番環境で以下を再現することは非推奨。設定が `enabled: true` であることの確認に留める。
+
+### 16. 災害復旧（DR）
+
+#### EBS Snapshot 取得手順（運用バックアップ）
+
+broker / controller の PV を EBS スナップショットとしてバックアップする。
+
+```bash
+# broker-0 PV の EBS Volume ID を取得
+PV_HANDLE=$(kubectl get pv -o jsonpath='{range .items[*]}{.spec.csi.volumeHandle},{.spec.claimRef.name}{"\n"}{end}' \
+  | grep "data-0-kafka-cluster-kafka-0" | cut -d, -f1)
+
+# Snapshot 取得
+aws ec2 create-snapshot --volume-id $PV_HANDLE \
+  --description "kafka-broker-0 daily backup $(date -u +%Y-%m-%dT%H:%M:%SZ)" \
+  --tag-specifications 'ResourceType=snapshot,Tags=[{Key=Cluster,Value=kafka-cluster},{Key=Pod,Value=kafka-0}]'
+
+# 全 broker / controller を一括取得（運用ではこれを cron / Lambda で日次実行）
+for n in 0 1 2; do
+  for role in kafka controller; do
+    pvc="data-0-kafka-cluster-${role}-${n}"
+    [ "$role" = "controller" ] && pvc="data-0-kafka-cluster-controller-$((n+3))"
+    vol=$(kubectl get pv -o jsonpath='{range .items[*]}{.spec.csi.volumeHandle},{.spec.claimRef.name}{"\n"}{end}' | grep ",$pvc$" | cut -d, -f1)
+    [ -z "$vol" ] && continue
+    aws ec2 create-snapshot --volume-id $vol --description "${pvc} backup" --tag-specifications "ResourceType=snapshot,Tags=[{Key=PVC,Value=${pvc}}]"
+  done
+done
+```
+
+#### Snapshot からの Restore（クラスター再構築シナリオ）
+
+1. `cdk deploy EksCdkStack` で空の Kafka cluster を起動（Strimzi が空の PVC を作成）
+2. 新しい PVC に対応する EBS Volume を、Snapshot から作成し直す（`aws ec2 create-volume --snapshot-id ...`）
+3. `kubectl edit pv` で対象 PV の `spec.csi.volumeHandle` を新 Volume ID に置き換える、または `VolumeSnapshot` CRD を使う（要：snapshot-controller インストール）
+4. broker pod を再起動 → 復元データから起動
+
+> 実運用では **AWS Backup** か Velero などのツールを使う方が現実的。手動でやる場合は KRaft メタデータの整合性に注意（全 broker・全 controller を**同じ時点**の snapshot で揃える必要がある）。
+
+#### orphan PV / EBS の掃除
+
+`KafkaNodePool` 削除や pool 名変更で**孤立した PV / EBS Volume** が残る場合がある。`deleteClaim: false`（stg/prd 設定）では特に発生しやすい。
+
+```bash
+# Released な PV を一覧
+kubectl get pv | awk '$5=="Released"'
+
+# Released PV を削除（→ Retain ポリシーのため EBS は残る）
+for pv in $(kubectl get pv -o jsonpath='{range .items[?(@.status.phase=="Released")]}{.metadata.name} {end}'); do
+  kubectl delete pv $pv
+done
+
+# PV 削除後の Available な EBS を一括削除（cluster タグでフィルタ）
+aws ec2 describe-volumes \
+  --filters "Name=status,Values=available" "Name=tag:kubernetes.io/cluster/eks-cluster-dev,Values=owned" \
+  --query 'Volumes[*].VolumeId' --output text \
+  | xargs -n1 aws ec2 delete-volume --volume-id
+```
+
+> dev 環境（`delete_claim: true`）では KafkaNodePool 削除時に PVC・PV・EBS まで連動削除される。stg/prd（`delete_claim: false`）はデータ保護優先で残るため、運用上は意図的なオペレーションでのみ削除する。
+
 ### よくある問題
 
 | 症状 | 原因 |
