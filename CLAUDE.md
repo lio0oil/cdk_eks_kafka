@@ -40,3 +40,5 @@ Strimzi 1.0.0 で `v1` が正式 API として昇格し、`v1beta2` / `v1beta1` 
 /home/vscode/workspace/data-on-eks/data-stacks/
 https://awslabs.github.io/data-on-eks/docs/datastacks/streaming/kafka-on-eks/infra
 https://github.com/awslabs/data-on-eks
+
+### AWSのアカウントID等、セキュリティ情報はgitで管理しない
