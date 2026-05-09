@@ -85,6 +85,29 @@ data:
                 - source_labels: [__meta_kubernetes_pod_name]
                   target_label: pod
 
+            # kubelet cAdvisor: container_cpu_usage_seconds_total / container_memory_usage_bytes を収集
+            # DaemonSet のため自ノードのみスクレイプして重複を防ぐ
+            - job_name: kubernetes-cadvisor
+              scheme: https
+              tls_config:
+                insecure_skip_verify: true
+              authorization:
+                credentials_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+              kubernetes_sd_configs:
+                - role: node
+              relabel_configs:
+                - source_labels: [__meta_kubernetes_node_name]
+                  action: keep
+                  regex: "${K8S_NODE_NAME}"
+                - source_labels: [__meta_kubernetes_node_name]
+                  target_label: node
+                - target_label: __metrics_path__
+                  replacement: /metrics/cadvisor
+              metric_relabel_configs:
+                - source_labels: [__name__]
+                  action: keep
+                  regex: "container_cpu_usage_seconds_total|container_memory_usage_bytes|container_memory_working_set_bytes|container_network_receive_bytes_total|container_network_transmit_bytes_total"
+
     processors:
       batch: {}
       memory_limiter:
