@@ -59,6 +59,10 @@ class ClusterConfig:
     # KRaft Controller の replica 数（KRaft は奇数推奨、通常 3）
     # node-pool-controller.yaml の replicas と kafka nodegroup サイズの両方に反映
     kafka_controller_count: int
+    # EKS クラスターの削除保護（CloudFormation の DeletionProtection）
+    # 有効化すると aws eks delete-cluster が拒否される（誤削除防止）
+    # dev は False（環境破棄を容易に）、stg/prd は True（事故防止）
+    deletion_protection: bool
 
     @classmethod
     def for_dev(cls, cluster_name: str = "eks-cluster-dev") -> ClusterConfig:
@@ -89,6 +93,7 @@ class ClusterConfig:
             enable_interface_endpoints=False,
             delete_claim=True,
             kafka_controller_count=3,
+            deletion_protection=False,
         )
 
     @classmethod
@@ -118,6 +123,7 @@ class ClusterConfig:
             enable_interface_endpoints=True,
             delete_claim=False,
             kafka_controller_count=3,
+            deletion_protection=True,
         )
 
     @classmethod
@@ -147,4 +153,5 @@ class ClusterConfig:
             enable_interface_endpoints=True,
             delete_claim=False,
             kafka_controller_count=3,
+            deletion_protection=True,
         )

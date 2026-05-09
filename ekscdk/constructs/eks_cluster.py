@@ -34,6 +34,16 @@ class EksClusterConstruct(Construct):
             ),
         )
 
+        # aws_eks_v2.Cluster は UpgradePolicy / DeletionProtection を直接プロパティ化
+        # していないため、CfnCluster にエスケープハッチで設定する。
+        # - UpgradePolicy.SupportType = STANDARD: K8s バージョンサポートを Extended（追加課金）
+        #   ではなく Standard（無償・約 14 ヶ月）に固定する
+        # - DeletionProtection = config.deletion_protection: 誤削除防止
+        #   （dev=False, stg/prd=True）
+        cfn_cluster = self._cluster.node.default_child
+        cfn_cluster.add_property_override("UpgradePolicy.SupportType", "STANDARD")  # type: ignore[union-attr]
+        cfn_cluster.add_property_override("DeletionProtection", config.deletion_protection)  # type: ignore[union-attr]
+
         _cluster_admin_policy = [
             eks.AccessPolicy.from_access_policy_name(
                 "AmazonEKSClusterAdminPolicy",
