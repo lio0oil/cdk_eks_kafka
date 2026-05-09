@@ -144,17 +144,15 @@ class MonitoringConstruct(Construct):
         kps.node.add_dependency(namespace)
         kps.node.add_dependency(prometheus_sa)
 
-        # ── Kafka ServiceMonitor / PodMonitor ─────────────────────────────────
-        # kube-prometheus-stack の CRD がインストールされた後に適用する
-        kafka_sm = cluster.add_manifest(
-            "KafkaServiceMonitor", load(_KAFKA_DIR, "kafka-service-monitor.yaml")
-        )
-        kafka_sm.node.add_dependency(kps)
-
+        # ── Kafka PodMonitor ───────────────────────────────────────────────────
+        # data-on-eks リファレンスに従い、broker / controller / cruise-control /
+        # kafka-exporter を1つの PodMonitor (kafka-resources-metrics) で scrape する。
+        # ServiceMonitor は持たない（重複 scrape を避ける）。
         kafka_pm = cluster.add_manifest(
-            "KafkaJmxPodMonitor", load(_KAFKA_DIR, "kafka-pod-monitor.yaml")
+            "KafkaResourcesPodMonitor", load(_KAFKA_DIR, "kafka-pod-monitor.yaml")
         )
         kafka_pm.node.add_dependency(kps)
+        kafka_pm.node.add_dependency(kafka_namespace)
 
         # Strimzi Cluster Operator (strimzi-system namespace) のメトリクス
         # PodMonitor は strimzi-system namespace に配置するため、namespace を作る

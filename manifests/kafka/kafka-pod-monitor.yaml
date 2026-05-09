@@ -1,29 +1,48 @@
 apiVersion: monitoring.coreos.com/v1
 kind: PodMonitor
 metadata:
-  name: kafka-jmx
-  namespace: monitoring
+  name: kafka-resources-metrics
+  namespace: kafka
   labels:
-    app.kubernetes.io/part-of: kube-prometheus-stack
+    app: strimzi
 spec:
-  namespaceSelector:
-    matchNames: [kafka]
   selector:
-    matchLabels:
-      strimzi.io/kind: Kafka
+    matchExpressions:
+      - key: "strimzi.io/kind"
+        operator: In
+        values: ["Kafka", "KafkaConnect", "KafkaMirrorMaker", "KafkaMirrorMaker2"]
+  namespaceSelector:
+    matchNames:
+      - kafka
   podMetricsEndpoints:
-    - port: tcp-prometheus
-      interval: 30s
+    - path: /metrics
+      port: tcp-prometheus
       relabelings:
+        - separator: ;
+          regex: __meta_kubernetes_pod_label_(strimzi_io_.+)
+          replacement: $1
+          action: labelmap
         - sourceLabels: [__meta_kubernetes_namespace]
+          separator: ;
+          regex: (.*)
           targetLabel: namespace
+          replacement: $1
+          action: replace
         - sourceLabels: [__meta_kubernetes_pod_name]
-          targetLabel: pod
-        - sourceLabels: [__meta_kubernetes_pod_name]
+          separator: ;
+          regex: (.*)
           targetLabel: kubernetes_pod_name
-        - sourceLabels: [__meta_kubernetes_pod_label_strimzi_io_cluster]
-          targetLabel: strimzi_io_cluster
-        - sourceLabels: [__meta_kubernetes_pod_label_strimzi_io_name]
-          targetLabel: strimzi_io_name
-        - sourceLabels: [__meta_kubernetes_pod_label_strimzi_io_pool_name]
-          targetLabel: pool
+          replacement: $1
+          action: replace
+        - sourceLabels: [__meta_kubernetes_pod_node_name]
+          separator: ;
+          regex: (.*)
+          targetLabel: node_name
+          replacement: $1
+          action: replace
+        - sourceLabels: [__meta_kubernetes_pod_host_ip]
+          separator: ;
+          regex: (.*)
+          targetLabel: node_ip
+          replacement: $1
+          action: replace
