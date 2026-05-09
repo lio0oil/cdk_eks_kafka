@@ -9,6 +9,41 @@ data:
   kafka-metrics-config.yml: |
     lowercaseOutputName: true
     rules:
+    # JVM memory (heap / nonheap)
+    - pattern: "java.lang<type=Memory><HeapMemoryUsage>(\\w+)"
+      name: jvm_memory_bytes_$1
+      type: GAUGE
+      labels:
+        area: "heap"
+    - pattern: "java.lang<type=Memory><NonHeapMemoryUsage>(\\w+)"
+      name: jvm_memory_bytes_$1
+      type: GAUGE
+      labels:
+        area: "nonheap"
+    - pattern: "java.lang<type=MemoryPool, name=(.+)><Usage>(\\w+)"
+      name: jvm_memory_pool_bytes_$2
+      type: GAUGE
+      labels:
+        pool: "$1"
+    # JVM GC
+    - pattern: "java.lang<type=GarbageCollector, name=(.+)><>CollectionCount"
+      name: jvm_gc_collection_seconds_count
+      type: COUNTER
+      labels:
+        gc: "$1"
+    - pattern: "java.lang<type=GarbageCollector, name=(.+)><>CollectionTime"
+      name: jvm_gc_collection_seconds_sum
+      type: COUNTER
+      labels:
+        gc: "$1"
+    # JVM threads / class loading
+    - pattern: "java.lang<type=Threading><>(\\w+)"
+      name: jvm_threads_$1
+      type: GAUGE
+    - pattern: "java.lang<type=ClassLoading><>(\\w+)"
+      name: jvm_classes_$1
+      type: GAUGE
+    # Kafka metrics
     - pattern: kafka.server<type=(.+), name=(.+), clientId=(.+), topic=(.+), partition=(.*)><>Value
       name: kafka_server_$1_$2
       type: GAUGE

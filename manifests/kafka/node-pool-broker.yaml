@@ -1,7 +1,7 @@
 apiVersion: kafka.strimzi.io/v1
 kind: KafkaNodePool
 metadata:
-  name: broker
+  name: kafka
   namespace: kafka
   labels:
     strimzi.io/cluster: kafka-cluster
@@ -51,7 +51,7 @@ spec:
                   - key: strimzi.io/pool-name
                     operator: In
                     values:
-                      - broker
+                      - kafka
               topologyKey: kubernetes.io/hostname
       topologySpreadConstraints:
         - maxSkew: 1
@@ -59,4 +59,4 @@ spec:
           whenUnsatisfiable: ScheduleAnyway
           labelSelector:
             matchLabels:
-              strimzi.io/name: kafka-cluster-broker
+              strimzi.io/name: kafka-cluster-kafka
