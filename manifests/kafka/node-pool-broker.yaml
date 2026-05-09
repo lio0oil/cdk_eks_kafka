@@ -46,12 +46,14 @@ spec:
                       - kafka
         podAntiAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
+            # broker と controller を同一ノードに同居させない（クロスプール）
             - labelSelector:
                 matchExpressions:
                   - key: strimzi.io/pool-name
                     operator: In
                     values:
                       - kafka
+                      - controller
               topologyKey: kubernetes.io/hostname
       topologySpreadConstraints:
         - maxSkew: 1

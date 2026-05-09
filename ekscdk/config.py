@@ -56,6 +56,9 @@ class ClusterConfig:
     # KafkaNodePool 削除時に PVC を一緒に削除するか（Strimzi の deleteClaim フィールド）
     # dev は True（環境破棄時に PVC ごとクリーンアップ）、stg/prd は False（データ保護）
     delete_claim: bool
+    # KRaft Controller の replica 数（KRaft は奇数推奨、通常 3）
+    # node-pool-controller.yaml の replicas と kafka nodegroup サイズの両方に反映
+    kafka_controller_count: int
 
     @classmethod
     def for_dev(cls, cluster_name: str = "eks-cluster-dev") -> ClusterConfig:
@@ -83,6 +86,7 @@ class ClusterConfig:
             grafana_version="12.4",
             enable_interface_endpoints=False,
             delete_claim=True,
+            kafka_controller_count=3,
         )
 
     @classmethod
@@ -111,6 +115,7 @@ class ClusterConfig:
             grafana_version="12.4",
             enable_interface_endpoints=True,
             delete_claim=False,
+            kafka_controller_count=3,
         )
 
     @classmethod
@@ -139,4 +144,5 @@ class ClusterConfig:
             grafana_version="12.4",
             enable_interface_endpoints=True,
             delete_claim=False,
+            kafka_controller_count=3,
         )

@@ -6,7 +6,7 @@ metadata:
   labels:
     strimzi.io/cluster: kafka-cluster
 spec:
-  replicas: 3
+  replicas: <CONTROLLER_REPLICAS>
   roles:
     - controller
   storage:
@@ -46,11 +46,13 @@ spec:
                       - kafka
         podAntiAffinity:
           requiredDuringSchedulingIgnoredDuringExecution:
+            # broker と controller を同一ノードに同居させない（クロスプール）
             - labelSelector:
                 matchExpressions:
                   - key: strimzi.io/pool-name
                     operator: In
                     values:
+                      - kafka
                       - controller
               topologyKey: kubernetes.io/hostname
       topologySpreadConstraints:

@@ -94,15 +94,18 @@ class EksClusterConstruct(Construct):
             enable_node_auto_repair=True,
         )
 
-        # KafkaノードグループはStrimziが管理するKafkaブローカー専用
+        # Kafka ノードグループは Strimzi の broker + controller pod 専用
+        # broker と controller は同一ノードに同居させない（podAntiAffinity）ため、
+        # broker_count + controller_count + 1 (rolling update buffer) のサイズを確保する
+        kafka_nodes = broker_count + config.kafka_controller_count
         self._cluster.add_nodegroup_capacity(
             "KafkaNodeGroup",
             nodegroup_name="kafka-nodegroup-v2",
             instance_types=[ec2.InstanceType(config.kafka_instance_type)],
             ami_type=config.nodegroup_ami_type,
-            min_size=broker_count,
-            max_size=broker_count + 1,  # ローリングアップデート時に新ノードを起動できる余裕を確保
-            desired_size=broker_count,
+            min_size=kafka_nodes,
+            max_size=kafka_nodes + 1,  # ローリングアップデート時に新ノードを起動できる余裕を確保
+            desired_size=kafka_nodes,
             capacity_type=eks.CapacityType.ON_DEMAND,
             subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS),
             labels={"role": "kafka"},

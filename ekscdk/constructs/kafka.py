@@ -32,6 +32,7 @@ class KafkaConstruct(Construct):
         external_listener_name: str,
         aws_lbc_chart: eks.HelmChart,
         delete_claim: bool,
+        controller_count: int,
     ) -> None:
         super().__init__(scope, construct_id)
 
@@ -51,7 +52,11 @@ class KafkaConstruct(Construct):
         # ── KafkaNodePool: controller ─────────────────────────────────────────
         controller_pool = cluster.add_manifest(
             "KafkaControllerPool",
-            load_with_subs(_DIR, "node-pool-controller.yaml", DELETE_CLAIM=delete_claim_str),
+            load_with_subs(
+                _DIR, "node-pool-controller.yaml",
+                DELETE_CLAIM=delete_claim_str,
+                CONTROLLER_REPLICAS=str(controller_count),
+            ),
         )
         controller_pool.node.add_dependency(namespace)
 
