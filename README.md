@@ -255,6 +255,57 @@ aws grafana delete-workspace-service-account \
 
 > **将来的な CDK 化**: 権限は `AwsCustomResource` で `grafana:UpdatePermissions` を呼べば CFN ベースで完結する（容易）。ダッシュボードは Grafana HTTP API のため独自 Lambda + `Custom::DashboardImport` カスタムリソースが必要（中程度の実装コスト）。本リポジトリでは現状手動運用としている。
 
+#### 5-3. Node / Cluster / Pod ダッシュボード（community 推奨セット）
+
+Strimzi 系 3 ダッシュボードに加え、Node OS / Cluster 全体 / Pod レベルの可視化は kube-prometheus-stack 同梱（grafana.enabled=false なので自動展開なし）の代わりに **grafana.com の community dashboard を ID 指定で import** する。kube-prometheus-stack の標準メトリクス名（`node_*`, `container_*`, `kube_*`）に対応しているため、本構成にそのまま接続できる。
+
+| dashboard ID | 名前 | カバー範囲 |
+|---|---|---|
+| **1860** | Node Exporter Full | Node OS 全部入り（CPU / Memory / Disk 容量・IO / Network / Load）。**最優先**でインポート推奨 |
+| 15757 | Kubernetes / Compute Resources / Cluster | クラスタ全体俯瞰、Namespace 別合計 |
+| 15760 | Kubernetes / Compute Resources / Node (Pods) | Node 上の Pod 別 CPU / Memory 配分 |
+| 15758 | Kubernetes / Compute Resources / Namespace (Pods) | Namespace 内の Pod 別リソース |
+| 15761 | Kubernetes / Compute Resources / Pod | Pod 単体の詳細 |
+
+**インポート手順（AMG コンソール、最も簡単）**
+
+1. AMG コンソール → 左メニュー **Dashboards → New → Import**
+2. **「Import via grafana.com」** に上記 ID（例: `1860`）を入力 → **Load**
+3. データソース：`Prometheus`（AMP のもの）を選択 → **Import**
+
+**インポート手順（HTTP API 経由、Service Account Token 利用）**
+
+§5-2(B) で発行した `$TOKEN` をそのまま使い、grafana.com から JSON を取得して POST する：
+
+```bash
+WORKSPACE_URL=$(aws grafana describe-workspace --workspace-id $WORKSPACE_ID \
+  --query 'workspace.endpoint' --output text)
+
+# AMP データソースの UID を取得（dashboard JSON の datasource 置換用）
+DS_UID=$(curl -sS "https://${WORKSPACE_URL}/api/datasources/name/prometheus" \
+  -H "Authorization: Bearer $TOKEN" | python3 -c "import sys,json;print(json.load(sys.stdin)['uid'])")
+
+# community dashboard ID を一括インポート
+for ID in 1860 15757 15760 15758 15761; do
+  REV=$(curl -sS "https://grafana.com/api/dashboards/${ID}" | python3 -c "import sys,json;print(json.load(sys.stdin)['revision'])")
+  curl -sS "https://grafana.com/api/dashboards/${ID}/revisions/${REV}/download" \
+    | python3 -c "
+import sys, json
+d = json.load(sys.stdin)
+# datasource template variable を AMP の UID で固定
+for v in d.get('templating', {}).get('list', []):
+    if v.get('type') == 'datasource':
+        v['current'] = {'text': 'prometheus', 'value': '$DS_UID'}
+print(json.dumps({'dashboard': d, 'overwrite': True, 'inputs': [{'name': 'DS_PROMETHEUS', 'type': 'datasource', 'pluginId': 'prometheus', 'value': '$DS_UID'}]}))
+" | curl -sS -X POST "https://${WORKSPACE_URL}/api/dashboards/import" \
+       -H "Authorization: Bearer $TOKEN" \
+       -H "Content-Type: application/json" \
+       -d @- | python3 -c "import sys,json;d=json.load(sys.stdin);print(f\"  {d.get('title')}: {d.get('uid')}\")"
+done
+```
+
+> **community dashboard を Git 管理したい場合**: `https://grafana.com/api/dashboards/<ID>/revisions/<REV>/download` から JSON を保存し、`manifests/monitoring/dashboards/` 以下に既存形式（`apiVersion: v1, kind: ConfigMap, data: { <name>.json: '<json string>' }`）で配置すれば §5-2(B) の一括インポートスクリプトで反映できる。
+
 ## バージョン更新時の参照先
 
 | 項目 | 確認先 |
