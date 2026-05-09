@@ -40,8 +40,12 @@ data:
                   target_label: namespace
                 - source_labels: [__meta_kubernetes_pod_name]
                   target_label: pod
+                - source_labels: [__meta_kubernetes_pod_name]
+                  target_label: kubernetes_pod_name
                 - source_labels: [__meta_kubernetes_pod_label_strimzi_io_cluster]
                   target_label: strimzi_io_cluster
+                - source_labels: [__meta_kubernetes_pod_label_strimzi_io_name]
+                  target_label: strimzi_io_name
                 - source_labels: [__meta_kubernetes_pod_label_strimzi_io_pool_name]
                   target_label: pool
 
@@ -84,6 +88,27 @@ data:
                   target_label: namespace
                 - source_labels: [__meta_kubernetes_pod_name]
                   target_label: pod
+
+            # kubelet stats: kubelet_volume_stats_* (Disk Space パネル用)
+            - job_name: kubernetes-kubelet
+              scheme: https
+              honor_timestamps: false
+              tls_config:
+                insecure_skip_verify: true
+              authorization:
+                credentials_file: /var/run/secrets/kubernetes.io/serviceaccount/token
+              kubernetes_sd_configs:
+                - role: node
+              relabel_configs:
+                - source_labels: [__meta_kubernetes_node_name]
+                  action: keep
+                  regex: "${K8S_NODE_NAME}"
+                - source_labels: [__meta_kubernetes_node_name]
+                  target_label: node
+              metric_relabel_configs:
+                - source_labels: [__name__]
+                  action: keep
+                  regex: "kubelet_volume_stats_available_bytes|kubelet_volume_stats_capacity_bytes|kubelet_volume_stats_used_bytes"
 
             # kubelet cAdvisor: container_cpu_usage_seconds_total / container_memory_usage_bytes を収集
             # DaemonSet のため自ノードのみスクレイプして重複を防ぐ
