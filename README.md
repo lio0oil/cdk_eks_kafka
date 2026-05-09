@@ -358,6 +358,92 @@ kubectl exec -n kafka kafka-cluster-kafka-0 -c kafka -- bin/kafka-consumer-group
 
 > **注意**: consumer group を一度作ると Kafka が `__consumer_offsets` トピック（50 partitions）を自動作成する。これは Kafka 仕様で削除不可、永続的に残る。ダッシュボードの Topics / Partitions の総数がテスト前後で恒久的に増える点に留意。
 
+### 9. Strimzi CR (KafkaTopic / KafkaUser) の動作確認
+
+`Strimzi Operators` ダッシュボードの `Topic CRs` / `User CRs` カウントは Strimzi CRD で宣言したリソース数を表す。Cruise Control の auto-create トピック等は CR を経由せず Kafka API 直叩きで作成されるため、CR が無い状態（`Topic CRs: 0`）でも Kafka 自体は正常に動作する。
+
+CR 経由の管理メリット（GitOps、ドリフト検知、K8s RBAC 連携、宣言的削除）を活かしたい場合は以下の YAML を `kubectl apply` する。
+
+#### KafkaTopic CR サンプル
+
+```yaml
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  name: sample-events           # この名前がそのまま Kafka topic 名になる
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: kafka-cluster   # 対象クラスタ名
+spec:
+  partitions: 6
+  replicas: 3
+  config:
+    retention.ms: 604800000     # 7 日
+    cleanup.policy: delete
+```
+
+#### KafkaUser CR サンプル（mTLS 認証）
+
+```yaml
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaUser
+metadata:
+  name: sample-app              # この名前で Secret も生成される
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: kafka-cluster
+spec:
+  authentication:
+    type: tls
+  # 必要なら ACL も宣言できる（cluster 側で authorization 有効化が前提）
+  # authorization:
+  #   type: simple
+  #   acls:
+  #     - resource: { type: topic, name: sample-events }
+  #       operations: [Read, Write]
+```
+
+#### 動作確認手順
+
+```bash
+# 1. CR を apply
+kubectl apply -f sample-kafka-topic.yaml
+kubectl apply -f sample-kafka-user.yaml
+
+# 2. CR が READY になるか確認（数秒〜十数秒）
+kubectl get kafkatopic,kafkauser -n kafka
+# NAME            CLUSTER         PARTITIONS   REPLICATION FACTOR   READY
+# sample-events   kafka-cluster   6            3                    True
+# NAME         CLUSTER         AUTHENTICATION   AUTHORIZATION   READY
+# sample-app   kafka-cluster   tls                              True
+
+# 3. Topic Operator が Kafka API に同期したか確認
+kubectl exec -n kafka kafka-cluster-kafka-0 -c kafka -- bin/kafka-topics.sh \
+  --bootstrap-server localhost:9092 --describe --topic sample-events
+# Topic: sample-events PartitionCount: 6 ReplicationFactor: 3
+# Configs: cleanup.policy=delete,retention.ms=604800000
+
+# 4. User Operator が認証情報の Secret を生成したか確認
+kubectl get secret -n kafka sample-app -o jsonpath='{.data}' \
+  | python3 -c "import sys,json; print('\n'.join(json.loads(sys.stdin.read()).keys()))"
+# ca.crt        ← cluster CA cert
+# user.crt      ← クライアント証明書
+# user.key      ← クライアント秘密鍵
+# user.p12      ← PKCS12 (Java truststore/keystore 用)
+# user.password ← p12 のパスワード
+
+# 5. Grafana ダッシュボードで Topic CRs / User CRs が +1 されることを確認
+#    （メトリクスは strimzi_resources{kind="KafkaTopic|KafkaUser"}）
+
+# 6. クリーンアップ - CR を消すと Kafka topic も Secret も連動削除される
+kubectl delete kafkatopic sample-events -n kafka
+kubectl delete kafkauser sample-app -n kafka
+```
+
+> **mTLS 認証を実際に使うには**: `kafka-cluster.yaml` の external listener に `authentication: { type: tls }` を追加して再デプロイする必要がある。クライアントは `user.crt` / `user.key` を keystore にロードして接続する（`ssl.keystore.*` プロパティ）。本サンプルは CR 同期動作の確認用途のため、認証なしの listener のままでも CR 自体は READY になり、Secret も生成される（ただし接続には使えない）。
+
+> **ACL を使うには**: `kafka-cluster.yaml` の `spec.kafka` に `authorization: { type: simple }` を追加して再デプロイする必要がある。
+
 ### よくある問題
 
 | 症状 | 原因 |
