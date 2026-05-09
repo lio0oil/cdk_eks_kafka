@@ -918,6 +918,117 @@ aws ec2 describe-volumes \
 | NLB ターゲットが大半 `unhealthy` | `externalTrafficPolicy: Local` のため broker pod 不在ノードは正常に unhealthy（broker pod のあるノードのみ healthy 表示）|
 | TLS handshake で `verify error` | `kafka-cluster-cluster-ca-cert` Secret から CA を再取得（cluster CA はローテーションされる）|
 
+## スタック削除手順（クリーンアップ）
+
+dev 環境を完全に破棄する場合、以下の順で実行する。実機検証で発生した詰まり所と対処もまとめている。
+
+### 事前チェック
+
+```bash
+# PrivateLink 接続消費者がいないこと（あれば先にクライアント側 Endpoint を消す）
+SVC_ID=$(aws ec2 describe-vpc-endpoint-service-configurations \
+  --query "ServiceConfigurations[?contains(NetworkLoadBalancerArns[0], 'kafka-shared-nlb')].ServiceId | [0]" --output text)
+aws ec2 describe-vpc-endpoint-connections --filters "Name=service-id,Values=$SVC_ID" \
+  --query 'VpcEndpointConnections[*].VpcEndpointId' --output table
+# → 空ならOK
+
+# DeletionProtection が False であること（dev は False）
+aws eks describe-cluster --name eks-cluster-dev --query 'cluster.deletionProtection'
+# → false（stg/prd を消す場合は config.py で False にして cdk deploy してから）
+```
+
+### Pre-destroy 推奨アクション（CDK 管轄外の事前掃除）
+
+CDK 管理リソース同士の削除順序が原因で詰まる箇所を予め掃除しておくと、`cdk destroy` が一発で通る。
+
+```bash
+# 1. AWS LBC の Validating/Mutating Webhook を先に消す
+#    (理由: cdk destroy で AWS LBC pod が消えた後も webhook 設定が残って
+#           TargetGroupBinding 削除を 1 時間ハングさせる)
+kubectl delete validatingwebhookconfiguration aws-load-balancer-webhook 2>/dev/null
+kubectl delete mutatingwebhookconfiguration aws-load-balancer-webhook 2>/dev/null
+
+# 2. KafkaNodePool を先に削除して Strimzi に PVC/EBS を片付けさせる
+#    (理由: Helm chart 削除が先行すると delete_claim:true でも Strimzi が
+#           動けず EBS が orphan 化する)
+kubectl delete kafkanodepool --all -n kafka --wait=false 2>/dev/null
+```
+
+### Stage 1: cdk destroy
+
+```bash
+cdk destroy EksCdkStack --force
+# 連動削除: VPC / NAT GW / NLB / TargetGroup / EKS Cluster / NodeGroup /
+#          IAM Role / Lambda / AMP / AMG / CloudWatch Log Group など
+# 所要時間: 15〜25 分
+
+cdk destroy IamStack --force
+# eks-cluster-admin-eks-cluster-dev IAM ロール削除
+```
+
+### Stage 2: 削除中エラーの対処
+
+| 症状 | 原因 | 対処 |
+|------|------|------|
+| `TargetGroupBindingXxx` が DELETE_IN_PROGRESS のまま 1 時間ハングして DELETE_FAILED | AWS LBC pod 削除後も webhook 設定が残り、`kubectl delete tgb` が webhook で永遠に待機 | 上記 Pre-destroy で先に webhook を消すか、発生後は `kubectl delete validatingwebhookconfiguration aws-load-balancer-webhook mutatingwebhookconfiguration aws-load-balancer-webhook && kubectl get tgb -A -o name \| xargs -n1 kubectl patch -n kafka --type=json -p='[{"op":"remove","path":"/metadata/finalizers"}]'` してから `cdk destroy` 再実行 |
+| `KafkaNlbSg` SG 削除が `dependent object` で失敗 | NLB 削除のタイミングずれで CFN が依存解消前に SG 削除を試みる（CFN 側の eventual consistency）| 数分待って `cdk destroy` 再実行 / または `aws ec2 delete-security-group --group-id <id>` を直接叩いて再 destroy |
+| `cdk destroy` が **DeletionProtection** で拒否 | stg/prd で `deletion_protection=True` のまま | `config.py` で `False` に変更 → `cdk deploy` → `cdk destroy` |
+| Namespace `kafka` / `monitoring` が `Terminating` で停止 | CRD finalizer 残存 | `kubectl get ns <ns> -o json \| jq '.spec.finalizers=[]' \| kubectl replace --raw "/api/v1/namespaces/<ns>/finalize" -f -` |
+| Helm release が `pending-uninstall` | 前回の helm 操作が中途終了 | `kubectl delete secret -n <ns> -l owner=helm,name=<release-name>` |
+
+### Stage 3: 手動クリーンアップ（CDK 管理外の orphan）
+
+```bash
+# (a) Lambda Log Groups（Lambda 関数を消しても Log Group は CDK では削除されない仕様）
+aws logs describe-log-groups --log-group-name-prefix '/aws/lambda/EksCdkStack-' \
+  --query 'logGroups[*].logGroupName' --output text \
+  | tr '\t' '\n' | xargs -r -n1 aws logs delete-log-group --log-group-name
+
+# (b) 旧 ADOT 期に作られた Container Insights Log Group（現 CDK では作成しない）
+aws logs delete-log-group --log-group-name /aws/containerinsights/eks-cluster-dev/performance 2>/dev/null
+
+# (c) orphan EBS Volume（Pre-destroy で KafkaNodePool を消し忘れた場合の保険）
+aws ec2 describe-volumes \
+  --filters "Name=status,Values=available" "Name=tag:kubernetes.io/cluster/eks-cluster-dev,Values=owned" \
+  --query 'Volumes[*].VolumeId' --output text \
+  | tr '\t' '\n' | xargs -r -n1 aws ec2 delete-volume --volume-id
+
+# (d) ローカル kubeconfig
+ACCT=$(aws sts get-caller-identity --query Account --output text)
+ARN="arn:aws:eks:ap-northeast-1:${ACCT}:cluster/eks-cluster-dev"
+kubectl config delete-cluster $ARN 2>/dev/null
+kubectl config delete-context $ARN 2>/dev/null
+kubectl config delete-user $ARN 2>/dev/null
+```
+
+### 削除完了の検証
+
+```bash
+echo "=== CFN Stacks（残るのは CDKToolkit のみ）==="
+aws cloudformation list-stacks --query 'StackSummaries[?StackStatus!=`DELETE_COMPLETE` && (StackName==`EksCdkStack` || StackName==`IamStack`)]' --output table
+
+echo "=== EKS Cluster ==="
+aws eks list-clusters --query 'clusters' --output table
+
+echo "=== EBS Volume / Snapshot ==="
+aws ec2 describe-volumes --filters "Name=tag:kubernetes.io/cluster/eks-cluster-dev,Values=owned" --query 'Volumes[*].VolumeId' --output table
+aws ec2 describe-snapshots --owner-ids self --filters 'Name=tag:Cluster,Values=kafka-cluster' --query 'Snapshots[*].SnapshotId' --output table
+
+echo "=== NLB / VPC Endpoint Service ==="
+aws elbv2 describe-load-balancers --query 'LoadBalancers[?LoadBalancerName==`kafka-shared-nlb`]' --output table
+aws ec2 describe-vpc-endpoint-service-configurations --output table
+
+echo "=== AMP / AMG Workspaces ==="
+aws amp list-workspaces --query 'workspaces[?alias==`eks-cluster-dev`]' --output table
+aws grafana list-workspaces --query 'workspaces[?name==`eks-cluster-dev-grafana`]' --output table
+
+echo "=== CloudWatch Log Groups / IAM Roles ==="
+aws logs describe-log-groups --query 'logGroups[?contains(logGroupName, `EksCdkStack`) || contains(logGroupName, `eks-cluster-dev`)].logGroupName' --output table
+aws iam list-roles --query 'Roles[?contains(RoleName, `eks-cluster-admin-eks-cluster-dev`) || starts_with(RoleName, `EksCdkStack`)].RoleName' --output table
+```
+
+すべて空であれば `eks-cluster-dev` 関連リソースは完全削除されている。
+
 ## 監視対象メトリクス
 
 | 収集元 | メトリクス内容 | 送信先 |
