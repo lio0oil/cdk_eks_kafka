@@ -1,0 +1,47 @@
+grafana:
+  enabled: false
+
+alertmanager:
+  enabled: false
+
+# node-exporter は DaemonSet なので全 Taint を許容する
+prometheus-node-exporter:
+  tolerations:
+    - operator: Exists
+
+kube-state-metrics:
+  tolerations:
+    - operator: Exists
+
+prometheusOperator:
+  tolerations:
+    - operator: Exists
+
+prometheus:
+  serviceAccount:
+    create: false
+    name: prometheus
+  prometheusSpec:
+    # 全 Namespace の ServiceMonitor / PodMonitor を対象にする
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+    ruleSelectorNilUsesHelmValues: false
+    scrapeConfigSelectorNilUsesHelmValues: false
+    remoteWrite:
+      - url: <AMP_REMOTE_WRITE_URL>
+        sigv4:
+          region: <REGION>
+          service: aps
+        queueConfig:
+          maxSamplesPerSend: 1000
+          maxShards: 200
+          capacity: 2500
+    tolerations:
+      - operator: Exists
+    resources:
+      requests:
+        memory: 512Mi
+        cpu: 250m
+      limits:
+        memory: 1Gi
+        cpu: 500m

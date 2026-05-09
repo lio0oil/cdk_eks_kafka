@@ -1,5 +1,3 @@
-import hashlib
-import json
 from typing import cast
 
 from aws_cdk import Stack
@@ -11,9 +9,10 @@ from aws_cdk import aws_logs as logs
 from constructs import Construct
 
 from ekscdk.config import ClusterConfig
-from ekscdk.constructs._manifest import load, load_all, load_with_subs, manifest_dir
+from ekscdk.constructs._manifest import load, load_with_subs, manifest_dir
 
 _DIR = manifest_dir("monitoring")
+_KAFKA_DIR = manifest_dir("kafka")
 
 
 class MonitoringConstruct(Construct):
@@ -25,10 +24,12 @@ class MonitoringConstruct(Construct):
       - CloudWatch Log Group（コンテナログ）
 
     Kubernetes リソース（CDK 管理 Helm）:
-      - ADOT DaemonSet: メトリクス → AMP + CloudWatch、トレース → X-Ray
+      - kube-prometheus-stack: メトリクス収集 → AMP remote write
+          - Prometheus（SigV4 認証付き remote write）
+          - node-exporter（ノードメトリクス）
+          - kube-state-metrics（Pod/Node/PV メトリクス）
+          - ServiceMonitor / PodMonitor（Kafka metrics）
       - Fluent Bit DaemonSet: ログ → CloudWatch Logs
-      - Kafka Exporter（Strimzi 組み込み）: Consumer Lag メトリクス → ADOT 経由で AMP へ
-      - JMX Prometheus Exporter（Strimzi 組み込み）: ブローカー内部メトリクス → ADOT kubernetes_sd 経由で AMP へ
     """
 
     def __init__(self, scope: Construct, construct_id: str, cluster: eks.ICluster, config: ClusterConfig) -> None:
@@ -54,60 +55,21 @@ class MonitoringConstruct(Construct):
             "MonitoringNamespace", load(_DIR, "namespace.yaml")
         )
 
-        # ── ADOT RBAC（Pod ディスカバリ用）────────────────────────────────────
-        adot_rbac = cluster.add_manifest(
-            "AdotRbac", *load_all(_DIR, "adot-rbac.yaml")
-        )
-
-        # ── ADOT Pod Identity ─────────────────────────────────────────────────
-        adot_sa = cluster.add_service_account(
-            "AdotSa",
-            name="adot-collector",
+        # ── Prometheus Pod Identity ────────────────────────────────────────────
+        # kube-prometheus-stack の serviceAccount.create=false で使用する SA を事前作成
+        prometheus_sa = cluster.add_service_account(
+            "PrometheusSa",
+            name="prometheus",
             namespace="monitoring",
             identity_type=eks.IdentityType.POD_IDENTITY,
         )
-        adot_sa.node.add_dependency(namespace)
-        for stmt in [
+        prometheus_sa.node.add_dependency(namespace)
+        cast(iam.Role, prometheus_sa.role).add_to_policy(
             iam.PolicyStatement(
                 actions=["aps:RemoteWrite", "aps:GetSeries", "aps:GetLabels", "aps:GetMetricMetadata"],
                 resources=[amp_workspace.attr_arn],
-            ),
-            # X-Ray / EC2 describe はサービス仕様上リソース指定不可のため * が必須
-            iam.PolicyStatement(
-                actions=[
-                    "xray:PutTraceSegments",
-                    "xray:PutTelemetryRecords",
-                    "xray:GetSamplingRules",
-                    "xray:GetSamplingTargets",
-                    "ec2:DescribeVolumes",
-                    "ec2:DescribeTags",
-                ],
-                resources=["*"],
-            ),
-            # cloudwatch:PutMetricData はリソース指定不可のため * が必須
-            iam.PolicyStatement(
-                actions=["cloudwatch:PutMetricData"],
-                resources=["*"],
-            ),
-            # Container Insights が動的に作成するロググループを /aws/containerinsights/* に限定
-            iam.PolicyStatement(
-                actions=["logs:CreateLogGroup"],
-                resources=["arn:*:logs:*:*:log-group:/aws/containerinsights/*"],
-            ),
-            iam.PolicyStatement(
-                actions=["logs:CreateLogStream", "logs:PutLogEvents", "logs:DescribeLogGroups", "logs:DescribeLogStreams"],
-                resources=[log_group.log_group_arn, log_group.log_group_arn + ":*"],
-            ),
-            # awsemf exporter が /aws/containerinsights/<cluster>/performance に書き込むための権限
-            iam.PolicyStatement(
-                actions=["logs:CreateLogStream", "logs:PutLogEvents", "logs:DescribeLogGroups", "logs:DescribeLogStreams"],
-                resources=[
-                    "arn:*:logs:*:*:log-group:/aws/containerinsights/*",
-                    "arn:*:logs:*:*:log-group:/aws/containerinsights/*:*",
-                ],
-            ),
-        ]:
-            cast(iam.Role, adot_sa.role).add_to_policy(stmt)
+            )
+        )
 
         # ── Fluent Bit Pod Identity ───────────────────────────────────────────
         fluent_bit_sa = cluster.add_service_account(
@@ -155,35 +117,34 @@ class MonitoringConstruct(Construct):
             grafana_version=config.grafana_version,
         )
 
-        # ── ADOT ConfigMap（Helm chart のデフォルト debug エクスポーターを回避するため直接管理）──
-        adot_configmap_manifest = load_with_subs(
-            _DIR, "adot-configmap.yaml",
+        # ── kube-prometheus-stack（Helm）──────────────────────────────────────
+        kps_values = load_with_subs(
+            _DIR, "kube-prometheus-stack-values.yaml",
             REGION=region,
             AMP_REMOTE_WRITE_URL=amp_remote_write_url,
-            CLUSTER_NAME=config.cluster_name,
         )
-        adot_configmap = cluster.add_manifest("AdotConfigMap", adot_configmap_manifest)
-        adot_configmap.node.add_dependency(namespace)
-
-        # ── ADOT DaemonSet（Helm）────────────────────────────────────────────
-        # ConfigMap の内容ハッシュを podAnnotations に仕込み、内容変更時に Pod を自動ロールアウトする
-        adot_config_hash = hashlib.md5(
-            json.dumps(adot_configmap_manifest["data"], sort_keys=True).encode()
-        ).hexdigest()
-        adot_values = load(_DIR, "adot-values.yaml")
-        adot_values.setdefault("podAnnotations", {})["checksum/config"] = adot_config_hash
-
-        adot = cluster.add_helm_chart(
-            "AdotCollector",
-            chart="opentelemetry-collector",
-            repository=config.adot_chart_repo,
+        kps = cluster.add_helm_chart(
+            "KubePrometheusStack",
+            chart="kube-prometheus-stack",
+            repository=config.kube_prometheus_stack_chart_repo,
             namespace="monitoring",
-            version=config.adot_chart_version,
-            values=adot_values,
+            version=config.kube_prometheus_stack_chart_version,
+            values=kps_values,
         )
-        adot.node.add_dependency(adot_configmap)
-        adot.node.add_dependency(adot_sa)
-        adot.node.add_dependency(adot_rbac)
+        kps.node.add_dependency(namespace)
+        kps.node.add_dependency(prometheus_sa)
+
+        # ── Kafka ServiceMonitor / PodMonitor ─────────────────────────────────
+        # kube-prometheus-stack の CRD がインストールされた後に適用する
+        kafka_sm = cluster.add_manifest(
+            "KafkaServiceMonitor", load(_KAFKA_DIR, "kafka-service-monitor.yaml")
+        )
+        kafka_sm.node.add_dependency(kps)
+
+        kafka_pm = cluster.add_manifest(
+            "KafkaJmxPodMonitor", load(_KAFKA_DIR, "kafka-pod-monitor.yaml")
+        )
+        kafka_pm.node.add_dependency(kps)
 
         # ── Fluent Bit DaemonSet（Helm）───────────────────────────────────────
         fluent_bit = cluster.add_helm_chart(

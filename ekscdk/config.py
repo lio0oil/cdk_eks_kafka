@@ -43,8 +43,8 @@ class ClusterConfig:
     addon_versions: dict[str, str]
     strimzi_version: str
     strimzi_chart_repo: str
-    adot_chart_version: str
-    adot_chart_repo: str
+    kube_prometheus_stack_chart_version: str
+    kube_prometheus_stack_chart_repo: str
     fluent_bit_chart_version: str
     fluent_bit_chart_repo: str
     log_retention: logs.RetentionDays
@@ -67,8 +67,8 @@ class ClusterConfig:
             addon_versions=dict(_ADDON_VERSIONS_K8S_135),
             strimzi_version="1.0.0",
             strimzi_chart_repo="https://strimzi.io/charts/",
-            adot_chart_version="0.153.0",
-            adot_chart_repo="https://open-telemetry.github.io/opentelemetry-helm-charts",
+            kube_prometheus_stack_chart_version="72.3.0",
+            kube_prometheus_stack_chart_repo="https://prometheus-community.github.io/helm-charts",
             fluent_bit_chart_version="0.57.3",
             fluent_bit_chart_repo="https://fluent.github.io/helm-charts",
             log_retention=logs.RetentionDays.ONE_WEEK,
@@ -92,8 +92,8 @@ class ClusterConfig:
             addon_versions=dict(_ADDON_VERSIONS_K8S_135),
             strimzi_version="1.0.0",
             strimzi_chart_repo="https://strimzi.io/charts/",
-            adot_chart_version="0.153.0",
-            adot_chart_repo="https://open-telemetry.github.io/opentelemetry-helm-charts",
+            kube_prometheus_stack_chart_version="72.3.0",
+            kube_prometheus_stack_chart_repo="https://prometheus-community.github.io/helm-charts",
             fluent_bit_chart_version="0.57.3",
             fluent_bit_chart_repo="https://fluent.github.io/helm-charts",
             log_retention=logs.RetentionDays.ONE_MONTH,
@@ -117,8 +117,8 @@ class ClusterConfig:
             addon_versions=dict(_ADDON_VERSIONS_K8S_135),
             strimzi_version="1.0.0",
             strimzi_chart_repo="https://strimzi.io/charts/",
-            adot_chart_version="0.153.0",
-            adot_chart_repo="https://open-telemetry.github.io/opentelemetry-helm-charts",
+            kube_prometheus_stack_chart_version="72.3.0",
+            kube_prometheus_stack_chart_repo="https://prometheus-community.github.io/helm-charts",
             fluent_bit_chart_version="0.57.3",
             fluent_bit_chart_repo="https://fluent.github.io/helm-charts",
             log_retention=logs.RetentionDays.ONE_MONTH,
