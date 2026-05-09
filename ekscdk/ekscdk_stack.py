@@ -5,7 +5,7 @@ from constructs import Construct
 from ekscdk.config import ClusterConfig
 from ekscdk.constructs._manifest import (
     manifest_dir,
-    parse_kafka_external_listener_port,
+    parse_kafka_external_listener,
     parse_kafka_nlb_ports,
 )
 from ekscdk.constructs.addons import AddonsConstruct
@@ -25,7 +25,7 @@ class EksCdkStack(Stack):
 
         kafka_dir = manifest_dir("kafka")
         nlb_ports = parse_kafka_nlb_ports(kafka_dir)
-        external_listener_port = parse_kafka_external_listener_port(kafka_dir)
+        external_listener_name, _ = parse_kafka_external_listener(kafka_dir)
         broker_count = len(nlb_ports) - 1
 
         network = NetworkConstruct(self, "Network", nlb_ports=nlb_ports, config=config)
@@ -42,7 +42,7 @@ class EksCdkStack(Stack):
             broker_count=broker_count,
             nlb_dns_name=network.kafka_nlb.load_balancer_dns_name,
             kafka_target_groups=network.kafka_target_groups,
-            external_listener_port=external_listener_port,
+            external_listener_name=external_listener_name,
         )
         kafka.node.add_dependency(addons)
 

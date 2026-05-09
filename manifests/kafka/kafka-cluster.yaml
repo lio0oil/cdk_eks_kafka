@@ -24,6 +24,10 @@ spec:
         type: nodeport # LoadBalancer から NodePort に変更（共有NLBを使用するため）
         tls: true
         configuration:
+          # Local: クライアント送信元 IP を保持し、余分な node 間ホップを回避する。
+          # AWS LBC の TargetGroupBinding が Pod のあるノードのみ NLB に登録するため、
+          # Local でも全ノードが NLB ターゲットに含まれることはない。
+          externalTrafficPolicy: Local
           bootstrap:
             nodePort: 30094
           brokers:
