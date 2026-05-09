@@ -44,9 +44,13 @@ class NetworkConstruct(Construct):
             "S3Endpoint",
             service=ec2.GatewayVpcEndpointAwsService.S3,
         )
-        # ECR・CloudWatch Logs・STS: Interface 型（時間課金）。
+        # Interface 型 VPC Endpoint（時間課金 + データ処理課金）。
         # NAT Gateway のデータ処理コストを削減し、通信を AWS 網内に閉じる。
         # dev は固定費が転送量コストを上回るため無効化する。
+        # - ECR: コンテナイメージ pull
+        # - CloudWatch Logs: Fluent Bit のログ送信
+        # - STS: Pod Identity の AssumeRole
+        # - aps-workspaces: Prometheus -> AMP の remote_write（メトリクス送信）
         if config.enable_interface_endpoints:
             private_subnets = ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS)
             for endpoint_id, service in [
@@ -54,6 +58,7 @@ class NetworkConstruct(Construct):
                 ("EcrDkrEndpoint",         ec2.InterfaceVpcEndpointAwsService.ECR_DOCKER),
                 ("CloudWatchLogsEndpoint", ec2.InterfaceVpcEndpointAwsService.CLOUDWATCH_LOGS),
                 ("StsEndpoint",            ec2.InterfaceVpcEndpointAwsService.STS),
+                ("ApsWorkspacesEndpoint",  ec2.InterfaceVpcEndpointAwsService("aps-workspaces")),
             ]:
                 self._vpc.add_interface_endpoint(endpoint_id, service=service, subnets=private_subnets)
 
