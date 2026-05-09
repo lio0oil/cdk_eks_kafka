@@ -38,6 +38,7 @@ class KafkaConstruct(Construct):
         namespace = cluster.add_manifest(
             "KafkaNamespace", load(_DIR, "namespace.yaml")
         )
+        self._kafka_namespace = namespace
 
         # ── JMX メトリクス ConfigMap ──────────────────────────────────────────
         cm = cluster.add_manifest("KafkaMetricsCm", load(_DIR, "cm.yaml"))
@@ -107,3 +108,12 @@ class KafkaConstruct(Construct):
             # construct レベルの add_dependency だけでは個別 manifest の DependsOn が
             # 確実に伝搬しないため、リソース単位で明示する。
             binding.node.add_dependency(aws_lbc_chart)
+
+    @property
+    def kafka_namespace(self) -> eks.KubernetesManifest:
+        """kafka namespace の manifest リソース。
+
+        kafka namespace に配置する PodMonitor 等が namespace 作成完了後に
+        apply されるよう依存を張るために公開する。
+        """
+        return self._kafka_namespace

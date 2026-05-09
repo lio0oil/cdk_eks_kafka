@@ -35,3 +35,8 @@ Strimzi 1.0.0 で `v1` が正式 API として昇格し、`v1beta2` / `v1beta1` 
 ブローカー数・ポート設定は `kafka-cluster.yaml` の external listener `configuration` が唯一の真実の源。`kafka.py` はこれをパースして NLB Listener / TargetGroup を組み立て、`BROKER_COUNT` を導出し、`node-pool-broker.yaml` の `<BROKER_REPLICAS>` プレースホルダーに注入する。ブローカーを増減する場合は `kafka-cluster.yaml` の `configuration.brokers` リストを編集するだけでよい。
 
 ### cdk deployはユーザーが行う
+
+### 以下をベースにする
+/home/vscode/workspace/data-on-eks/data-stacks/
+https://awslabs.github.io/data-on-eks/docs/datastacks/streaming/kafka-on-eks/infra
+https://github.com/awslabs/data-on-eks

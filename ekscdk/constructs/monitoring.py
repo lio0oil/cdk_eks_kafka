@@ -32,7 +32,15 @@ class MonitoringConstruct(Construct):
       - Fluent Bit DaemonSet: ログ → CloudWatch Logs
     """
 
-    def __init__(self, scope: Construct, construct_id: str, cluster: eks.ICluster, config: ClusterConfig) -> None:
+    def __init__(
+        self,
+        scope: Construct,
+        construct_id: str,
+        cluster: eks.ICluster,
+        config: ClusterConfig,
+        strimzi_chart: eks.HelmChart,
+        kafka_namespace: eks.KubernetesManifest,
+    ) -> None:
         super().__init__(scope, construct_id)
 
         region = Stack.of(self).region
@@ -147,6 +155,25 @@ class MonitoringConstruct(Construct):
             "KafkaJmxPodMonitor", load(_KAFKA_DIR, "kafka-pod-monitor.yaml")
         )
         kafka_pm.node.add_dependency(kps)
+
+        # Strimzi Cluster Operator (strimzi-system namespace) のメトリクス
+        # PodMonitor は strimzi-system namespace に配置するため、namespace を作る
+        # Strimzi helm chart にも依存する。
+        cluster_op_pm = cluster.add_manifest(
+            "StrimziClusterOperatorPodMonitor",
+            load(_KAFKA_DIR, "cluster-operator-pod-monitor.yaml"),
+        )
+        cluster_op_pm.node.add_dependency(kps)
+        cluster_op_pm.node.add_dependency(strimzi_chart)
+
+        # Strimzi Entity Operator (Topic/User Operator, kafka namespace) のメトリクス
+        # PodMonitor は kafka namespace に配置するため、namespace 作成 manifest にも依存する。
+        entity_op_pm = cluster.add_manifest(
+            "StrimziEntityOperatorPodMonitor",
+            load(_KAFKA_DIR, "entity-operator-pod-monitor.yaml"),
+        )
+        entity_op_pm.node.add_dependency(kps)
+        entity_op_pm.node.add_dependency(kafka_namespace)
 
         # ── Fluent Bit DaemonSet（Helm）───────────────────────────────────────
         fluent_bit = cluster.add_helm_chart(

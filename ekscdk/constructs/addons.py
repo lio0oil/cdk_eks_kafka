@@ -23,7 +23,7 @@ class AddonsConstruct(Construct):
         self._config = config
 
         self._add_eks_addons()
-        self._add_strimzi()
+        self._strimzi_chart = self._add_strimzi()
         self._aws_lbc_chart = self._add_aws_lbc()
 
     def _add_eks_addons(self) -> None:
@@ -52,10 +52,20 @@ class AddonsConstruct(Construct):
             # OVERWRITE にしないと既存 SA のラベルと衝突してデプロイが失敗する。
             addon.node.default_child.add_override("Properties.ResolveConflicts", "OVERWRITE")
 
-    def _add_strimzi(self) -> None:
+    @property
+    def strimzi_chart(self) -> eks.HelmChart:
+        """Strimzi Kafka Operator の Helm chart リソース。
+
+        strimzi-system namespace に配置する PodMonitor 等は、namespace 作成
+        （chart 内の create_namespace=True）を待つ必要があるためこの chart に
+        依存を張る。
+        """
+        return self._strimzi_chart
+
+    def _add_strimzi(self) -> eks.HelmChart:
         self._cluster.add_manifest("Gp3StorageClass", load(_DIR, "gp3-storageclass.yaml"))
 
-        self._cluster.add_helm_chart(
+        return self._cluster.add_helm_chart(
             "StrimziOperator",
             chart="strimzi-kafka-operator",
             repository=self._config.strimzi_chart_repo,
