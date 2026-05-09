@@ -2,7 +2,7 @@ import json
 import os
 from typing import cast
 
-from aws_cdk import Stack
+from aws_cdk import Duration, Stack
 from aws_cdk import aws_eks_v2 as eks
 from aws_cdk import aws_iam as iam
 from constructs import Construct
@@ -101,6 +101,9 @@ class AddonsConstruct(Construct):
         for stmt in policy_doc["Statement"]:
             cast(iam.Role, sa.role).add_to_policy(iam.PolicyStatement.from_json(stmt))
 
+        # wait=True で Pod が Ready になるまで待つ。
+        # TargetGroupBinding の apply 時に AWS LBC の MutatingWebhook が呼ばれるため、
+        # webhook service の endpoint が立ち上がっていないと apply が失敗する。
         chart = self._cluster.add_helm_chart(
             "AwsLbc",
             chart="aws-load-balancer-controller",
@@ -121,6 +124,8 @@ class AddonsConstruct(Construct):
                 ],
                 "replicaCount": 2,
             },
+            wait=True,
+            timeout=Duration.minutes(10),
         )
         chart.node.add_dependency(sa)
         return chart
