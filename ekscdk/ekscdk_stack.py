@@ -42,6 +42,8 @@ class EksCdkStack(Stack):
             broker_count=broker_count,
             nlb_dns_name=network.kafka_nlb.load_balancer_dns_name,
             kafka_target_groups=network.kafka_target_groups,
+            nlb_ports=nlb_ports,
+            nlb_sg_id=network.kafka_nlb_sg.security_group_id,
             external_listener_name=external_listener_name,
         )
         kafka.node.add_dependency(addons)

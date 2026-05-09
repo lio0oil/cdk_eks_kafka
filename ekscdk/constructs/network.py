@@ -65,9 +65,9 @@ class NetworkConstruct(Construct):
             Tags.of(subnet).add("kubernetes.io/role/internal-elb", "1")
 
         # ── Kafka 共有 NLB ─────────────────────────────────────────────────────
-        kafka_nlb_sg = ec2.SecurityGroup(self, "KafkaNlbSg", vpc=self._vpc)
+        self._kafka_nlb_sg = ec2.SecurityGroup(self, "KafkaNlbSg", vpc=self._vpc)
         for _, listener_port, _ in nlb_ports:
-            kafka_nlb_sg.add_ingress_rule(
+            self._kafka_nlb_sg.add_ingress_rule(
                 ec2.Peer.ipv4(self._vpc.vpc_cidr_block),
                 ec2.Port.tcp(listener_port),
             )
@@ -79,7 +79,7 @@ class NetworkConstruct(Construct):
             internet_facing=False,
             cross_zone_enabled=True,
             load_balancer_name="kafka-shared-nlb",
-            security_groups=[kafka_nlb_sg],
+            security_groups=[self._kafka_nlb_sg],
         )
 
         # ── NLB TargetGroup + Listener ────────────────────────────────────────
@@ -135,3 +135,12 @@ class NetworkConstruct(Construct):
     def kafka_target_groups(self) -> dict[str, elbv2.NetworkTargetGroup]:
         """Kafka NLB の TargetGroup マップ（key: 'Bootstrap' / 'Broker0' 等）。"""
         return self._kafka_target_groups
+
+    @property
+    def kafka_nlb_sg(self) -> ec2.ISecurityGroup:
+        """Kafka 共有 NLB のセキュリティグループ。
+
+        TargetGroupBinding の networking.ingress.from に指定し、
+        AWS LBC がノード SG に NodePort 受け入れルールを自動追加できるようにする。
+        """
+        return self._kafka_nlb_sg

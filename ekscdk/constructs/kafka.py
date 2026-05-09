@@ -27,6 +27,8 @@ class KafkaConstruct(Construct):
         broker_count: int,
         nlb_dns_name: str,
         kafka_target_groups: dict[str, elbv2.NetworkTargetGroup],
+        nlb_ports: list[tuple[str, int, int]],
+        nlb_sg_id: str,
         external_listener_name: str,
     ) -> None:
         super().__init__(scope, construct_id)
@@ -76,6 +78,7 @@ class KafkaConstruct(Construct):
         # Service の port は number ではなく name `tcp-<listener>` で参照する
         # （Kubernetes Service の慣習：port は name 参照が推奨）。
         port_name = f"tcp-{external_listener_name}"
+        node_ports_by_name = {name: node_port for name, _, node_port in nlb_ports}
         for tg_key, tg in kafka_target_groups.items():
             if tg_key == "Bootstrap":
                 service_name = f"kafka-cluster-kafka-{external_listener_name}-bootstrap"
@@ -94,6 +97,8 @@ class KafkaConstruct(Construct):
                     SERVICE_NAME=service_name,
                     SERVICE_PORT=port_name,
                     TARGET_GROUP_ARN=tg.target_group_arn,
+                    NLB_SG_ID=nlb_sg_id,
+                    NODE_PORT=str(node_ports_by_name[tg_key]),
                 ),
             )
             binding.node.add_dependency(kafka_cr)

@@ -9,3 +9,14 @@ spec:
     port: <SERVICE_PORT>
   targetGroupARN: <TARGET_GROUP_ARN>
   targetType: instance
+  # AWS LBC がノード SG に NLB SG からの NodePort 受け入れルールを自動追加する。
+  # 明示することで何の通信を許可するかが透明になり、AWS LBC の auto-detect 動作に
+  # 依存せずに済む。
+  networking:
+    ingress:
+      - from:
+          - securityGroup:
+              groupID: <NLB_SG_ID>
+        ports:
+          - protocol: TCP
+            port: <NODE_PORT>
