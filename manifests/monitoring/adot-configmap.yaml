@@ -41,7 +41,7 @@ data:
                 - source_labels: [__meta_kubernetes_pod_name]
                   target_label: pod
                 - source_labels: [__meta_kubernetes_pod_label_strimzi_io_cluster]
-                  target_label: kafka_cluster
+                  target_label: strimzi_io_cluster
                 - source_labels: [__meta_kubernetes_pod_label_strimzi_io_pool_name]
                   target_label: pool
 
@@ -89,6 +89,7 @@ data:
             # DaemonSet のため自ノードのみスクレイプして重複を防ぐ
             - job_name: kubernetes-cadvisor
               scheme: https
+              honor_timestamps: false
               tls_config:
                 insecure_skip_verify: true
               authorization:
