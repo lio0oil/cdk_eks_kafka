@@ -1,6 +1,6 @@
 from typing import cast
 
-from aws_cdk import Stack
+from aws_cdk import Duration, Stack
 from aws_cdk import aws_aps as aps
 from aws_cdk import aws_eks_v2 as eks
 from aws_cdk import aws_grafana as grafana
@@ -123,6 +123,7 @@ class MonitoringConstruct(Construct):
             REGION=region,
             AMP_REMOTE_WRITE_URL=amp_remote_write_url,
         )
+        # timeout を延長して admission webhook の cert 生成 Job が完了するまで待機する
         kps = cluster.add_helm_chart(
             "KubePrometheusStack",
             chart="kube-prometheus-stack",
@@ -130,6 +131,7 @@ class MonitoringConstruct(Construct):
             namespace="monitoring",
             version=config.kube_prometheus_stack_chart_version,
             values=kps_values,
+            timeout=Duration.minutes(15),
         )
         kps.node.add_dependency(namespace)
         kps.node.add_dependency(prometheus_sa)

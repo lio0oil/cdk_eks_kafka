@@ -16,6 +16,10 @@ kube-state-metrics:
 prometheusOperator:
   tolerations:
     - operator: Exists
+  admissionWebhooks:
+    patch:
+      tolerations:
+        - operator: Exists
 
 prometheus:
   serviceAccount:
@@ -31,7 +35,6 @@ prometheus:
       - url: <AMP_REMOTE_WRITE_URL>
         sigv4:
           region: <REGION>
-          service: aps
         queueConfig:
           maxSamplesPerSend: 1000
           maxShards: 200

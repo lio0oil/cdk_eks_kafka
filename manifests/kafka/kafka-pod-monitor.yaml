@@ -15,15 +15,15 @@ spec:
     - port: tcp-prometheus
       interval: 30s
       relabelings:
-        - source_labels: [__meta_kubernetes_namespace]
-          target_label: namespace
-        - source_labels: [__meta_kubernetes_pod_name]
-          target_label: pod
-        - source_labels: [__meta_kubernetes_pod_name]
-          target_label: kubernetes_pod_name
-        - source_labels: [__meta_kubernetes_pod_label_strimzi_io_cluster]
-          target_label: strimzi_io_cluster
-        - source_labels: [__meta_kubernetes_pod_label_strimzi_io_name]
-          target_label: strimzi_io_name
-        - source_labels: [__meta_kubernetes_pod_label_strimzi_io_pool_name]
-          target_label: pool
+        - sourceLabels: [__meta_kubernetes_namespace]
+          targetLabel: namespace
+        - sourceLabels: [__meta_kubernetes_pod_name]
+          targetLabel: pod
+        - sourceLabels: [__meta_kubernetes_pod_name]
+          targetLabel: kubernetes_pod_name
+        - sourceLabels: [__meta_kubernetes_pod_label_strimzi_io_cluster]
+          targetLabel: strimzi_io_cluster
+        - sourceLabels: [__meta_kubernetes_pod_label_strimzi_io_name]
+          targetLabel: strimzi_io_name
+        - sourceLabels: [__meta_kubernetes_pod_label_strimzi_io_pool_name]
+          targetLabel: pool
