@@ -267,10 +267,86 @@ aws grafana delete-workspace-service-account \
 
 ## デプロイ後の動作確認
 
-### 1. kubeconfig 更新
+### 1. kubeconfig 更新 / EKS API アクセス権付与
+
+EKS のアクセスは 2 層構造（**IAM 認証** + **EKS Access Entry → K8s RBAC マッピング**）。CDK が一部を自動で設定するが、新規ユーザー追加は手動が必要。
+
+#### 1-1. CDK が自動で設定するもの
+
+| 設定 | 対象 | 設定箇所 |
+|------|------|---------|
+| `cdk deploy` 実行者を cluster-admin に登録 | デプロイ実行 IAM Principal | `bootstrap_cluster_creator_admin_permissions=True`（`eks_cluster.py`）|
+| `eks-cluster-admin-<env>` ロールに cluster-admin | IamStack のロール | `AccessEntry "AdminAccessEntry"`（`eks_cluster.py`）|
+| context で渡した admin ロールを cluster-admin に登録 | 例：SSO Permission Set Role | `cdk deploy -c console-role-arns=arn1,arn2`（カンマ区切り）|
+
+#### 1-2. kubeconfig 更新
 
 ```bash
-aws eks update-kubeconfig --name <cluster_name> --region ap-northeast-1
+# 自分のクレデンシャルで接続
+aws eks update-kubeconfig --name eks-cluster-dev --region ap-northeast-1
+
+# 特定の IAM ロールを assume して接続（例: 上記 admin ロール）
+aws eks update-kubeconfig --name eks-cluster-dev --region ap-northeast-1 \
+  --role-arn arn:aws:iam::<AWSアカウントID>:role/eks-cluster-admin-eks-cluster-dev
+
+kubectl get nodes
+```
+
+#### 1-3. 後から CLI でユーザー / ロールを追加
+
+`bootstrap_cluster_creator_admin_permissions` でも `console-role-arns` でもカバーされなかった IAM Principal は、後から Access Entry を作って権限を紐付ける。
+
+```bash
+CLUSTER=eks-cluster-dev
+PRINCIPAL_ARN="arn:aws:iam::<AWSアカウントID>:role/AWSReservedSSO_AdministratorAccess_xxx"
+
+# 1) Access Entry 作成（IAM Principal を EKS に登録）
+aws eks create-access-entry \
+  --cluster-name $CLUSTER \
+  --principal-arn "$PRINCIPAL_ARN" \
+  --type STANDARD
+
+# 2) Access Policy を紐付け（K8s 権限を付与）
+aws eks associate-access-policy \
+  --cluster-name $CLUSTER \
+  --principal-arn "$PRINCIPAL_ARN" \
+  --policy-arn arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy \
+  --access-scope type=cluster
+
+# 3) 確認
+aws eks list-associated-access-policies --cluster-name $CLUSTER \
+  --principal-arn "$PRINCIPAL_ARN"
+```
+
+主要 Access Policy ARN：
+
+| Policy | ARN suffix | 用途 |
+|--------|-----------|------|
+| `AmazonEKSClusterAdminPolicy` | `cluster-access-policy/AmazonEKSClusterAdminPolicy` | 全権限（cluster scope）|
+| `AmazonEKSAdminPolicy` | `cluster-access-policy/AmazonEKSAdminPolicy` | namespace 単位 admin（`--access-scope type=namespace,namespaces=kafka`）|
+| `AmazonEKSEditPolicy` | `cluster-access-policy/AmazonEKSEditPolicy` | edit |
+| `AmazonEKSViewPolicy` | `cluster-access-policy/AmazonEKSViewPolicy` | 参照のみ |
+| `AmazonEKSAdminViewPolicy` | `cluster-access-policy/AmazonEKSAdminViewPolicy` | Secret 含む参照 |
+
+#### 1-4. AWS マネジメントコンソールでの操作
+
+1. EKS Console → 対象クラスター → **「アクセス」タブ**
+2. **「アクセスエントリーの作成」**
+3. **IAM Principal ARN** を入力（SSO は `AWSReservedSSO_<PermissionSetName>_<id>` ロール）
+4. **「次へ」→ ポリシーを追加** → `AmazonEKSClusterAdminPolicy` 等を選択、スコープ指定
+5. **「作成」**
+6. ローカルで `aws eks update-kubeconfig` を実行
+
+#### 1-5. Access Entry の削除
+
+```bash
+# Policy 紐付けを解除
+aws eks disassociate-access-policy --cluster-name $CLUSTER \
+  --principal-arn "$PRINCIPAL_ARN" \
+  --policy-arn arn:aws:eks::aws:cluster-access-policy/AmazonEKSClusterAdminPolicy
+
+# Access Entry 削除
+aws eks delete-access-entry --cluster-name $CLUSTER --principal-arn "$PRINCIPAL_ARN"
 ```
 
 ### 2. ノード確認
