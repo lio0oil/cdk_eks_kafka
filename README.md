@@ -444,6 +444,121 @@ kubectl delete kafkauser sample-app -n kafka
 
 > **ACL を使うには**: `kafka-cluster.yaml` の `spec.kafka` に `authorization: { type: simple }` を追加して再デプロイする必要がある。
 
+### 10. Fluent Bit → CloudWatch Logs
+
+コンテナログが `/aws/eks/<cluster>/application` Log Group に流入するか確認する。
+
+```bash
+LG=/aws/eks/eks-cluster-dev/application
+
+# Log Group 存在確認
+aws logs describe-log-groups --log-group-name-prefix "$LG" \
+  --query 'logGroups[*].[logGroupName,retentionInDays]' --output table
+
+# 最近作成された log stream（pod 単位で 1 stream）
+aws logs describe-log-streams --log-group-name "$LG" \
+  --order-by LastEventTime --descending --max-items 5 \
+  --query 'logStreams[*].[logStreamName,lastEventTimestamp]' --output table
+
+# 直近 5 分のログを確認
+aws logs filter-log-events --log-group-name "$LG" \
+  --start-time $(($(date +%s%3N) - 300000)) \
+  --max-items 5 --query 'events[*].message' --output text
+```
+
+各ログには `kubernetes.{namespace,pod_name,labels,annotations}` が付与される（Fluent Bit kube parser が補完）。pod を namespace 別にフィルタしたい場合は `aws logs filter-log-events --filter-pattern '{ $.kubernetes.namespace_name = "kafka" }'` を使う。
+
+### 11. Cruise Control リバランス
+
+`KafkaRebalance` CR でパーティション再配置の提案を生成・承認する。
+
+```bash
+# 提案生成（数十秒）
+kubectl apply -f manifests/kafka/kafka-rebalance.yaml
+kubectl get kafkarebalance -n kafka
+# STATUS: PendingProposal -> ProposalReady
+
+# 提案内容を確認（dataToMoveMB / numReplicaMovements 等）
+kubectl get kafkarebalance kafka-rebalance -n kafka -o yaml | yq '.status.optimizationResult'
+
+# 承認 → 実行
+kubectl annotate kafkarebalance kafka-rebalance \
+  strimzi.io/rebalance=approve --overwrite -n kafka
+kubectl get kafkarebalance -n kafka -w
+# STATUS: Rebalancing -> Ready
+
+# クリーンアップ
+kubectl delete kafkarebalance kafka-rebalance -n kafka
+```
+
+> 既にバランスが取れたクラスターでは `dataToMoveMB: 0` で `Rebalancing` 後すぐ `Ready` になる（warning が出ても正常）。実データが流れてからリバランスすることが本来の用途。
+
+### 12. Strimzi Cluster Operator HA
+
+`replicas: 2` 構成で Leader Lease による leader election が動いているか検証する。
+
+```bash
+# 2 pod が異なるノード（できれば異 AZ）に配置されていること
+kubectl get pods -n strimzi-system -l strimzi.io/kind=cluster-operator -o wide
+
+# 現在の leader を確認
+kubectl get lease strimzi-cluster-operator -n strimzi-system \
+  -o jsonpath='{.spec.holderIdentity}{"\n"}'
+
+# leader を強制終了 → standby が即座に leader 昇格
+LEADER=$(kubectl get lease strimzi-cluster-operator -n strimzi-system \
+  -o jsonpath='{.spec.holderIdentity}')
+kubectl delete pod $LEADER -n strimzi-system --grace-period=0 --force
+
+# 数秒後、新しい leader holder を確認
+sleep 5
+kubectl get lease strimzi-cluster-operator -n strimzi-system \
+  -o jsonpath='{.spec.holderIdentity}{"\n"}'
+# → 別の pod 名になっていれば leader 切替成功
+
+# reconciliation が継続しているか
+NEW_LEADER=$(kubectl get lease strimzi-cluster-operator -n strimzi-system \
+  -o jsonpath='{.spec.holderIdentity}')
+kubectl logs -n strimzi-system $NEW_LEADER --tail=5 | grep -i reconcil
+```
+
+### 13. Strimzi cluster CA cert 状態 / ローテーション
+
+Strimzi が自動発行する cluster CA / clients CA の有効期限と自動更新ポリシーを確認する。
+
+```bash
+# CA Secret 一覧
+kubectl get secret -n kafka kafka-cluster-cluster-ca-cert kafka-cluster-clients-ca-cert
+
+# 有効期限を確認
+kubectl get secret -n kafka kafka-cluster-cluster-ca-cert \
+  -o jsonpath='{.data.ca\.crt}' | base64 -d | openssl x509 -noout -dates -subject
+# notBefore=... notAfter=...
+# subject=O=io.strimzi, CN=cluster-ca v0
+```
+
+**自動更新ポリシー（デフォルト）**
+
+| 項目 | 値 | 備考 |
+|------|-----|------|
+| `generateCertificateAuthority` | `true` | Strimzi が CA を自動生成 |
+| 有効期限 | 365 日 | `clusterCa.validityDays` で変更可 |
+| 自動更新トリガー | 期限 30 日前 | `clusterCa.renewalDays` で変更可 |
+| 更新方式 | 期限内に新 CA を生成、新旧並行運用、ブローカー rolling restart | クライアントは新 `ca.crt` を取得して truststore を更新する必要あり |
+
+**手動ローテーション**（CA 漏洩等）：
+
+```bash
+# 強制更新を要求
+kubectl annotate secret kafka-cluster-cluster-ca-cert \
+  -n kafka strimzi.io/force-renew=true
+
+# Strimzi が新 CA を生成 → broker rolling restart
+# クライアントは新 ca.crt を再取得して truststore を更新
+kubectl get secret kafka-cluster-cluster-ca-cert -n kafka \
+  -o jsonpath='{.data.ca\.crt}' | base64 -d > new-ca.crt
+```
+
 ### よくある問題
 
 | 症状 | 原因 |
