@@ -1,4 +1,5 @@
 from aws_cdk import aws_eks_v2 as eks
+from aws_cdk import aws_elasticloadbalancingv2 as elbv2
 from constructs import Construct
 
 from ekscdk.constructs._manifest import load, load_with_subs, manifest_dir
@@ -13,6 +14,7 @@ class KafkaConstruct(Construct):
     - JMX メトリクス ConfigMap
     - KafkaNodePool（controller x3 / broker x3）
     - Kafka CR（KRaft モード / 外部リスナー NodePort）
+    - TargetGroupBinding（NLB TargetGroup と Strimzi NodePort Service の動的バインド）
 
     NLB / SG / Listener / TargetGroup は NetworkConstruct が管理する。
     """
@@ -24,6 +26,8 @@ class KafkaConstruct(Construct):
         cluster: eks.ICluster,
         broker_count: int,
         nlb_dns_name: str,
+        kafka_target_groups: dict[str, elbv2.NetworkTargetGroup],
+        external_listener_port: int,
     ) -> None:
         super().__init__(scope, construct_id)
 
@@ -62,3 +66,31 @@ class KafkaConstruct(Construct):
             "KafkaExporterService", load(_DIR, "kafka-exporter-service.yaml")
         )
         exporter_svc.node.add_dependency(kafka_cr)
+
+        # ── TargetGroupBinding ─────────────────────────────────────────────────
+        # AWS LBC が Service Endpoints と TargetGroup を同期する。
+        # Bootstrap: kafka-cluster-kafka-external-bootstrap (全 broker pod を選択)
+        # Broker N : kafka-cluster-kafka-N (broker ID N の pod を選択)
+        # ローリング更新時の pod 移動にも追従するため、TargetType=instance でも
+        # Endpoints があるノードのみが NLB ターゲットになる。
+        for tg_key, tg in kafka_target_groups.items():
+            if tg_key == "Bootstrap":
+                service_name = "kafka-cluster-kafka-external-bootstrap"
+                binding_name = "kafka-external-bootstrap"
+            else:
+                # "Broker0" -> 0
+                broker_id = tg_key.removeprefix("Broker")
+                service_name = f"kafka-cluster-kafka-{broker_id}"
+                binding_name = f"kafka-broker-{broker_id}"
+
+            binding = cluster.add_manifest(
+                f"TargetGroupBinding{tg_key}",
+                load_with_subs(
+                    _DIR, "target-group-binding.yaml",
+                    BINDING_NAME=binding_name,
+                    SERVICE_NAME=service_name,
+                    SERVICE_PORT=str(external_listener_port),
+                    TARGET_GROUP_ARN=tg.target_group_arn,
+                ),
+            )
+            binding.node.add_dependency(kafka_cr)

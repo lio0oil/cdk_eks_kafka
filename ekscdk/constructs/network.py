@@ -84,8 +84,10 @@ class NetworkConstruct(Construct):
 
         # ── NLB TargetGroup + Listener ────────────────────────────────────────
         # リスナーとターゲットグループは nlb_ports（kafka-cluster.yaml 由来）で決定する。
-        # TargetType.INSTANCE はターゲットを明示登録せず、EKS ノードが NodePort 経由で
-        # ヘルスチェックを通過した時点で自動的にトラフィックを受け取る。
+        # TargetType.INSTANCE で作成し、ターゲット登録は AWS Load Balancer Controller の
+        # TargetGroupBinding が Service Endpoints と同期して行う（KafkaConstruct で設定）。
+        # これによりローリング更新時の Pod 移動にも追従できる。
+        self._kafka_target_groups: dict[str, elbv2.NetworkTargetGroup] = {}
         for name, listener_port, node_port in nlb_ports:
             tg = elbv2.NetworkTargetGroup(
                 self,
@@ -110,6 +112,7 @@ class NetworkConstruct(Construct):
                 protocol=elbv2.Protocol.TCP,
                 default_target_groups=[tg],
             )
+            self._kafka_target_groups[name] = tg
 
         # ── Kafka PrivateLink (Endpoint Service) ─────────────────────────────
         # NLB本体はCDK管理なので、ここで作成してしまえば ARN は不変
@@ -127,3 +130,8 @@ class NetworkConstruct(Construct):
     @property
     def kafka_nlb(self) -> elbv2.INetworkLoadBalancer:
         return self._kafka_nlb
+
+    @property
+    def kafka_target_groups(self) -> dict[str, elbv2.NetworkTargetGroup]:
+        """Kafka NLB の TargetGroup マップ（key: 'Bootstrap' / 'Broker0' 等）。"""
+        return self._kafka_target_groups

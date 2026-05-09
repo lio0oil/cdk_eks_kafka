@@ -45,6 +45,8 @@ class ClusterConfig:
     strimzi_chart_repo: str
     kube_prometheus_stack_chart_version: str
     kube_prometheus_stack_chart_repo: str
+    aws_lbc_chart_version: str
+    aws_lbc_chart_repo: str
     fluent_bit_chart_version: str
     fluent_bit_chart_repo: str
     log_retention: logs.RetentionDays
@@ -69,6 +71,8 @@ class ClusterConfig:
             strimzi_chart_repo="https://strimzi.io/charts/",
             kube_prometheus_stack_chart_version="84.5.0",
             kube_prometheus_stack_chart_repo="https://prometheus-community.github.io/helm-charts",
+            aws_lbc_chart_version="3.3.0",
+            aws_lbc_chart_repo="https://aws.github.io/eks-charts",
             fluent_bit_chart_version="0.57.3",
             fluent_bit_chart_repo="https://fluent.github.io/helm-charts",
             log_retention=logs.RetentionDays.ONE_WEEK,
@@ -94,6 +98,8 @@ class ClusterConfig:
             strimzi_chart_repo="https://strimzi.io/charts/",
             kube_prometheus_stack_chart_version="84.5.0",
             kube_prometheus_stack_chart_repo="https://prometheus-community.github.io/helm-charts",
+            aws_lbc_chart_version="3.3.0",
+            aws_lbc_chart_repo="https://aws.github.io/eks-charts",
             fluent_bit_chart_version="0.57.3",
             fluent_bit_chart_repo="https://fluent.github.io/helm-charts",
             log_retention=logs.RetentionDays.ONE_MONTH,
@@ -119,6 +125,8 @@ class ClusterConfig:
             strimzi_chart_repo="https://strimzi.io/charts/",
             kube_prometheus_stack_chart_version="84.5.0",
             kube_prometheus_stack_chart_repo="https://prometheus-community.github.io/helm-charts",
+            aws_lbc_chart_version="3.3.0",
+            aws_lbc_chart_repo="https://aws.github.io/eks-charts",
             fluent_bit_chart_version="0.57.3",
             fluent_bit_chart_repo="https://fluent.github.io/helm-charts",
             log_retention=logs.RetentionDays.ONE_MONTH,

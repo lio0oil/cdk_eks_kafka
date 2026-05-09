@@ -28,6 +28,32 @@ def load_all(base_dir: str, filename: str) -> list[dict]:
         return [doc for doc in yaml.safe_load_all(f) if doc is not None]
 
 
+def parse_kafka_external_listener_port(base_dir: str) -> int:
+    """kafka-cluster.yaml の external listener.port を返す。
+
+    Strimzi が生成する per-broker NodePort Service の Service port は、
+    すべて external listener の `port` と同じ値になる（NodePort は別）。
+    TargetGroupBinding の `serviceRef.port` で使用する。
+    """
+    manifest = load(base_dir, "kafka-cluster.yaml")
+    try:
+        listeners = manifest["spec"]["kafka"]["listeners"]
+    except KeyError as e:
+        raise ValueError(
+            f"kafka-cluster.yaml に必須フィールドがありません: {e}"
+        ) from e
+    external = next((listener for listener in listeners if listener["name"] == "external"), None)
+    if external is None:
+        raise ValueError(
+            "kafka-cluster.yaml に 'external' リスナーが見つかりません。"
+        )
+    if "port" not in external:
+        raise ValueError(
+            "kafka-cluster.yaml の external リスナーに 'port' が定義されていません。"
+        )
+    return external["port"]
+
+
 def parse_kafka_nlb_ports(base_dir: str) -> list[tuple[str, int, int]]:
     """kafka-cluster.yaml の external listener から (name, listener_port, node_port) を返す。
 

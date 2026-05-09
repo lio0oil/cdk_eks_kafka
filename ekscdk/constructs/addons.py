@@ -1,3 +1,8 @@
+import json
+import os
+from typing import cast
+
+from aws_cdk import Stack
 from aws_cdk import aws_eks_v2 as eks
 from aws_cdk import aws_iam as iam
 from constructs import Construct
@@ -19,6 +24,7 @@ class AddonsConstruct(Construct):
 
         self._add_eks_addons()
         self._add_strimzi()
+        self._add_aws_lbc()
 
     def _add_eks_addons(self) -> None:
         # EBS CSI Driver 用 Pod Identity
@@ -64,3 +70,46 @@ class AddonsConstruct(Construct):
                 ],
             },
         )
+
+    def _add_aws_lbc(self) -> None:
+        """AWS Load Balancer Controller を導入する。
+
+        Strimzi の per-broker NodePort Service を NLB の TargetGroup に
+        TargetGroupBinding 経由で動的バインドするために必要。
+        ASG ベースの static attachment と異なり、Pod のローリング更新時にも
+        Service Endpoints と TargetGroup の同期が追従する。
+        """
+        sa = self._cluster.add_service_account(
+            "AwsLbcSa",
+            name="aws-load-balancer-controller",
+            namespace="kube-system",
+            identity_type=eks.IdentityType.POD_IDENTITY,
+        )
+        # AWS LBC 公式 IAM ポリシー
+        with open(os.path.join(_DIR, "aws-lbc-iam-policy.json")) as f:
+            policy_doc = json.load(f)
+        for stmt in policy_doc["Statement"]:
+            cast(iam.Role, sa.role).add_to_policy(iam.PolicyStatement.from_json(stmt))
+
+        chart = self._cluster.add_helm_chart(
+            "AwsLbc",
+            chart="aws-load-balancer-controller",
+            repository=self._config.aws_lbc_chart_repo,
+            namespace="kube-system",
+            version=self._config.aws_lbc_chart_version,
+            values={
+                "clusterName": self._config.cluster_name,
+                "region": Stack.of(self).region,
+                "vpcId": self._cluster.vpc.vpc_id,
+                "serviceAccount": {
+                    "create": False,
+                    "name": "aws-load-balancer-controller",
+                },
+                # システムノードのみで稼働させる
+                "tolerations": [
+                    {"key": "CriticalAddonsOnly", "operator": "Equal", "value": "true", "effect": "NoSchedule"}
+                ],
+                "replicaCount": 2,
+            },
+        )
+        chart.node.add_dependency(sa)
