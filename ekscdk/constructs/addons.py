@@ -49,6 +49,8 @@ class AddonsConstruct(Construct):
             "coredns": "CoreDns",
             "kube-proxy": "KubeProxy",
             "aws-ebs-csi-driver": "EbsCsiDriver",
+            "metrics-server": "MetricsServer",
+            "eks-node-monitoring-agent": "NodeMonitoringAgent",
         }.items():
             addon = eks.Addon(
                 self,
