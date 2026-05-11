@@ -47,6 +47,14 @@ class EksClusterConstruct(Construct):
         cfn_cluster = self._cluster.node.default_child
         cfn_cluster.add_property_override("UpgradePolicy.SupportType", "STANDARD")  # type: ignore[union-attr]
         cfn_cluster.add_property_override("DeletionProtection", config.deletion_protection)  # type: ignore[union-attr]
+        # Control Plane Logs を CloudWatch Logs に送る。
+        # data-on-eks リファレンス（terraform-aws-modules/eks v21）の
+        # enabled_log_types デフォルト値と揃える。controllerManager / scheduler は
+        # 採用しない（リファレンス側も未有効化、コスト対監査価値が低い）。
+        cfn_cluster.add_property_override(  # type: ignore[union-attr]
+            "Logging.ClusterLogging.EnabledTypes",
+            [{"Type": "audit"}, {"Type": "api"}, {"Type": "authenticator"}],
+        )
 
         _cluster_admin_policy = [
             eks.AccessPolicy.from_access_policy_name(
