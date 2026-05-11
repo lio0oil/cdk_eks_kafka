@@ -1,5 +1,9 @@
 grafana:
   enabled: true
+  # KPS chart 同梱の標準 dashboard セット (Kubernetes / Cluster / Node / Pod /
+  # API server / kubelet 等) を取り込む。chart デフォルトと同じ値だが、
+  # 「意図的に使っている」ことを明示するため記載する
+  defaultDashboardsEnabled: true
   # CDK 側で Pod Identity 紐付き SA を作成するため Helm からは作らない
   serviceAccount:
     create: false
