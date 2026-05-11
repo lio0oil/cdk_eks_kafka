@@ -15,7 +15,11 @@ _DIR = manifest_dir("addons")
 
 class AddonsConstruct(Construct):
     def __init__(
-        self, scope: Construct, construct_id: str, cluster: eks.ICluster, config: ClusterConfig
+        self,
+        scope: Construct,
+        construct_id: str,
+        cluster: eks.ICluster,
+        config: ClusterConfig,
     ) -> None:
         super().__init__(scope, construct_id)
 
@@ -41,16 +45,23 @@ class AddonsConstruct(Construct):
         )
 
         for addon_name, construct_id in {
-            "vpc-cni":            "VpcCni",
-            "coredns":            "CoreDns",
-            "kube-proxy":         "KubeProxy",
+            "vpc-cni": "VpcCni",
+            "coredns": "CoreDns",
+            "kube-proxy": "KubeProxy",
             "aws-ebs-csi-driver": "EbsCsiDriver",
         }.items():
-            addon = eks.Addon(self, construct_id, cluster=self._cluster,
-                              addon_name=addon_name, addon_version=self._config.addon_versions[addon_name])
+            addon = eks.Addon(
+                self,
+                construct_id,
+                cluster=self._cluster,
+                addon_name=addon_name,
+                addon_version=self._config.addon_versions[addon_name],
+            )
             # aws_eks_v2.Addon は ResolveConflicts を公開していないためエスケープハッチで設定する。
             # OVERWRITE にしないと既存 SA のラベルと衝突してデプロイが失敗する。
-            addon.node.default_child.add_override("Properties.ResolveConflicts", "OVERWRITE")
+            addon.node.default_child.add_override(
+                "Properties.ResolveConflicts", "OVERWRITE"
+            )  # type: ignore
 
     @property
     def strimzi_chart(self) -> eks.HelmChart:
@@ -63,7 +74,9 @@ class AddonsConstruct(Construct):
         return self._strimzi_chart
 
     def _add_strimzi(self) -> eks.HelmChart:
-        self._cluster.add_manifest("Gp3StorageClass", load(_DIR, "gp3-storageclass.yaml"))
+        self._cluster.add_manifest(
+            "Gp3StorageClass", load(_DIR, "gp3-storageclass.yaml")
+        )
 
         return self._cluster.add_helm_chart(
             "StrimziOperator",
@@ -76,7 +89,12 @@ class AddonsConstruct(Construct):
                 "watchNamespaces": ["kafka"],
                 "replicas": 2,
                 "tolerations": [
-                    {"key": "CriticalAddonsOnly", "operator": "Equal", "value": "true", "effect": "NoSchedule"}
+                    {
+                        "key": "CriticalAddonsOnly",
+                        "operator": "Equal",
+                        "value": "true",
+                        "effect": "NoSchedule",
+                    }
                 ],
             },
         )
@@ -130,7 +148,12 @@ class AddonsConstruct(Construct):
                 },
                 # システムノードのみで稼働させる
                 "tolerations": [
-                    {"key": "CriticalAddonsOnly", "operator": "Equal", "value": "true", "effect": "NoSchedule"}
+                    {
+                        "key": "CriticalAddonsOnly",
+                        "operator": "Equal",
+                        "value": "true",
+                        "effect": "NoSchedule",
+                    }
                 ],
                 "replicaCount": 2,
             },

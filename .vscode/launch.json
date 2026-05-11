@@ -1,0 +1,29 @@
+{
+  "version": "0.2.0",
+  "inputs": [
+    {
+      "id": "envName",
+      "type": "pickString",
+      "description": "CDK context env",
+      "options": ["dev", "stg", "prd"],
+      "default": "dev"
+    }
+  ],
+  "configurations": [
+    {
+      "name": "cdk synth (app.py)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/app.py",
+      "cwd": "${workspaceFolder}",
+      "python": "${workspaceFolder}/.venv/bin/python3",
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "env": {
+        "CDK_DEFAULT_ACCOUNT": "123456789012",
+        "CDK_DEFAULT_REGION": "ap-northeast-1",
+        "CDK_CONTEXT_JSON": "{\"env\": \"${input:envName}\"}"
+      }
+    }
+  ]
+}
