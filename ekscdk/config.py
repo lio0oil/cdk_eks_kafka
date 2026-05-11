@@ -1,9 +1,10 @@
 from __future__ import annotations
 
 from dataclasses import dataclass
-from aws_cdk import aws_logs as logs
-from aws_cdk import aws_eks_v2 as eks
+
 from aws_cdk import RemovalPolicy
+from aws_cdk import aws_eks_v2 as eks
+from aws_cdk import aws_logs as logs
 
 # Kubernetes 1.35 向けアドオン最新バージョン（2026-05 時点）
 # 更新コマンド:
@@ -14,11 +15,11 @@ from aws_cdk import RemovalPolicy
 #       --query 'addons[0].addonVersions[0].addonVersion' --output text
 #   done
 _ADDON_VERSIONS_K8S_135: dict[str, str] = {
-    "vpc-cni":                   "v1.21.1-eksbuild.8",
-    "coredns":                   "v1.14.2-eksbuild.4",
-    "kube-proxy":                "v1.35.3-eksbuild.5",
-    "aws-ebs-csi-driver":        "v1.59.0-eksbuild.1",
-    "metrics-server":            "v0.8.1-eksbuild.6",
+    "vpc-cni": "v1.21.1-eksbuild.8",
+    "coredns": "v1.14.2-eksbuild.4",
+    "kube-proxy": "v1.35.3-eksbuild.5",
+    "aws-ebs-csi-driver": "v1.59.0-eksbuild.1",
+    "metrics-server": "v0.8.1-eksbuild.6",
     "eks-node-monitoring-agent": "v1.6.4-eksbuild.1",
 }
 

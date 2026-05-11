@@ -54,11 +54,17 @@ class NetworkConstruct(Construct):
         if config.enable_interface_endpoints:
             private_subnets = ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS)
             for endpoint_id, service in [
-                ("EcrApiEndpoint",         ec2.InterfaceVpcEndpointAwsService.ECR),
-                ("EcrDkrEndpoint",         ec2.InterfaceVpcEndpointAwsService.ECR_DOCKER),
-                ("CloudWatchLogsEndpoint", ec2.InterfaceVpcEndpointAwsService.CLOUDWATCH_LOGS),
-                ("StsEndpoint",            ec2.InterfaceVpcEndpointAwsService.STS),
-                ("ApsWorkspacesEndpoint",  ec2.InterfaceVpcEndpointAwsService("aps-workspaces")),
+                ("EcrApiEndpoint", ec2.InterfaceVpcEndpointAwsService.ECR),
+                ("EcrDkrEndpoint", ec2.InterfaceVpcEndpointAwsService.ECR_DOCKER),
+                (
+                    "CloudWatchLogsEndpoint",
+                    ec2.InterfaceVpcEndpointAwsService.CLOUDWATCH_LOGS,
+                ),
+                ("StsEndpoint", ec2.InterfaceVpcEndpointAwsService.STS),
+                (
+                    "ApsWorkspacesEndpoint",
+                    ec2.InterfaceVpcEndpointAwsService("aps-workspaces"),
+                ),
             ]:
                 self._vpc.add_interface_endpoint(endpoint_id, service=service, subnets=private_subnets)
 

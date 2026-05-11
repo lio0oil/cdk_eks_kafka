@@ -37,9 +37,7 @@ class KafkaConstruct(Construct):
         super().__init__(scope, construct_id)
 
         # ── Namespace ─────────────────────────────────────────────────────────
-        namespace = cluster.add_manifest(
-            "KafkaNamespace", load(_DIR, "namespace.yaml")
-        )
+        namespace = cluster.add_manifest("KafkaNamespace", load(_DIR, "namespace.yaml"))
         self._kafka_namespace = namespace
 
         # ── JMX メトリクス ConfigMap ──────────────────────────────────────────
@@ -53,7 +51,8 @@ class KafkaConstruct(Construct):
         controller_pool = cluster.add_manifest(
             "KafkaControllerPool",
             load_with_subs(
-                _DIR, "node-pool-controller.yaml",
+                _DIR,
+                "node-pool-controller.yaml",
                 DELETE_CLAIM=delete_claim_str,
                 CONTROLLER_REPLICAS=str(controller_count),
             ),
@@ -64,7 +63,8 @@ class KafkaConstruct(Construct):
         broker_pool = cluster.add_manifest(
             "KafkaBrokerPool",
             load_with_subs(
-                _DIR, "node-pool-broker.yaml",
+                _DIR,
+                "node-pool-broker.yaml",
                 BROKER_REPLICAS=str(broker_count),
                 DELETE_CLAIM=delete_claim_str,
             ),
@@ -103,7 +103,8 @@ class KafkaConstruct(Construct):
             binding = cluster.add_manifest(
                 f"TargetGroupBinding{tg_key}",
                 load_with_subs(
-                    _DIR, "target-group-binding.yaml",
+                    _DIR,
+                    "target-group-binding.yaml",
                     BINDING_NAME=binding_name,
                     SERVICE_NAME=service_name,
                     SERVICE_PORT=port_name,

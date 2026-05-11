@@ -41,18 +41,12 @@ def parse_kafka_external_listener(base_dir: str) -> tuple[str, int]:
     try:
         listeners = manifest["spec"]["kafka"]["listeners"]
     except KeyError as e:
-        raise ValueError(
-            f"kafka-cluster.yaml に必須フィールドがありません: {e}"
-        ) from e
+        raise ValueError(f"kafka-cluster.yaml に必須フィールドがありません: {e}") from e
     external = next((listener for listener in listeners if listener["name"] == "external"), None)
     if external is None:
-        raise ValueError(
-            "kafka-cluster.yaml に 'external' リスナーが見つかりません。"
-        )
+        raise ValueError("kafka-cluster.yaml に 'external' リスナーが見つかりません。")
     if "port" not in external:
-        raise ValueError(
-            "kafka-cluster.yaml の external リスナーに 'port' が定義されていません。"
-        )
+        raise ValueError("kafka-cluster.yaml の external リスナーに 'port' が定義されていません。")
     return external["name"], external["port"]
 
 
@@ -75,7 +69,7 @@ def parse_kafka_nlb_ports(base_dir: str) -> list[tuple[str, int, int]]:
     if external is None:
         raise ValueError(
             "kafka-cluster.yaml に 'external' リスナーが見つかりません。"
-            f"定義済みリスナー: {[l['name'] for l in listeners]}"
+            f"定義済みリスナー: {[listener['name'] for listener in listeners]}"
         )
 
     cfg = external.get("configuration")
@@ -84,13 +78,9 @@ def parse_kafka_nlb_ports(base_dir: str) -> list[tuple[str, int, int]]:
 
     for required in ("bootstrap", "brokers"):
         if required not in cfg:
-            raise ValueError(
-                f"kafka-cluster.yaml の external.configuration に '{required}' が定義されていません。"
-            )
+            raise ValueError(f"kafka-cluster.yaml の external.configuration に '{required}' が定義されていません。")
     if "nodePort" not in cfg["bootstrap"]:
-        raise ValueError(
-            "kafka-cluster.yaml の external.configuration.bootstrap に 'nodePort' が定義されていません。"
-        )
+        raise ValueError("kafka-cluster.yaml の external.configuration.bootstrap に 'nodePort' が定義されていません。")
 
     ports: list[tuple[str, int, int]] = [("Bootstrap", external["port"], cfg["bootstrap"]["nodePort"])]
     for i, broker in enumerate(cfg["brokers"]):

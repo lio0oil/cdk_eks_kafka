@@ -1,7 +1,11 @@
 import pytest
 import yaml
 
-from ekscdk.constructs._manifest import load_with_subs, manifest_dir, parse_kafka_nlb_ports
+from ekscdk.constructs._manifest import (
+    load_with_subs,
+    manifest_dir,
+    parse_kafka_nlb_ports,
+)
 
 
 def test_load_with_subs_replaces_placeholders(tmp_path):
@@ -62,10 +66,21 @@ def test_parse_kafka_nlb_ports_missing_spec_path(tmp_path):
 
 def test_parse_kafka_nlb_ports_missing_bootstrap_nodeport(tmp_path):
     manifest = {
-        "spec": {"kafka": {"listeners": [{
-            "name": "external", "port": 9094, "type": "nodeport",
-            "configuration": {"bootstrap": {}, "brokers": []},  # nodePort 欠落
-        }]}}
+        "spec": {
+            "kafka": {
+                "listeners": [
+                    {
+                        "name": "external",
+                        "port": 9094,
+                        "type": "nodeport",
+                        "configuration": {
+                            "bootstrap": {},
+                            "brokers": [],
+                        },  # nodePort 欠落
+                    }
+                ]
+            }
+        }
     }
     (tmp_path / "kafka-cluster.yaml").write_text(yaml.dump(manifest))
     with pytest.raises(ValueError, match="bootstrap.*nodePort|nodePort.*bootstrap"):
@@ -74,13 +89,21 @@ def test_parse_kafka_nlb_ports_missing_bootstrap_nodeport(tmp_path):
 
 def test_parse_kafka_nlb_ports_broker_missing_field(tmp_path):
     manifest = {
-        "spec": {"kafka": {"listeners": [{
-            "name": "external", "port": 9094, "type": "nodeport",
-            "configuration": {
-                "bootstrap": {"nodePort": 30094},
-                "brokers": [{"broker": 0, "nodePort": 30095}],  # advertisedPort 欠落
-            },
-        }]}}
+        "spec": {
+            "kafka": {
+                "listeners": [
+                    {
+                        "name": "external",
+                        "port": 9094,
+                        "type": "nodeport",
+                        "configuration": {
+                            "bootstrap": {"nodePort": 30094},
+                            "brokers": [{"broker": 0, "nodePort": 30095}],  # advertisedPort 欠落
+                        },
+                    }
+                ]
+            }
+        }
     }
     (tmp_path / "kafka-cluster.yaml").write_text(yaml.dump(manifest))
     with pytest.raises(ValueError, match="advertisedPort"):

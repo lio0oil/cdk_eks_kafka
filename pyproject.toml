@@ -13,5 +13,73 @@ dependencies = [
 
 [dependency-groups]
 dev = [
-    "pytest==8.4.2",
+    "commitizen>=4.0",
+    "pre-commit>=3.5",
+    "pyright>=1.1.408",
+    "pytest>=9.0.2",
+    "pytest-env>=1.5.0",
+    "pytest-mock>=3.15.1",
+    "ruff>=0.15.1",
 ]
+
+[tool.pytest.ini_options]
+minversion = "9.0"
+testpaths = ["tests"]
+pythonpath = ["src"]
+addopts = ["-ra", "-q", "--strict-markers", "--strict-config"]
+#addopts = ["-ra", "-q", "--strict-markers", "--strict-config", "--cov=app", "--cov-report=term-missing"]
+
+# [tool.coverage.run]
+# branch = true
+# source = ["src"]
+
+# [tool.coverage.report]
+# fail_under = 80
+# show_missing = true
+# skip_covered = false
+# exclude_lines = [
+#     "pragma: no cover",
+#     "raise NotImplementedError",
+#     "if TYPE_CHECKING:",
+#     "@overload",
+# ]
+
+[tool.pyright]
+include = ["src"]
+extraPaths = ["src"]
+exclude = ["**/__pycache__", "**/node_modules", "**/.*", ".venv", "tests"]
+typeCheckingMode = "standard"
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+select = [
+    "E",   # pycodestyle (エラー)
+    "F",   # Pyflakes (論理エラー)
+    "I",   # isort (import 整列。VSCode の source.organizeImports 連携)
+    "C90", # mccabe (循環的複雑度)
+    "T20", # flake8-print (print文禁止)
+    "PLR", # Pylint Refactor (マジックナンバー、過剰な引数など)
+    "BLE", # flake8-blind-except (盲目的なExcept禁止)
+    "SIM", # flake8-simplify (with文強制、コード簡略化)
+    "S",   # flake8-bandit (セキュリティ、シークレット露呈防御)
+    "PT",  # flake8-pytest-style (pytestアサーション強制)
+]
+ignore = [
+    "PLR0913", # Too many arguments: CDK Construct は依存注入で引数が多くなりがちなため許容
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S101", "PLR2004", "PLR0913", "E501", "S108"]
+"src/app/main.py" = ["T20"]  # CLI entry point: stdout への出力を許容
+
+[tool.ruff.lint.mccabe]
+max-complexity = 10
+
+[tool.commitizen]
+name = "cz_conventional_commits"
+version = "0.1.0"
+tag_format = "v$version"
+major_version_zero = true
+update_changelog_on_bump = false

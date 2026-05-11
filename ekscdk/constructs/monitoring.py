@@ -59,9 +59,7 @@ class MonitoringConstruct(Construct):
         )
 
         # ── monitoring Namespace ──────────────────────────────────────────────
-        namespace = cluster.add_manifest(
-            "MonitoringNamespace", load(_DIR, "namespace.yaml")
-        )
+        namespace = cluster.add_manifest("MonitoringNamespace", load(_DIR, "namespace.yaml"))
 
         # ── Prometheus Pod Identity ────────────────────────────────────────────
         # kube-prometheus-stack の serviceAccount.create=false で使用する SA を事前作成
@@ -74,7 +72,12 @@ class MonitoringConstruct(Construct):
         prometheus_sa.node.add_dependency(namespace)
         cast(iam.Role, prometheus_sa.role).add_to_policy(
             iam.PolicyStatement(
-                actions=["aps:RemoteWrite", "aps:GetSeries", "aps:GetLabels", "aps:GetMetricMetadata"],
+                actions=[
+                    "aps:RemoteWrite",
+                    "aps:GetSeries",
+                    "aps:GetLabels",
+                    "aps:GetMetricMetadata",
+                ],
                 resources=[amp_workspace.attr_arn],
             )
         )
@@ -117,7 +120,8 @@ class MonitoringConstruct(Construct):
         # ── kube-prometheus-stack（Helm）──────────────────────────────────────
         amp_query_url = amp_workspace.attr_prometheus_endpoint.rstrip("/")
         kps_values = load_with_subs(
-            _DIR, "kube-prometheus-stack-values.yaml",
+            _DIR,
+            "kube-prometheus-stack-values.yaml",
             REGION=region,
             AMP_REMOTE_WRITE_URL=amp_remote_write_url,
             AMP_QUERY_URL=amp_query_url,
@@ -144,7 +148,9 @@ class MonitoringConstruct(Construct):
             "grafana-strimzi-exporter-dashboard.yaml",
             "grafana-strimzi-operators-dashboard.yaml",
         ):
-            cm_id = "Dash" + fname.removeprefix("grafana-strimzi-").removesuffix("-dashboard.yaml").title().replace("-", "")
+            cm_id = "Dash" + fname.removeprefix("grafana-strimzi-").removesuffix("-dashboard.yaml").title().replace(
+                "-", ""
+            )
             cm = cluster.add_manifest(cm_id, load(_DIR, f"dashboards/{fname}"))
             cm.node.add_dependency(kps)
 
@@ -152,9 +158,7 @@ class MonitoringConstruct(Construct):
         # data-on-eks リファレンスに従い、broker / controller / cruise-control /
         # kafka-exporter を1つの PodMonitor (kafka-resources-metrics) で scrape する。
         # ServiceMonitor は持たない（重複 scrape を避ける）。
-        kafka_pm = cluster.add_manifest(
-            "KafkaResourcesPodMonitor", load(_KAFKA_DIR, "kafka-pod-monitor.yaml")
-        )
+        kafka_pm = cluster.add_manifest("KafkaResourcesPodMonitor", load(_KAFKA_DIR, "kafka-pod-monitor.yaml"))
         kafka_pm.node.add_dependency(kps)
         kafka_pm.node.add_dependency(kafka_namespace)
 
@@ -185,7 +189,8 @@ class MonitoringConstruct(Construct):
             namespace="monitoring",
             version=config.fluent_bit_chart_version,
             values=load_with_subs(
-                _DIR, "fluent-bit-values.yaml",
+                _DIR,
+                "fluent-bit-values.yaml",
                 REGION=region,
                 LOG_GROUP_NAME=log_group.log_group_name,
             ),

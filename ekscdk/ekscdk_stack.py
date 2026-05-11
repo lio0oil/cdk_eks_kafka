@@ -19,7 +19,12 @@ class EksCdkStack(Stack):
     """インフラスタック（VPC / EKS / アドオン / Kafka）"""
 
     def __init__(
-        self, scope: Construct, construct_id: str, admin_role: iam.IRole, config: ClusterConfig, **kwargs
+        self,
+        scope: Construct,
+        construct_id: str,
+        admin_role: iam.IRole,
+        config: ClusterConfig,
+        **kwargs,
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)
 
@@ -30,7 +35,12 @@ class EksCdkStack(Stack):
 
         network = NetworkConstruct(self, "Network", nlb_ports=nlb_ports, config=config)
         eks_construct = EksClusterConstruct(
-            self, "EksCluster", vpc=network.vpc, admin_role=admin_role, broker_count=broker_count, config=config
+            self,
+            "EksCluster",
+            vpc=network.vpc,
+            admin_role=admin_role,
+            broker_count=broker_count,
+            config=config,
         )
         addons = AddonsConstruct(self, "Addons", cluster=eks_construct.cluster, config=config)
         addons.node.add_dependency(eks_construct)

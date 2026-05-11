@@ -12,7 +12,13 @@ from ekscdk.config import ClusterConfig
 
 class EksClusterConstruct(Construct):
     def __init__(
-        self, scope: Construct, construct_id: str, vpc: ec2.IVpc, admin_role: iam.IRole, broker_count: int, config: ClusterConfig
+        self,
+        scope: Construct,
+        construct_id: str,
+        vpc: ec2.IVpc,
+        admin_role: iam.IRole,
+        broker_count: int,
+        config: ClusterConfig,
     ) -> None:
         super().__init__(scope, construct_id)
 
@@ -21,9 +27,7 @@ class EksClusterConstruct(Construct):
             "Cluster",
             cluster_name=config.cluster_name,
             vpc=vpc,
-            vpc_subnets=[
-                ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS)
-            ],
+            vpc_subnets=[ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS)],
             version=eks.KubernetesVersion.V1_35,
             default_capacity=0,
             default_capacity_type=DefaultCapacityType.NODEGROUP,
@@ -73,7 +77,8 @@ class EksClusterConstruct(Construct):
         # IMDSv2 ホップ制限を 2 に設定して Pod から EC2 メタデータにアクセス可能にする
         # デフォルト値 1 だと awscontainerinsightreceiver が EC2 インスタンス情報を取得できない
         imds_lt = ec2.LaunchTemplate(
-            self, "ImdsLaunchTemplate",
+            self,
+            "ImdsLaunchTemplate",
             http_put_response_hop_limit=2,
             http_tokens=ec2.LaunchTemplateHttpTokens.REQUIRED,
         )

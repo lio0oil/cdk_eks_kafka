@@ -39,9 +39,7 @@ class AddonsConstruct(Construct):
             identity_type=eks.IdentityType.POD_IDENTITY,
         )
         ebs_csi_sa.role.add_managed_policy(
-            iam.ManagedPolicy.from_aws_managed_policy_name(
-                "service-role/AmazonEBSCSIDriverPolicy"
-            )
+            iam.ManagedPolicy.from_aws_managed_policy_name("service-role/AmazonEBSCSIDriverPolicy")
         )
 
         for addon_name, construct_id in {
@@ -61,9 +59,7 @@ class AddonsConstruct(Construct):
             )
             # aws_eks_v2.Addon は ResolveConflicts を公開していないためエスケープハッチで設定する。
             # OVERWRITE にしないと既存 SA のラベルと衝突してデプロイが失敗する。
-            addon.node.default_child.add_override(
-                "Properties.ResolveConflicts", "OVERWRITE"
-            )  # type: ignore
+            addon.node.default_child.add_override("Properties.ResolveConflicts", "OVERWRITE")  # type: ignore
 
     @property
     def strimzi_chart(self) -> eks.HelmChart:
@@ -76,9 +72,7 @@ class AddonsConstruct(Construct):
         return self._strimzi_chart
 
     def _add_strimzi(self) -> eks.HelmChart:
-        self._cluster.add_manifest(
-            "Gp3StorageClass", load(_DIR, "gp3-storageclass.yaml")
-        )
+        self._cluster.add_manifest("Gp3StorageClass", load(_DIR, "gp3-storageclass.yaml"))
 
         return self._cluster.add_helm_chart(
             "StrimziOperator",
