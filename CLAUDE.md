@@ -32,13 +32,13 @@ Strimzi 1.0.0 で `v1` が正式 API として昇格し、`v1beta2` / `v1beta1` 
 ブローカー数・ポート設定は `kafka-cluster.yaml` の external listener `configuration` が唯一の真実の源。`_manifest.py` の `parse_kafka_nlb_ports()` がこれをパースし、`NetworkConstruct` が NLB Listener / TargetGroup を生成、`BROKER_COUNT` を `node-pool-broker.yaml` の `<BROKER_REPLICAS>` プレースホルダーに注入する。ブローカーを増減する場合は `kafka-cluster.yaml` の `configuration.brokers` リストを編集するだけでよい。
 
 ### Controller 数・PVC 削除挙動・インスタンスタイプは config.py
-controller の replicas（`kafka_controller_count`、デフォルト 3）と KafkaNodePool 削除時の PVC 削除挙動（`delete_claim`、dev=True / stg/prd=False）、ノードグループのインスタンスタイプは `ekscdk/config.py` の各 env factory で管理し、CDK 経由で YAML プレースホルダーや nodegroup 定義に注入する。
+controller の replicas（`kafka_controller_count`、デフォルト 3）と KafkaNodePool 削除時の PVC 削除挙動（`delete_claim`、dev=True / stg/prd=False）、ノードグループのインスタンスタイプ（broker 用 `kafka_broker_instance_type` と controller 用 `kafka_controller_instance_type`）は `ekscdk/config.py` の各 env factory で管理し、CDK 経由で YAML プレースホルダーや nodegroup 定義に注入する。
 
 ### EKS 設定は CfnCluster エスケープハッチ
 `aws_eks_v2.Cluster` は `UpgradePolicy.SupportType` / `DeletionProtection` を直接プロパティ化していないため、`eks_cluster.py` で `cfn_cluster.add_property_override()` で設定する。`UpgradePolicy=STANDARD`（追加課金回避）、`DeletionProtection` は env 別（dev=False, stg/prd=True）。
 
-### Broker と Controller を別ノードに配置（クロスプール AntiAffinity）
-`node-pool-*.yaml` の `podAntiAffinity.values` を `[kafka, controller]` にして、broker pod と controller pod を**同一ノードに同居させない**。これにより 1 ノード障害で両方失われるリスクを排除。代わりに kafka nodegroup は `broker_count + controller_count` 台必要（`eks_cluster.py` で計算）。
+### Broker と Controller は別 nodegroup に配置
+EKS nodegroup を `kafka-broker-nodegroup` と `kafka-controller-nodegroup` に分離し、`node-pool-broker.yaml` / `node-pool-controller.yaml` の nodeAffinity でそれぞれ `role=kafka-broker` / `role=kafka-controller` ラベルを要求して**物理的に別ノードに配置**する。これにより (1) 1 ノード障害で broker と controller を同時に失うリスクを排除、(2) controller を broker より小型のインスタンス（`kafka_controller_instance_type`）に変更可能、の 2 点を達成する。各 nodegroup の `podAntiAffinity` は同一プール内の HA 確保（broker 同士 / controller 同士の分散）にのみ使う。
 
 ### cdk deploy はユーザーが行う
 `cdk deploy` は本リポジトリの自動化対象外（ユーザーが手動で実行）。リポジトリで管理するのは synth 可能な状態までで、デプロイの判断・タイミングはユーザー側。

@@ -104,21 +104,50 @@ class EksClusterConstruct(Construct):
             enable_node_auto_repair=True,
         )
 
-        # Kafka ノードグループは Strimzi の broker + controller pod 専用
-        # broker と controller は同一ノードに同居させない（podAntiAffinity）ため、
-        # broker_count + controller_count + 1 (rolling update buffer) のサイズを確保する
-        kafka_nodes = broker_count + config.kafka_controller_count
+        # Kafka 用ノードグループは broker と controller で分離する。
+        # 役割ごとに最適なインスタンスサイズが異なる（broker は memory-optimized、
+        # controller はメタデータ管理のみで軽量）ため別 nodegroup にして、
+        # node-pool-*.yaml の nodeAffinity (role=kafka-broker / kafka-controller)
+        # で物理的に配置を分離する。これにより 1 ノード障害で broker と controller を
+        # 同時に失うリスクも回避できる。
+        # 各 nodegroup は max=desired+1 でローリング時の新ノード起動余裕を確保する。
         self._cluster.add_nodegroup_capacity(
-            "KafkaNodeGroup",
-            nodegroup_name="kafka-nodegroup",
-            instance_types=[ec2.InstanceType(config.kafka_instance_type)],
+            "KafkaBrokerNodeGroup",
+            nodegroup_name="kafka-broker-nodegroup",
+            instance_types=[ec2.InstanceType(config.kafka_broker_instance_type)],
             ami_type=config.nodegroup_ami_type,
-            min_size=kafka_nodes,
-            max_size=kafka_nodes + 1,  # ローリングアップデート時に新ノードを起動できる余裕を確保
-            desired_size=kafka_nodes,
+            min_size=broker_count,
+            max_size=broker_count + 1,
+            desired_size=broker_count,
             capacity_type=eks.CapacityType.ON_DEMAND,
             subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS),
-            labels={"role": "kafka"},
+            labels={"role": "kafka-broker"},
+            taints=[
+                eks.TaintSpec(
+                    key="DedicatedKafka",
+                    value="true",
+                    effect=eks.TaintEffect.NO_SCHEDULE,
+                )
+            ],
+            launch_template_spec=eks.LaunchTemplateSpec(
+                id=imds_lt.launch_template_id,  # type: ignore[arg-type]
+                version=imds_lt.version_number,
+            ),
+            enable_node_auto_repair=True,
+        )
+
+        controller_count = config.kafka_controller_count
+        self._cluster.add_nodegroup_capacity(
+            "KafkaControllerNodeGroup",
+            nodegroup_name="kafka-controller-nodegroup",
+            instance_types=[ec2.InstanceType(config.kafka_controller_instance_type)],
+            ami_type=config.nodegroup_ami_type,
+            min_size=controller_count,
+            max_size=controller_count + 1,
+            desired_size=controller_count,
+            capacity_type=eks.CapacityType.ON_DEMAND,
+            subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS),
+            labels={"role": "kafka-controller"},
             taints=[
                 eks.TaintSpec(
                     key="DedicatedKafka",

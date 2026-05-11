@@ -38,7 +38,8 @@ class ClusterConfig:
     system_min_size: int
     system_max_size: int
     system_desired_size: int
-    kafka_instance_type: str
+    kafka_broker_instance_type: str
+    kafka_controller_instance_type: str
     nodegroup_ami_type: eks.NodegroupAmiType
     addon_versions: dict[str, str]
     strimzi_version: str
@@ -76,7 +77,9 @@ class ClusterConfig:
             system_min_size=2,
             system_max_size=3,
             system_desired_size=2,
-            kafka_instance_type="t4g.large",
+            kafka_broker_instance_type="t4g.large",
+            # controller はメタデータ管理のみで負荷軽微なため broker より小型インスタンス
+            kafka_controller_instance_type="t4g.medium",
             nodegroup_ami_type=eks.NodegroupAmiType.AL2023_ARM_64_STANDARD,
             addon_versions=dict(_ADDON_VERSIONS_K8S_135),
             strimzi_version="1.0.0",
@@ -106,7 +109,9 @@ class ClusterConfig:
             system_min_size=3,
             system_max_size=6,
             system_desired_size=3,
-            kafka_instance_type="r8g.large",
+            kafka_broker_instance_type="r8g.large",
+            # controller はメタデータ管理のみで負荷軽微なため broker (memory-optimized) より小型・汎用
+            kafka_controller_instance_type="m8g.medium",
             nodegroup_ami_type=eks.NodegroupAmiType.AL2023_ARM_64_STANDARD,
             addon_versions=dict(_ADDON_VERSIONS_K8S_135),
             strimzi_version="1.0.0",
@@ -136,7 +141,9 @@ class ClusterConfig:
             system_min_size=3,
             system_max_size=6,
             system_desired_size=3,
-            kafka_instance_type="r8g.large",
+            kafka_broker_instance_type="r8g.large",
+            # controller はメタデータ管理のみで負荷軽微なため broker (memory-optimized) より小型・汎用
+            kafka_controller_instance_type="m8g.medium",
             nodegroup_ami_type=eks.NodegroupAmiType.AL2023_ARM_64_STANDARD,
             addon_versions=dict(_ADDON_VERSIONS_K8S_135),
             strimzi_version="1.0.0",
