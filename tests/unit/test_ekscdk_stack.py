@@ -9,6 +9,26 @@ from ekscdk.ekscdk_stack import EksCdkStack
 from ekscdk.iam_stack import IamStack
 
 
+def _manifest_literals(value: object) -> str:
+    """KubernetesResource.Properties.Manifest から JSON 文字列リテラル部分のみ連結する。
+
+    Manifest が Fn::Join で組み立てられている場合（NLB DNS 名や TargetGroup ARN 等の
+    intrinsic を埋め込むケース）、CFN テンプレート上は dict 構造になる。
+    assertions.Match では intrinsic 値の中身を直接 regex マッチできないため、
+    リテラル部分を取り出して通常の文字列検索に落とす。
+    """
+    if isinstance(value, str):
+        return value
+    if isinstance(value, dict):
+        if "Fn::Join" in value:
+            _sep, parts = value["Fn::Join"]
+            return "".join(_manifest_literals(p) for p in parts)
+        return ""
+    if isinstance(value, list):
+        return "".join(_manifest_literals(v) for v in value)
+    return ""
+
+
 @pytest.fixture(scope="module")
 def _app_stacks():
     app = core.App()
@@ -81,6 +101,170 @@ def test_kafka_nlb_sg_ingress_restricted_to_vpc(template):
                             "FromPort": 9094,
                             "ToPort": 9094,
                             "CidrIp": assertions.Match.any_value(),
+                        }
+                    )
+                ]
+            )
+        },
+    )
+
+
+def test_amp_workspace_alias_matches_cluster_name(template):
+    template.has_resource_properties(
+        "AWS::APS::Workspace",
+        {"Alias": ClusterConfig.for_prd().cluster_name},
+    )
+
+
+def test_application_log_group_retention_matches_config(template):
+    # for_prd() は log_retention=ONE_MONTH (30 days) を指定する。
+    # aws_logs.RetentionDays は jsii enum で .value は文字列識別子を返すため
+    # 数値（CFN の RetentionInDays）はここで明示する。
+    config = ClusterConfig.for_prd()
+    template.has_resource_properties(
+        "AWS::Logs::LogGroup",
+        {
+            "LogGroupName": f"/aws/eks/{config.cluster_name}/application",
+            "RetentionInDays": 30,
+        },
+    )
+
+
+@pytest.mark.parametrize(
+    "addon_name",
+    [
+        "vpc-cni",
+        "coredns",
+        "kube-proxy",
+        "aws-ebs-csi-driver",
+        "metrics-server",
+        "eks-node-monitoring-agent",
+    ],
+)
+def test_eks_addon_present(template, addon_name):
+    template.has_resource_properties("AWS::EKS::Addon", {"AddonName": addon_name})
+
+
+@pytest.mark.parametrize(
+    ("namespace", "service_account"),
+    [
+        ("kube-system", "ebs-csi-controller-sa"),
+        ("kube-system", "aws-load-balancer-controller"),
+        ("monitoring", "prometheus"),
+        ("monitoring", "fluent-bit"),
+        ("monitoring", "grafana"),
+    ],
+)
+def test_pod_identity_association_exists(template, namespace, service_account):
+    template.has_resource_properties(
+        "AWS::EKS::PodIdentityAssociation",
+        {"Namespace": namespace, "ServiceAccount": service_account},
+    )
+
+
+@pytest.mark.parametrize(
+    ("chart", "namespace"),
+    [
+        ("strimzi-kafka-operator", "strimzi-system"),
+        ("aws-load-balancer-controller", "kube-system"),
+        ("kube-prometheus-stack", "monitoring"),
+        ("fluent-bit", "monitoring"),
+    ],
+)
+def test_helm_chart_deployed(template, chart, namespace):
+    template.has_resource_properties(
+        "Custom::AWSCDK-EKS-HelmChart",
+        {"Chart": chart, "Namespace": namespace},
+    )
+
+
+def test_target_group_binding_count_matches_broker_count(template):
+    # bootstrap 1 個 + broker_count 個の TargetGroupBinding が apply される
+    all_k8s = template.find_resources("Custom::AWSCDK-EKS-KubernetesResource")
+    bindings = [
+        name
+        for name, res in all_k8s.items()
+        if "TargetGroupBinding" in _manifest_literals(res["Properties"]["Manifest"])
+    ]
+    assert len(bindings) == 1 + ClusterConfig.for_prd().broker_count
+
+
+def test_kafka_cluster_manifest_includes_all_broker_node_ports(template):
+    # external listener configuration.brokers[] が broker_count 分すべて KafkaCluster
+    # manifest に注入されていることを確認する（_manifest.build_kafka_broker_configs の結果）。
+    all_k8s = template.find_resources("Custom::AWSCDK-EKS-KubernetesResource")
+    kafka_crs = [
+        res
+        for res in all_k8s.values()
+        if '"kind":"Kafka"' in _manifest_literals(res["Properties"]["Manifest"])
+        and '"kind":"KafkaNodePool"' not in _manifest_literals(res["Properties"]["Manifest"])
+    ]
+    assert len(kafka_crs) == 1
+    literals = _manifest_literals(kafka_crs[0]["Properties"]["Manifest"])
+    config = ClusterConfig.for_prd()
+    expected_ports = build_kafka_nlb_ports(manifest_dir("kafka"), broker_count=config.broker_count)
+    for name, advertised_port, node_port in expected_ports:
+        if name == "Bootstrap":
+            continue
+        assert f'"nodePort":{node_port}' in literals
+        assert f'"advertisedPort":{advertised_port}' in literals
+
+
+def test_cluster_control_plane_logging_enabled(template):
+    # data-on-eks リファレンス（terraform-aws-modules/eks v21）のデフォルトに合わせ、
+    # audit / api / authenticator の 3 種類を CloudWatch Logs に送る。
+    template.has_resource_properties(
+        "AWS::EKS::Cluster",
+        {
+            "Logging": {
+                "ClusterLogging": {
+                    "EnabledTypes": assertions.Match.array_with(
+                        [
+                            {"Type": "audit"},
+                            {"Type": "api"},
+                            {"Type": "authenticator"},
+                        ]
+                    )
+                }
+            }
+        },
+    )
+
+
+def test_grafana_role_attaches_amp_query_managed_policy(template):
+    # Grafana が AMP を SigV4 query する権限（AmazonPrometheusQueryAccess）を持つ
+    template.has_resource_properties(
+        "AWS::IAM::Role",
+        {
+            "ManagedPolicyArns": assertions.Match.array_with(
+                [
+                    assertions.Match.object_like(
+                        {
+                            "Fn::Join": [
+                                "",
+                                assertions.Match.array_with([":iam::aws:policy/AmazonPrometheusQueryAccess"]),
+                            ]
+                        }
+                    )
+                ]
+            )
+        },
+    )
+
+
+def test_ebs_csi_role_attaches_managed_policy(template):
+    # EBS CSI Driver の Pod Identity ロールが AmazonEBSCSIDriverPolicy を attach している
+    template.has_resource_properties(
+        "AWS::IAM::Role",
+        {
+            "ManagedPolicyArns": assertions.Match.array_with(
+                [
+                    assertions.Match.object_like(
+                        {
+                            "Fn::Join": [
+                                "",
+                                assertions.Match.array_with([":iam::aws:policy/service-role/AmazonEBSCSIDriverPolicy"]),
+                            ]
                         }
                     )
                 ]
