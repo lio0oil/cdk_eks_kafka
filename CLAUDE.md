@@ -17,7 +17,7 @@ cdk synth                                                              # synth
 `MonitoringConstruct` 内の `monitoring` Namespace は `manifests/` ではなく `cluster.add_manifest()` で CDK が直接管理している。IRSA の `add_service_account()` は kubectl apply 時に Namespace が存在していないと失敗するため、ArgoCD に任せると順序が保証できない。
 
 ### メトリクススタックは kube-prometheus-stack
-当初 ADOT (opentelemetry-collector) を採用していたが、Strimzi 標準ダッシュボードが kube-prometheus-stack の標準ラベル（`strimzi_io_*` / `kubelet_volume_stats_*` 等）に依存していたため kube-prometheus-stack に置き換えた。Prometheus が AMP に SigV4 remote_write、AMG が AMP からクエリする構成。
+当初 ADOT (opentelemetry-collector) を採用していたが、Strimzi 標準ダッシュボードが kube-prometheus-stack の標準ラベル（`strimzi_io_*` / `kubelet_volume_stats_*` 等）に依存していたため kube-prometheus-stack に置き換えた。Prometheus が AMP に SigV4 remote_write、self-hosted Grafana（kube-prometheus-stack 同梱）が AMP を SigV4 で query する構成。Grafana へは `kubectl port-forward svc/<release>-grafana -n monitoring 3000:80` でアクセス。
 
 ### Kafka 外部接続のポート設計
 `kafka-cluster.yaml` の external listener は NodePort 型。共有 NLB → NodePort → Kafka broker の経路で、bootstrap に 30094、broker 0〜2 に 30095〜30097 を使用する。advertised port（9095〜9097）はクライアントがブローカーに繋ぎ直す際のポートで NodePort とは別。`externalTrafficPolicy: Local` でクライアント送信元 IP 保持・余分なホップ排除。

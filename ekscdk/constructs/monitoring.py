@@ -3,7 +3,6 @@ from typing import cast
 from aws_cdk import Duration, Stack
 from aws_cdk import aws_aps as aps
 from aws_cdk import aws_eks_v2 as eks
-from aws_cdk import aws_grafana as grafana
 from aws_cdk import aws_iam as iam
 from aws_cdk import aws_logs as logs
 from constructs import Construct
@@ -20,12 +19,13 @@ class MonitoringConstruct(Construct):
 
     AWS リソース:
       - AMP（Prometheus メトリクス）
-      - AMG（Grafana ダッシュボード / AWS SSO 認証）
       - CloudWatch Log Group（コンテナログ）
 
     Kubernetes リソース（CDK 管理 Helm）:
-      - kube-prometheus-stack: メトリクス収集 → AMP remote write
-          - Prometheus（SigV4 認証付き remote write）
+      - kube-prometheus-stack: メトリクス収集 + 可視化
+          - Prometheus（SigV4 認証付き remote write → AMP）
+          - Grafana（self-hosted、AMP を SigV4 で query。dashboard sidecar で
+            ConfigMap ラベル grafana_dashboard=1 を自動取り込み）
           - node-exporter（ノードメトリクス）
           - kube-state-metrics（Pod/Node/PV メトリクス）
           - ServiceMonitor / PodMonitor（Kafka metrics）
@@ -99,37 +99,28 @@ class MonitoringConstruct(Construct):
             )
         )
 
-        # ── AMG ──────────────────────────────────────────────────────────────
-        # デフォルトは AWS_SSO。SSO 未導入の場合は -c amg-auth-provider=SAML を指定する。
-        amg_auth_provider: str = self.node.try_get_context("amg-auth-provider") or "AWS_SSO"
-
-        amg_role = iam.Role(
-            self,
-            "AmgRole",
-            assumed_by=iam.ServicePrincipal("grafana.amazonaws.com"),  # type: ignore[arg-type]
+        # ── Grafana Pod Identity ───────────────────────────────────────────────
+        # self-hosted Grafana が AMP を data source として SigV4 で query するため。
+        # AmazonPrometheusQueryAccess: aps:QueryMetrics / GetSeries / GetLabels /
+        # GetMetricMetadata / DescribeWorkspace 等 read 系を一括付与。
+        grafana_sa = cluster.add_service_account(
+            "GrafanaSa",
+            name="grafana",
+            namespace="monitoring",
+            identity_type=eks.IdentityType.POD_IDENTITY,
         )
-        amg_role.add_managed_policy(
+        grafana_sa.node.add_dependency(namespace)
+        cast(iam.Role, grafana_sa.role).add_managed_policy(
             iam.ManagedPolicy.from_aws_managed_policy_name("AmazonPrometheusQueryAccess")
-        )
-        # ワークスペース名を変更すると CloudFormation がリソースを再作成するため、
-        # 手動インポート済みのダッシュボードが失われる点に注意。
-        grafana.CfnWorkspace(
-            self,
-            "AmgWorkspace",
-            name=f"{config.cluster_name}-grafana",
-            account_access_type="CURRENT_ACCOUNT",
-            authentication_providers=[amg_auth_provider],
-            permission_type="SERVICE_MANAGED",
-            role_arn=amg_role.role_arn,
-            data_sources=["PROMETHEUS"],
-            grafana_version=config.grafana_version,
         )
 
         # ── kube-prometheus-stack（Helm）──────────────────────────────────────
+        amp_query_url = amp_workspace.attr_prometheus_endpoint.rstrip("/")
         kps_values = load_with_subs(
             _DIR, "kube-prometheus-stack-values.yaml",
             REGION=region,
             AMP_REMOTE_WRITE_URL=amp_remote_write_url,
+            AMP_QUERY_URL=amp_query_url,
         )
         # timeout を延長して admission webhook の cert 生成 Job が完了するまで待機する
         kps = cluster.add_helm_chart(
@@ -143,6 +134,19 @@ class MonitoringConstruct(Construct):
         )
         kps.node.add_dependency(namespace)
         kps.node.add_dependency(prometheus_sa)
+        kps.node.add_dependency(grafana_sa)
+
+        # ── Grafana Dashboard ConfigMap ───────────────────────────────────────
+        # kube-prometheus-stack の sidecar が monitoring namespace の
+        # ConfigMap でラベル grafana_dashboard=1 を持つものを自動取り込みする。
+        for fname in (
+            "grafana-strimzi-kafka-dashboard.yaml",
+            "grafana-strimzi-exporter-dashboard.yaml",
+            "grafana-strimzi-operators-dashboard.yaml",
+        ):
+            cm_id = "Dash" + fname.removeprefix("grafana-strimzi-").removesuffix("-dashboard.yaml").title().replace("-", "")
+            cm = cluster.add_manifest(cm_id, load(_DIR, f"dashboards/{fname}"))
+            cm.node.add_dependency(kps)
 
         # ── Kafka PodMonitor ───────────────────────────────────────────────────
         # data-on-eks リファレンスに従い、broker / controller / cruise-control /

@@ -1,5 +1,45 @@
 grafana:
-  enabled: false
+  enabled: true
+  # CDK 側で Pod Identity 紐付き SA を作成するため Helm からは作らない
+  serviceAccount:
+    create: false
+    name: grafana
+  # 開発用途。本番運用なら Secrets Manager 経由 or existingSecret 推奨
+  adminPassword: admin
+  # ダッシュボードと Grafana DB を Pod 再起動後も保持
+  persistence:
+    enabled: true
+    type: pvc
+    storageClassName: gp3
+    size: 10Gi
+    accessModes: [ReadWriteOnce]
+  # tolerations は不要：system-nodegroup には taint が無く、kafka nodegroup の
+  # DedicatedKafka taint には toleration を持たないので自然に system に乗る
+  # ConfigMap label grafana_dashboard=1 の dashboard を sidecar が自動取り込み
+  sidecar:
+    dashboards:
+      enabled: true
+      label: grafana_dashboard
+      labelValue: "1"
+      searchNamespace: ALL
+      provider:
+        allowUiUpdates: true
+    datasources:
+      enabled: true
+      searchNamespace: ALL
+  # Prometheus は kube-prometheus-stack 同梱の in-cluster を default、
+  # AMP は SigV4 で長期保存メトリクスを query する additional data source
+  additionalDataSources:
+    - name: AMP
+      type: prometheus
+      access: proxy
+      url: <AMP_QUERY_URL>
+      jsonData:
+        httpMethod: POST
+        sigV4Auth: true
+        sigV4AuthType: default
+        sigV4Region: <REGION>
+      editable: false
 
 alertmanager:
   enabled: false
@@ -9,17 +49,8 @@ prometheus-node-exporter:
   tolerations:
     - operator: Exists
 
-kube-state-metrics:
-  tolerations:
-    - operator: Exists
-
-prometheusOperator:
-  tolerations:
-    - operator: Exists
-  admissionWebhooks:
-    patch:
-      tolerations:
-        - operator: Exists
+# kube-state-metrics / prometheusOperator は toleration 未指定のまま system に乗る
+# （kafka nodegroup の DedicatedKafka taint で kafka ノードからは弾かれる）
 
 prometheus:
   serviceAccount:
@@ -39,8 +70,7 @@ prometheus:
           maxSamplesPerSend: 1000
           maxShards: 200
           capacity: 2500
-    tolerations:
-      - operator: Exists
+    # tolerations 未指定で system に乗る
     resources:
       requests:
         memory: 512Mi

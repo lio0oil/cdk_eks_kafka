@@ -78,7 +78,10 @@ class EksClusterConstruct(Construct):
             http_tokens=ec2.LaunchTemplateHttpTokens.REQUIRED,
         )
 
-        # システムノードグループ: CoreDNS等のクリティカルアドオン専用
+        # システムノードグループ: 監視 / Operator / アドオン用
+        # taint は打たない（kafka 用ノードを DedicatedKafka taint で隔離する設計のため、
+        # system 側を taint で守る必要がない。toleration 未指定の Pod は自然に system に
+        # schedule される）
         self._cluster.add_nodegroup_capacity(
             "SystemNodeGroup",
             nodegroup_name="system-nodegroup",
@@ -90,13 +93,6 @@ class EksClusterConstruct(Construct):
             capacity_type=eks.CapacityType.ON_DEMAND,
             subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS),
             labels={"role": "system"},
-            taints=[
-                eks.TaintSpec(
-                    key="CriticalAddonsOnly",
-                    value="true",
-                    effect=eks.TaintEffect.NO_SCHEDULE,
-                )
-            ],
             launch_template_spec=eks.LaunchTemplateSpec(
                 id=imds_lt.launch_template_id,  # type: ignore[arg-type]
                 version=imds_lt.version_number,

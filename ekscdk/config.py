@@ -52,7 +52,6 @@ class ClusterConfig:
     fluent_bit_chart_repo: str
     log_retention: logs.RetentionDays
     log_removal_policy: RemovalPolicy
-    grafana_version: str
     enable_interface_endpoints: bool
     # KafkaNodePool 削除時に PVC を一緒に削除するか（Strimzi の deleteClaim フィールド）
     # dev は True（環境破棄時に PVC ごとクリーンアップ）、stg/prd は False（データ保護）
@@ -92,7 +91,6 @@ class ClusterConfig:
             fluent_bit_chart_repo="https://fluent.github.io/helm-charts",
             log_retention=logs.RetentionDays.ONE_WEEK,
             log_removal_policy=RemovalPolicy.DESTROY,
-            grafana_version="12.4",
             enable_interface_endpoints=False,
             delete_claim=True,
             kafka_controller_count=3,
@@ -124,7 +122,6 @@ class ClusterConfig:
             fluent_bit_chart_repo="https://fluent.github.io/helm-charts",
             log_retention=logs.RetentionDays.ONE_MONTH,
             log_removal_policy=RemovalPolicy.RETAIN,
-            grafana_version="12.4",
             enable_interface_endpoints=True,
             delete_claim=False,
             kafka_controller_count=3,
@@ -156,7 +153,6 @@ class ClusterConfig:
             fluent_bit_chart_repo="https://fluent.github.io/helm-charts",
             log_retention=logs.RetentionDays.ONE_MONTH,
             log_removal_policy=RemovalPolicy.RETAIN,
-            grafana_version="12.4",
             enable_interface_endpoints=True,
             delete_claim=False,
             kafka_controller_count=3,

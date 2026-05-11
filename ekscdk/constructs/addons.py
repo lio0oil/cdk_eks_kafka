@@ -88,14 +88,9 @@ class AddonsConstruct(Construct):
             values={
                 "watchNamespaces": ["kafka"],
                 "replicas": 2,
-                "tolerations": [
-                    {
-                        "key": "CriticalAddonsOnly",
-                        "operator": "Equal",
-                        "value": "true",
-                        "effect": "NoSchedule",
-                    }
-                ],
+                # toleration 不要：system-nodegroup には taint が無く、
+                # kafka nodegroup の DedicatedKafka taint を tolerate しないため
+                # 自然に system に schedule される
             },
         )
 
@@ -146,15 +141,8 @@ class AddonsConstruct(Construct):
                     "create": False,
                     "name": "aws-load-balancer-controller",
                 },
-                # システムノードのみで稼働させる
-                "tolerations": [
-                    {
-                        "key": "CriticalAddonsOnly",
-                        "operator": "Equal",
-                        "value": "true",
-                        "effect": "NoSchedule",
-                    }
-                ],
+                # toleration 不要：DedicatedKafka taint で kafka nodegroup から弾かれ、
+                # system-nodegroup（taint 無し）に自然に乗る
                 "replicaCount": 2,
             },
             wait=True,
