@@ -25,7 +25,6 @@ dev = [
 [tool.pytest.ini_options]
 minversion = "9.0"
 testpaths = ["tests"]
-pythonpath = ["src"]
 addopts = ["-ra", "-q", "--strict-markers", "--strict-config"]
 #addopts = ["-ra", "-q", "--strict-markers", "--strict-config", "--cov=app", "--cov-report=term-missing"]
 
@@ -45,8 +44,7 @@ addopts = ["-ra", "-q", "--strict-markers", "--strict-config"]
 # ]
 
 [tool.pyright]
-include = ["src"]
-extraPaths = ["src"]
+include = ["ekscdk", "app.py"]
 exclude = ["**/__pycache__", "**/node_modules", "**/.*", ".venv", "tests"]
 typeCheckingMode = "standard"
 
@@ -72,7 +70,6 @@ ignore = [
 
 [tool.ruff.lint.per-file-ignores]
 "tests/*" = ["S101", "PLR2004", "PLR0913", "E501", "S108"]
-"src/app/main.py" = ["T20"]  # CLI entry point: stdout への出力を許容
 
 [tool.ruff.lint.mccabe]
 max-complexity = 10
