@@ -71,11 +71,14 @@ class ClusterConfig:
             admin_role_name=f"eks-cluster-admin-{cluster_name}",
             nat_gateways=1,
             # dev はテスト用途のためコスト最適化（Graviton2 burstable t4g）
-            # 同じ 2vCPU/8GB だが m8g/r8g より約 12〜48% 安い
-            system_instance_type="t4g.large",
+            # system は監視 / Operator / アドオンのみで実使用 ~1.5GB/ノード のため
+            # t4g.medium (2vCPU/4GB) で十分（allocatable 3.2GB に対し約 50% 余裕）
+            system_instance_type="t4g.medium",
             system_min_size=2,
             system_max_size=3,
             system_desired_size=2,
+            # broker は JVM heap 2GB + page cache 用に余裕が必要なため t4g.large 維持
+            # （t4g.medium にすると page cache が枯渇し dev でも本番と挙動が乖離する）
             kafka_broker_instance_type="t4g.large",
             # controller はメタデータ管理のみで負荷軽微なため broker より小型インスタンス
             kafka_controller_instance_type="t4g.medium",
