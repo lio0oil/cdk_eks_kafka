@@ -4,9 +4,9 @@ from constructs import Construct
 
 from ekscdk.config import ClusterConfig
 from ekscdk.constructs._manifest import (
+    build_kafka_nlb_ports,
     manifest_dir,
     parse_kafka_external_listener,
-    parse_kafka_nlb_ports,
 )
 from ekscdk.constructs.addons import AddonsConstruct
 from ekscdk.constructs.eks_cluster import EksClusterConstruct
@@ -29,9 +29,9 @@ class EksCdkStack(Stack):
         super().__init__(scope, construct_id, **kwargs)
 
         kafka_dir = manifest_dir("kafka")
-        nlb_ports = parse_kafka_nlb_ports(kafka_dir)
+        broker_count = config.broker_count
+        nlb_ports = build_kafka_nlb_ports(kafka_dir, broker_count=broker_count)
         external_listener_name, _ = parse_kafka_external_listener(kafka_dir)
-        broker_count = len(nlb_ports) - 1
 
         network = NetworkConstruct(self, "Network", nlb_ports=nlb_ports, config=config)
         eks_construct = EksClusterConstruct(

@@ -2,7 +2,12 @@ from aws_cdk import aws_eks_v2 as eks
 from aws_cdk import aws_elasticloadbalancingv2 as elbv2
 from constructs import Construct
 
-from ekscdk.constructs._manifest import load, load_with_subs, manifest_dir
+from ekscdk.constructs._manifest import (
+    build_kafka_broker_configs,
+    load,
+    load_with_subs,
+    manifest_dir,
+)
 
 _DIR = manifest_dir("kafka")
 
@@ -72,10 +77,19 @@ class KafkaConstruct(Construct):
         broker_pool.node.add_dependency(namespace)
 
         # ── Kafka CR ──────────────────────────────────────────────────────────
-        kafka_cr = cluster.add_manifest(
-            "KafkaCluster",
-            load_with_subs(_DIR, "kafka-cluster.yaml", KAFKA_ADVERTISED_HOST=nlb_dns_name),
+        # kafka-cluster.yaml の external listener には brokers[] を含めず、
+        # ここで broker_count から生成して inject する（broker_count を単一の真実の源にする）。
+        kafka_cr_manifest = load(_DIR, "kafka-cluster.yaml")
+        external_listener = next(
+            listener
+            for listener in kafka_cr_manifest["spec"]["kafka"]["listeners"]
+            if listener["name"] == external_listener_name
         )
+        external_listener["configuration"]["brokers"] = build_kafka_broker_configs(
+            broker_count=broker_count,
+            advertised_host=nlb_dns_name,
+        )
+        kafka_cr = cluster.add_manifest("KafkaCluster", kafka_cr_manifest)
         kafka_cr.node.add_dependency(cm)
         kafka_cr.node.add_dependency(controller_pool)
         kafka_cr.node.add_dependency(broker_pool)

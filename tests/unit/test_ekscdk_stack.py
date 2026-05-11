@@ -4,7 +4,7 @@ from aws_cdk import assertions
 from aws_cdk import aws_iam as iam
 
 from ekscdk.config import ClusterConfig
-from ekscdk.constructs._manifest import manifest_dir, parse_kafka_nlb_ports
+from ekscdk.constructs._manifest import build_kafka_nlb_ports, manifest_dir
 from ekscdk.ekscdk_stack import EksCdkStack
 from ekscdk.iam_stack import IamStack
 
@@ -43,12 +43,12 @@ def test_stack_synthesizes(template):
 
 
 def test_nlb_listener_count_matches_kafka_config(template):
-    ports = parse_kafka_nlb_ports(manifest_dir("kafka"))
+    ports = build_kafka_nlb_ports(manifest_dir("kafka"), broker_count=ClusterConfig.for_prd().broker_count)
     template.resource_count_is("AWS::ElasticLoadBalancingV2::Listener", len(ports))
 
 
 def test_nlb_target_group_count_matches_kafka_config(template):
-    ports = parse_kafka_nlb_ports(manifest_dir("kafka"))
+    ports = build_kafka_nlb_ports(manifest_dir("kafka"), broker_count=ClusterConfig.for_prd().broker_count)
     template.resource_count_is("AWS::ElasticLoadBalancingV2::TargetGroup", len(ports))
 
 

@@ -30,19 +30,8 @@ spec:
           externalTrafficPolicy: Local
           bootstrap:
             nodePort: 30094
-          brokers:
-            - broker: 0
-              advertisedHost: <KAFKA_ADVERTISED_HOST>
-              nodePort: 30095
-              advertisedPort: 9095
-            - broker: 1
-              advertisedHost: <KAFKA_ADVERTISED_HOST>
-              nodePort: 30096
-              advertisedPort: 9096
-            - broker: 2
-              advertisedHost: <KAFKA_ADVERTISED_HOST>
-              nodePort: 30097
-              advertisedPort: 9097
+          # brokers[] は CDK 側で ClusterConfig.broker_count から動的に生成・注入する。
+          # 採番ルールと注入処理は ekscdk.constructs._manifest.build_kafka_broker_configs を参照。
     config:
       offsets.topic.replication.factor: 3
       transaction.state.log.replication.factor: 3

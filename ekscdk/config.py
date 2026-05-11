@@ -62,6 +62,11 @@ class ClusterConfig:
     # KRaft Controller の replica 数（KRaft は奇数推奨、通常 3）
     # node-pool-controller.yaml の replicas と kafka nodegroup サイズの両方に反映
     kafka_controller_count: int
+    # Kafka Broker の replica 数。NLB target group / nodegroup capacity /
+    # KafkaNodePool replicas / kafka-cluster.yaml の brokers[] すべての単一の真実の源。
+    # 既存ブローカーの advertisedPort/nodePort は変えない（クライアント接続が壊れる）ため、
+    # 増設は末尾追加・縮退は Cruise Control での reassign 後に行うこと。
+    broker_count: int
     # EKS クラスターの削除保護（CloudFormation の DeletionProtection）
     # 有効化すると aws eks delete-cluster が拒否される（誤削除防止）
     # dev は False（環境破棄を容易に）、stg/prd は True（事故防止）
@@ -100,6 +105,7 @@ class ClusterConfig:
             enable_interface_endpoints=False,
             delete_claim=True,
             kafka_controller_count=3,
+            broker_count=3,
             deletion_protection=False,
         )
 
@@ -131,6 +137,7 @@ class ClusterConfig:
             enable_interface_endpoints=True,
             delete_claim=False,
             kafka_controller_count=3,
+            broker_count=3,
             deletion_protection=True,
         )
 
@@ -162,5 +169,6 @@ class ClusterConfig:
             enable_interface_endpoints=True,
             delete_claim=False,
             kafka_controller_count=3,
+            broker_count=3,
             deletion_protection=True,
         )
