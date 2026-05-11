@@ -1,6 +1,7 @@
 from aws_cdk import Duration, Tags
 from aws_cdk import aws_ec2 as ec2
 from aws_cdk import aws_elasticloadbalancingv2 as elbv2
+from aws_cdk import aws_s3 as s3
 from constructs import Construct
 
 from ekscdk.config import ClusterConfig
@@ -37,6 +38,25 @@ class NetworkConstruct(Construct):
             enable_dns_hostnames=True,
             enable_dns_support=True,
         )
+
+        # ── VPC Flow Logs ─────────────────────────────────────────────────────
+        # stg/prd で有効化（dev はコスト削減のため無効）。送り先は S3。
+        # CloudWatch Logs に比べて保存コストが約 20 倍安く、Athena でクエリ可能。
+        # 監査・コンプライアンス・インシデント調査のいずれにも対応する。
+        if config.enable_vpc_flow_logs:
+            flow_log_bucket = s3.Bucket(
+                self,
+                "VpcFlowLogBucket",
+                encryption=s3.BucketEncryption.S3_MANAGED,
+                block_public_access=s3.BlockPublicAccess.BLOCK_ALL,
+                enforce_ssl=True,
+                removal_policy=config.log_removal_policy,
+            )
+            self._vpc.add_flow_log(
+                "FlowLog",
+                destination=ec2.FlowLogDestination.to_s3(flow_log_bucket),
+                traffic_type=ec2.FlowLogTrafficType.ALL,
+            )
 
         # ── VPC エンドポイント ─────────────────────────────────────────────────
         # S3: Gateway 型（無料）。ECR イメージレイヤーはS3経由のため必須。

@@ -71,6 +71,9 @@ class ClusterConfig:
     # 有効化すると aws eks delete-cluster が拒否される（誤削除防止）
     # dev は False（環境破棄を容易に）、stg/prd は True（事故防止）
     deletion_protection: bool
+    # VPC Flow Logs を CloudWatch Logs に送るか
+    # dev は False（コスト削減）、stg/prd は True（監査・インシデント調査用）
+    enable_vpc_flow_logs: bool
 
     @classmethod
     def for_dev(cls, cluster_name: str = "eks-cluster-dev") -> ClusterConfig:
@@ -107,6 +110,7 @@ class ClusterConfig:
             kafka_controller_count=3,
             broker_count=3,
             deletion_protection=False,
+            enable_vpc_flow_logs=False,
         )
 
     @classmethod
@@ -139,6 +143,7 @@ class ClusterConfig:
             kafka_controller_count=3,
             broker_count=3,
             deletion_protection=True,
+            enable_vpc_flow_logs=True,
         )
 
     @classmethod
@@ -171,4 +176,5 @@ class ClusterConfig:
             kafka_controller_count=3,
             broker_count=3,
             deletion_protection=True,
+            enable_vpc_flow_logs=True,
         )

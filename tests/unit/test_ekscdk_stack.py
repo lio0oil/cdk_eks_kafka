@@ -273,6 +273,50 @@ def test_ebs_csi_role_attaches_managed_policy(template):
     )
 
 
+def test_vpc_flow_log_enabled_in_prd(template):
+    # prd は VPC Flow Logs を S3 に送る（ALL traffic）。
+    # S3 バケットは暗号化 + public 遮断 + TLS 強制で作られる。
+    template.resource_count_is("AWS::EC2::FlowLog", 1)
+    template.has_resource_properties(
+        "AWS::EC2::FlowLog",
+        {
+            "TrafficType": "ALL",
+            "LogDestinationType": "s3",
+        },
+    )
+    template.has_resource_properties(
+        "AWS::S3::Bucket",
+        {
+            "BucketEncryption": {
+                "ServerSideEncryptionConfiguration": [{"ServerSideEncryptionByDefault": {"SSEAlgorithm": "AES256"}}]
+            },
+            "PublicAccessBlockConfiguration": {
+                "BlockPublicAcls": True,
+                "BlockPublicPolicy": True,
+                "IgnorePublicAcls": True,
+                "RestrictPublicBuckets": True,
+            },
+        },
+    )
+
+
+def test_vpc_flow_log_disabled_in_dev():
+    # dev はコスト削減のため VPC Flow Logs を有効化しない
+    app = core.App()
+    env = core.Environment(account="123456789012", region="ap-northeast-1")
+    config = ClusterConfig.for_dev()
+    iam_stack = IamStack(
+        app,
+        "IamStack",
+        admin_principal=iam.AccountRootPrincipal(),
+        role_name=config.admin_role_name,
+        env=env,
+    )
+    infra_stack = EksCdkStack(app, "EksCdkStack", admin_role=iam_stack.eks_admin_role, config=config, env=env)
+    dev_template = assertions.Template.from_stack(infra_stack)
+    dev_template.resource_count_is("AWS::EC2::FlowLog", 0)
+
+
 def test_eks_admin_role_trust_policy(iam_template):
     # eks-cluster-admin ロールの trust policy に sts:AssumeRole が含まれることを確認
     # AWS フィールドは Fn::Join で構築される intrinsic function なので any_value() で検証
