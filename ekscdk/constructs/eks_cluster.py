@@ -1,6 +1,7 @@
 from typing import cast
 
 from aws_cdk import aws_ec2 as ec2
+from aws_cdk import aws_eks as eks_l1
 from aws_cdk import aws_eks_v2 as eks
 from aws_cdk import aws_iam as iam
 from aws_cdk.aws_eks_v2 import DefaultCapacityType
@@ -44,14 +45,17 @@ class EksClusterConstruct(Construct):
         #   ではなく Standard（無償・約 14 ヶ月）に固定する
         # - DeletionProtection = config.deletion_protection: 誤削除防止
         #   （dev=False, stg/prd=True）
-        cfn_cluster = self._cluster.node.default_child
-        cfn_cluster.add_property_override("UpgradePolicy.SupportType", "STANDARD")  # type: ignore[union-attr]
-        cfn_cluster.add_property_override("DeletionProtection", config.deletion_protection)  # type: ignore[union-attr]
+        # aws_eks_v2.Cluster の node.default_child は L1 の aws_eks.CfnCluster。
+        # CDK v2 では L2 の高レベル Construct が aws_eks_v2 / aws_eks 両方にあるが、
+        # CFN リソース直接の Cfn* 系は aws_eks（L1）側にしか存在しないため別名 import する。
+        cfn_cluster = cast(eks_l1.CfnCluster, self._cluster.node.default_child)
+        cfn_cluster.add_property_override("UpgradePolicy.SupportType", "STANDARD")
+        cfn_cluster.add_property_override("DeletionProtection", config.deletion_protection)
         # Control Plane Logs を CloudWatch Logs に送る。
         # data-on-eks リファレンス（terraform-aws-modules/eks v21）の
         # enabled_log_types デフォルト値と揃える。controllerManager / scheduler は
         # 採用しない（リファレンス側も未有効化、コスト対監査価値が低い）。
-        cfn_cluster.add_property_override(  # type: ignore[union-attr]
+        cfn_cluster.add_property_override(
             "Logging.ClusterLogging.EnabledTypes",
             [{"Type": "audit"}, {"Type": "api"}, {"Type": "authenticator"}],
         )

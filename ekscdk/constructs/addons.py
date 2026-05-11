@@ -3,6 +3,7 @@ import os
 from typing import cast
 
 from aws_cdk import Duration, Stack
+from aws_cdk import aws_eks as eks_l1
 from aws_cdk import aws_eks_v2 as eks
 from aws_cdk import aws_iam as iam
 from constructs import Construct
@@ -59,7 +60,17 @@ class AddonsConstruct(Construct):
             )
             # aws_eks_v2.Addon は ResolveConflicts を公開していないためエスケープハッチで設定する。
             # OVERWRITE にしないと既存 SA のラベルと衝突してデプロイが失敗する。
-            addon.node.default_child.add_override("Properties.ResolveConflicts", "OVERWRITE")  # type: ignore
+            cfn_addon = cast(eks_l1.CfnAddon, addon.node.default_child)
+            cfn_addon.add_override("Properties.ResolveConflicts", "OVERWRITE")
+
+        # aws_eks_v2.Cluster が自動追加する eks-pod-identity-agent Addon は
+        # CDK API から AddonVersion を渡せないため CFN プロパティ override で pin する。
+        pod_identity_addon = self._cluster.node.try_find_child("EksPodIdentityAgentAddon")
+        if pod_identity_addon is not None:
+            cfn_pod_identity = cast(eks_l1.CfnAddon, pod_identity_addon.node.default_child)
+            cfn_pod_identity.add_property_override(
+                "AddonVersion", self._config.addon_versions["eks-pod-identity-agent"]
+            )
 
     @property
     def strimzi_chart(self) -> eks.HelmChart:

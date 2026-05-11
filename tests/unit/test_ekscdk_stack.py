@@ -210,6 +210,18 @@ def test_kafka_cluster_manifest_includes_all_broker_node_ports(template):
         assert f'"advertisedPort":{advertised_port}' in literals
 
 
+def test_eks_pod_identity_agent_addon_version_pinned(template):
+    # aws_eks_v2.Cluster が自動追加する eks-pod-identity-agent Addon にも
+    # 他 addon と同じく AddonVersion が明示されている（latest 追従を防ぐ）。
+    template.has_resource_properties(
+        "AWS::EKS::Addon",
+        {
+            "AddonName": "eks-pod-identity-agent",
+            "AddonVersion": ClusterConfig.for_prd().addon_versions["eks-pod-identity-agent"],
+        },
+    )
+
+
 def test_cluster_control_plane_logging_enabled(template):
     # data-on-eks リファレンス（terraform-aws-modules/eks v21）のデフォルトに合わせ、
     # audit / api / authenticator の 3 種類を CloudWatch Logs に送る。
