@@ -28,7 +28,7 @@ class MonitoringConstruct(Construct):
             ConfigMap ラベル grafana_dashboard=1 を自動取り込み）
           - node-exporter（ノードメトリクス）
           - kube-state-metrics（Pod/Node/PV メトリクス）
-          - ServiceMonitor / PodMonitor（Kafka metrics）
+          - PodMonitor（Kafka metrics）
       - Fluent Bit DaemonSet: ログ → CloudWatch Logs
     """
 
