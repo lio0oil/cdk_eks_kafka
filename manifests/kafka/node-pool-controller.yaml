@@ -6,7 +6,7 @@ metadata:
   labels:
     strimzi.io/cluster: kafka-cluster
   annotations:
-    strimzi.io/next-node-ids: "[100000000-199999999]"
+    strimzi.io/next-node-ids: "[1000000-1999999]"
 spec:
   replicas: <CONTROLLER_REPLICAS>
   roles:
