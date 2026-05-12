@@ -81,10 +81,10 @@ class ClusterConfig:
     # VPC Flow Logs を CloudWatch Logs に送るか
     # dev は False（コスト削減）、stg/prd は True（監査・インシデント調査用）
     enable_vpc_flow_logs: bool
-    # EKS Control Plane の audit ログを CloudWatch Logs に送るか
-    # dev は False（コスト削減、監査要件なし）、stg/prd は True（API 呼出履歴の追跡用）
-    # api / authenticator は環境共通で常に有効
-    enable_audit_log: bool
+    # EKS Control Plane Logs（audit / api / authenticator）を CloudWatch Logs に送るか
+    # dev は False（コスト削減、監査要件なし）、stg/prd は True（インシデント調査・監査用）
+    # 3 種類の粒度を分ける運用価値が薄いためまとめて on/off する
+    enable_control_plane_logs: bool
 
     @classmethod
     def for_dev(cls, cluster_name: str = "eks-cluster-dev") -> ClusterConfig:
@@ -122,7 +122,7 @@ class ClusterConfig:
             broker_count=3,
             deletion_protection=False,
             enable_vpc_flow_logs=False,
-            enable_audit_log=False,
+            enable_control_plane_logs=False,
         )
 
     @classmethod
@@ -156,7 +156,7 @@ class ClusterConfig:
             broker_count=3,
             deletion_protection=True,
             enable_vpc_flow_logs=True,
-            enable_audit_log=True,
+            enable_control_plane_logs=True,
         )
 
     @classmethod
@@ -190,5 +190,5 @@ class ClusterConfig:
             broker_count=3,
             deletion_protection=True,
             enable_vpc_flow_logs=True,
-            enable_audit_log=True,
+            enable_control_plane_logs=True,
         )

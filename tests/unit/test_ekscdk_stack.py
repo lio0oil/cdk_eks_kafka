@@ -314,9 +314,9 @@ def test_vpc_flow_log_enabled_in_prd(template):
     )
 
 
-def test_audit_log_disabled_in_dev():
-    # dev はコスト削減のため kube-apiserver-audit ログを CloudWatch に送らない。
-    # api / authenticator は維持する（IAM 認証フローと API server エラーの追跡用）。
+def test_control_plane_logs_disabled_in_dev():
+    # dev はコスト削減のため Control Plane Logs を一切 CloudWatch に送らない。
+    # audit / api / authenticator は粒度を分ける運用価値が薄く、まとめてオフにする。
     app = core.App()
     env = core.Environment(account="123456789012", region="ap-northeast-1")
     config = ClusterConfig.for_dev()
@@ -332,10 +332,7 @@ def test_audit_log_disabled_in_dev():
     clusters = dev_template.find_resources("AWS::EKS::Cluster")
     assert len(clusters) == 1
     cluster = next(iter(clusters.values()))
-    enabled = {t["Type"] for t in cluster["Properties"]["Logging"]["ClusterLogging"]["EnabledTypes"]}
-    assert "audit" not in enabled
-    assert "api" in enabled
-    assert "authenticator" in enabled
+    assert cluster["Properties"]["Logging"]["ClusterLogging"]["EnabledTypes"] == []
 
 
 def test_vpc_flow_log_disabled_in_dev():
