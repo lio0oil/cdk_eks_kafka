@@ -314,6 +314,30 @@ def test_vpc_flow_log_enabled_in_prd(template):
     )
 
 
+def test_audit_log_disabled_in_dev():
+    # dev はコスト削減のため kube-apiserver-audit ログを CloudWatch に送らない。
+    # api / authenticator は維持する（IAM 認証フローと API server エラーの追跡用）。
+    app = core.App()
+    env = core.Environment(account="123456789012", region="ap-northeast-1")
+    config = ClusterConfig.for_dev()
+    iam_stack = IamStack(
+        app,
+        "IamStack",
+        admin_principal=iam.AccountRootPrincipal(),
+        role_name=config.admin_role_name,
+        env=env,
+    )
+    infra_stack = EksCdkStack(app, "EksCdkStack", admin_role=iam_stack.eks_admin_role, config=config, env=env)
+    dev_template = assertions.Template.from_stack(infra_stack)
+    clusters = dev_template.find_resources("AWS::EKS::Cluster")
+    assert len(clusters) == 1
+    cluster = next(iter(clusters.values()))
+    enabled = {t["Type"] for t in cluster["Properties"]["Logging"]["ClusterLogging"]["EnabledTypes"]}
+    assert "audit" not in enabled
+    assert "api" in enabled
+    assert "authenticator" in enabled
+
+
 def test_vpc_flow_log_disabled_in_dev():
     # dev はコスト削減のため VPC Flow Logs を有効化しない
     app = core.App()

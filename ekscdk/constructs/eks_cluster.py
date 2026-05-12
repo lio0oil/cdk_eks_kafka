@@ -55,9 +55,13 @@ class EksClusterConstruct(Construct):
         # data-on-eks リファレンス（terraform-aws-modules/eks v21）の
         # enabled_log_types デフォルト値と揃える。controllerManager / scheduler は
         # 採用しない（リファレンス側も未有効化、コスト対監査価値が低い）。
+        # audit は config.enable_audit_log で環境別に切替（dev=False、stg/prd=True）。
+        enabled_log_types: list[dict[str, str]] = [{"Type": "api"}, {"Type": "authenticator"}]
+        if config.enable_audit_log:
+            enabled_log_types.insert(0, {"Type": "audit"})
         cfn_cluster.add_property_override(
             "Logging.ClusterLogging.EnabledTypes",
-            [{"Type": "audit"}, {"Type": "api"}, {"Type": "authenticator"}],
+            enabled_log_types,
         )
 
         _cluster_admin_policy = [
