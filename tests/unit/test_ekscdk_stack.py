@@ -190,8 +190,10 @@ def test_target_group_binding_count_matches_broker_count(template):
 
 
 def test_kafka_cluster_manifest_includes_all_broker_node_ports(template):
-    # external listener configuration.brokers[] が broker_count 分すべて KafkaCluster
-    # manifest に注入されていることを確認する（_manifest.build_kafka_broker_configs の結果）。
+    # external listener の bootstrap.nodePort および brokers[] が KafkaCluster manifest に
+    # 正しく含まれていることを確認する。
+    # - bootstrap.nodePort: kafka-cluster.yaml に直書き（YAML 値の改ざんを検知）
+    # - brokers[].nodePort / advertisedPort: _manifest.build_kafka_broker_configs が動的注入
     all_k8s = template.find_resources("Custom::AWSCDK-EKS-KubernetesResource")
     kafka_crs = [
         res
@@ -204,10 +206,10 @@ def test_kafka_cluster_manifest_includes_all_broker_node_ports(template):
     config = ClusterConfig.for_prd()
     expected_ports = build_kafka_nlb_ports(manifest_dir("kafka"), broker_count=config.broker_count)
     for name, advertised_port, node_port in expected_ports:
-        if name == "Bootstrap":
-            continue
         assert f'"nodePort":{node_port}' in literals
-        assert f'"advertisedPort":{advertised_port}' in literals
+        # Bootstrap はクライアントが broker に繋ぎ直す前段なので advertisedPort を持たない
+        if name != "Bootstrap":
+            assert f'"advertisedPort":{advertised_port}' in literals
 
 
 def test_eks_pod_identity_agent_addon_version_pinned(template):
