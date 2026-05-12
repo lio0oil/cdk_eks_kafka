@@ -63,6 +63,10 @@ spec:
         configMapKeyRef:
           name: kafka-metrics
           key: cruise-control-config.yml
+    logging:
+      type: inline
+      loggers:
+        rootLogger.level: WARN
     template:
       pod:
         tolerations:
@@ -71,8 +75,16 @@ spec:
             value: "true"
             effect: "NoSchedule"
   entityOperator:
-    topicOperator: {}
-    userOperator: {}
+    topicOperator:
+      logging:
+        type: inline
+        loggers:
+          rootLogger.level: WARN
+    userOperator:
+      logging:
+        type: inline
+        loggers:
+          rootLogger.level: WARN
     template:
       pod:
         tolerations:
