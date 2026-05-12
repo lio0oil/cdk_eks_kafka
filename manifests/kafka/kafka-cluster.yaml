@@ -46,6 +46,14 @@ spec:
         configMapKeyRef:
           name: kafka-metrics
           key: kafka-metrics-config.yml
+    logging:
+      type: inline
+      loggers:
+        rootLogger.level: INFO
+        logger.eventperf.name: org.apache.kafka.controller.EventPerformanceMonitor
+        logger.eventperf.level: WARN
+        logger.periodtask.name: org.apache.kafka.controller.PeriodTaskControlManager
+        logger.periodtask.level: WARN
   kafkaExporter:
     topicRegex: ".*"
     groupRegex: ".*"
