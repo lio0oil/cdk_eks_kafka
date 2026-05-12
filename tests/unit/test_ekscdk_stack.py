@@ -352,6 +352,53 @@ def test_vpc_flow_log_disabled_in_dev():
     dev_template.resource_count_is("AWS::EC2::FlowLog", 0)
 
 
+def test_external_snapshotter_crds_applied(template):
+    # external-snapshotter の CRD（VolumeSnapshot 系・VolumeGroupSnapshot 系）が
+    # KubernetesResource として apply される。snapshot-controller / csi-snapshotter が
+    # 起動時に watch する型定義なので、controller より先に apply される必要がある。
+    all_k8s = template.find_resources("Custom::AWSCDK-EKS-KubernetesResource")
+    matches = [
+        res
+        for res in all_k8s.values()
+        if '"kind":"CustomResourceDefinition"' in _manifest_literals(res["Properties"]["Manifest"])
+        and '"volumesnapshots.snapshot.storage.k8s.io"' in _manifest_literals(res["Properties"]["Manifest"])
+    ]
+    assert len(matches) >= 1
+
+
+def test_snapshot_controller_deployment_applied(template):
+    # snapshot-controller Deployment が kube-system に apply される。
+    # VolumeSnapshot を VolumeSnapshotContent に変換する Kubernetes 標準コントローラで、
+    # CSI Driver と独立してクラスタに 1 つだけ必要。
+    all_k8s = template.find_resources("Custom::AWSCDK-EKS-KubernetesResource")
+    matches = [
+        res
+        for res in all_k8s.values()
+        if '"kind":"Deployment"' in _manifest_literals(res["Properties"]["Manifest"])
+        and '"name":"snapshot-controller"' in _manifest_literals(res["Properties"]["Manifest"])
+        and '"namespace":"kube-system"' in _manifest_literals(res["Properties"]["Manifest"])
+    ]
+    assert len(matches) >= 1
+
+
+def test_default_volume_snapshot_class_applied(template):
+    # デフォルトの VolumeSnapshotClass が apply される。
+    # - driver: ebs.csi.aws.com（EBS CSI Driver に処理を委譲）
+    # - deletionPolicy: Retain（VolumeSnapshot 誤削除時に EBS Snapshot を残す本番安全側）
+    # - is-default-class アノテーション無し（VolumeSnapshot 作成時の明示指定を強制）
+    all_k8s = template.find_resources("Custom::AWSCDK-EKS-KubernetesResource")
+    matches = [
+        res
+        for res in all_k8s.values()
+        if '"kind":"VolumeSnapshotClass"' in _manifest_literals(res["Properties"]["Manifest"])
+        and '"driver":"ebs.csi.aws.com"' in _manifest_literals(res["Properties"]["Manifest"])
+        and '"deletionPolicy":"Retain"' in _manifest_literals(res["Properties"]["Manifest"])
+    ]
+    assert len(matches) == 1
+    literals = _manifest_literals(matches[0]["Properties"]["Manifest"])
+    assert "is-default-class" not in literals
+
+
 def test_eks_admin_role_trust_policy(iam_template):
     # eks-cluster-admin ロールの trust policy に sts:AssumeRole が含まれることを確認
     # AWS フィールドは Fn::Join で構築される intrinsic function なので any_value() で検証

@@ -85,6 +85,14 @@ class ClusterConfig:
     # dev は False（コスト削減、監査要件なし）、stg/prd は True（インシデント調査・監査用）
     # 3 種類の粒度を分ける運用価値が薄いためまとめて on/off する
     enable_control_plane_logs: bool
+    # external-snapshotter のリリースタグ。
+    # manifests/snapshotter/{crds.yaml, controller.yaml} は以下で再生成する:
+    #   VER=v8.5.0
+    #   BASE=https://github.com/kubernetes-csi/external-snapshotter
+    #   kubectl kustomize "$BASE/client/config/crd?ref=$VER" > manifests/snapshotter/crds.yaml
+    #   kubectl kustomize "$BASE/deploy/kubernetes/snapshot-controller?ref=$VER" \
+    #     > manifests/snapshotter/controller.yaml
+    external_snapshotter_version: str
 
     @classmethod
     def for_dev(cls, cluster_name: str = "eks-cluster-dev") -> ClusterConfig:
@@ -123,6 +131,7 @@ class ClusterConfig:
             deletion_protection=False,
             enable_vpc_flow_logs=False,
             enable_control_plane_logs=False,
+            external_snapshotter_version="v8.5.0",
         )
 
     @classmethod
@@ -157,6 +166,7 @@ class ClusterConfig:
             deletion_protection=True,
             enable_vpc_flow_logs=True,
             enable_control_plane_logs=True,
+            external_snapshotter_version="v8.5.0",
         )
 
     @classmethod
@@ -191,4 +201,5 @@ class ClusterConfig:
             deletion_protection=True,
             enable_vpc_flow_logs=True,
             enable_control_plane_logs=True,
+            external_snapshotter_version="v8.5.0",
         )

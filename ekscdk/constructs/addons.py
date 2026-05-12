@@ -9,9 +9,10 @@ from aws_cdk import aws_iam as iam
 from constructs import Construct
 
 from ekscdk.config import ClusterConfig
-from ekscdk.constructs._manifest import load, manifest_dir
+from ekscdk.constructs._manifest import load, load_all, manifest_dir
 
 _DIR = manifest_dir("addons")
+_DIR_SNAPSHOTTER = manifest_dir("snapshotter")
 
 
 class AddonsConstruct(Construct):
@@ -28,6 +29,7 @@ class AddonsConstruct(Construct):
         self._config = config
 
         self._add_eks_addons()
+        self._add_external_snapshotter()
         self._strimzi_chart = self._add_strimzi()
         self._aws_lbc_chart = self._add_aws_lbc()
 
@@ -62,6 +64,23 @@ class AddonsConstruct(Construct):
             # OVERWRITE にしないと既存 SA のラベルと衝突してデプロイが失敗する。
             cfn_addon = cast(eks_l1.CfnAddon, addon.node.default_child)
             cfn_addon.add_override("Properties.ResolveConflicts", "OVERWRITE")
+            if addon_name == "eks-node-monitoring-agent":
+                # NMA は --verbosity フラグを zap level に -1 倍して渡すため、
+                # WARN 以上 (zapcore.WarnLevel = 1) にするには --verbosity=-1。
+                # additionalArgs は完全置換なので chart デフォルトの --metrics-address も含める。
+                cfn_addon.add_property_override(
+                    "ConfigurationValues",
+                    json.dumps(
+                        {
+                            "nodeAgent": {
+                                "additionalArgs": [
+                                    "--metrics-address=:8003",
+                                    "--verbosity=-1",
+                                ],
+                            },
+                        }
+                    ),
+                )
 
         # aws_eks_v2.Cluster が自動追加する eks-pod-identity-agent Addon は
         # CDK API から AddonVersion を渡せないため CFN プロパティ override で pin する。
@@ -71,6 +90,37 @@ class AddonsConstruct(Construct):
             cfn_pod_identity.add_property_override(
                 "AddonVersion", self._config.addon_versions["eks-pod-identity-agent"]
             )
+
+    def _add_external_snapshotter(self) -> None:
+        """external-snapshotter (CRD + snapshot-controller + default VolumeSnapshotClass) を導入する。
+
+        EBS CSI Driver の csi-snapshotter サイドカーは起動時に VolumeSnapshotClass CRD を
+        watch するため、CRD が無いと "the server could not find the requested resource"
+        エラーが永続的にログに出続ける。また Kubernetes 流の VolumeSnapshot ワークフロー
+        (PVC.dataSource からの restore など) を使うには snapshot-controller も必要。
+
+        Kafka クラスタ全体のアトミックバックアップは VolumeGroupSnapshot が EBS CSI Driver
+        未対応の現状では実現できないため、実バックアップ運用は AWS Backup の Backup Plan で
+        broker / controller の EBS を並列スナップショットする想定。ここで導入するのは
+        Kubernetes 側の「スナップショット機能の有効化」であり、取得運用は別途設計する。
+        """
+        crds = self._cluster.add_manifest(
+            "ExtSnapshotterCrds",
+            *load_all(_DIR_SNAPSHOTTER, "crds.yaml"),
+        )
+        controller = self._cluster.add_manifest(
+            "ExtSnapshotterController",
+            *load_all(_DIR_SNAPSHOTTER, "controller.yaml"),
+        )
+        controller.node.add_dependency(crds)
+
+        # deletionPolicy=Retain: VolumeSnapshot を誤削除しても EBS Snapshot は残す本番安全側
+        # is-default-class アノテーション無し: VolumeSnapshot 作成時の明示指定を強制する
+        vsc = self._cluster.add_manifest(
+            "EbsVolumeSnapshotClass",
+            load(_DIR_SNAPSHOTTER, "volumesnapshotclass.yaml"),
+        )
+        vsc.node.add_dependency(crds)
 
     @property
     def strimzi_chart(self) -> eks.HelmChart:
@@ -95,6 +145,7 @@ class AddonsConstruct(Construct):
             values={
                 "watchNamespaces": ["kafka"],
                 "replicas": 2,
+                "logLevel": "WARN",
                 # toleration 不要：system-nodegroup には taint が無く、
                 # kafka nodegroup の DedicatedKafka taint を tolerate しないため
                 # 自然に system に schedule される
