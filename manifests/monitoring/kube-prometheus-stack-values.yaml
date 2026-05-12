@@ -4,6 +4,9 @@ grafana:
   # API server / kubelet 等) を取り込む。chart デフォルトと同じ値だが、
   # 「意図的に使っている」ことを明示するため記載する
   defaultDashboardsEnabled: true
+  grafana.ini:
+    log:
+      level: warn
   # CDK 側で Pod Identity 紐付き SA を作成するため Helm からは作らない
   serviceAccount:
     create: false
@@ -26,11 +29,13 @@ grafana:
       label: grafana_dashboard
       labelValue: "1"
       searchNamespace: ALL
+      logLevel: WARN
       provider:
         allowUiUpdates: true
     datasources:
       enabled: true
       searchNamespace: ALL
+      logLevel: WARN
   # Prometheus は kube-prometheus-stack 同梱の in-cluster を default、
   # AMP は SigV4 で長期保存メトリクスを query する additional data source
   additionalDataSources:
