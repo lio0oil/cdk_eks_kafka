@@ -92,35 +92,22 @@ class AddonsConstruct(Construct):
             )
 
     def _add_external_snapshotter(self) -> None:
-        """external-snapshotter (CRD + snapshot-controller + default VolumeSnapshotClass) を導入する。
+        """external-snapshotter の CRD だけを apply する。
 
         EBS CSI Driver の csi-snapshotter サイドカーは起動時に VolumeSnapshotClass CRD を
         watch するため、CRD が無いと "the server could not find the requested resource"
-        エラーが永続的にログに出続ける。また Kubernetes 流の VolumeSnapshot ワークフロー
-        (PVC.dataSource からの restore など) を使うには snapshot-controller も必要。
+        エラーが永続的にログに出続ける。CRD さえあれば watch は成立してエラーは消える。
 
-        Kafka クラスタ全体のアトミックバックアップは VolumeGroupSnapshot が EBS CSI Driver
-        未対応の現状では実現できないため、実バックアップ運用は AWS Backup の Backup Plan で
-        broker / controller の EBS を並列スナップショットする想定。ここで導入するのは
-        Kubernetes 側の「スナップショット機能の有効化」であり、取得運用は別途設計する。
+        VolumeSnapshot ワークフローを動かす snapshot-controller と、参照される
+        VolumeSnapshotClass は実需が無いので導入しない。実バックアップ運用は
+        AWS Backup の Backup Plan で broker / controller の EBS を並列スナップショット
+        する想定で、Kubernetes 側で VolumeSnapshot リソースを作る予定が無いため。
+        必要になった時点で snapshot-controller を足す。
         """
-        crds = self._cluster.add_manifest(
+        self._cluster.add_manifest(
             "ExtSnapshotterCrds",
             *load_all(_DIR_SNAPSHOTTER, "crds.yaml"),
         )
-        controller = self._cluster.add_manifest(
-            "ExtSnapshotterController",
-            *load_all(_DIR_SNAPSHOTTER, "controller.yaml"),
-        )
-        controller.node.add_dependency(crds)
-
-        # deletionPolicy=Retain: VolumeSnapshot を誤削除しても EBS Snapshot は残す本番安全側
-        # is-default-class アノテーション無し: VolumeSnapshot 作成時の明示指定を強制する
-        vsc = self._cluster.add_manifest(
-            "EbsVolumeSnapshotClass",
-            load(_DIR_SNAPSHOTTER, "volumesnapshotclass.yaml"),
-        )
-        vsc.node.add_dependency(crds)
 
     @property
     def strimzi_chart(self) -> eks.HelmChart:
