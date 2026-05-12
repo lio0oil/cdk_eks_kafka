@@ -5,6 +5,8 @@ metadata:
   namespace: kafka
   labels:
     strimzi.io/cluster: kafka-cluster
+  annotations:
+    strimzi.io/next-node-ids: "[100000000-199999999]"
 spec:
   replicas: <CONTROLLER_REPLICAS>
   roles:
