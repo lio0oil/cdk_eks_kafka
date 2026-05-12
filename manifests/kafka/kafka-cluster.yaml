@@ -49,6 +49,7 @@ spec:
   kafkaExporter:
     topicRegex: ".*"
     groupRegex: ".*"
+    logging: warn
     template:
       pod:
         tolerations:
