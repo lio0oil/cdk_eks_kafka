@@ -133,6 +133,13 @@ class KafkaConstruct(Construct):
             # 確実に伝搬しないため、リソース単位で明示する。
             binding.node.add_dependency(aws_lbc_chart)
 
+        # ── KafkaTopic ────────────────────────────────────────────────────────
+        # Strimzi Topic Operator (entityOperator) が KafkaTopic CR を監視し
+        # 実 Kafka に Topic を作成する。Operator は Kafka CR より後に起動するため
+        # kafka_cr への依存だけで apply 順序は十分。
+        test_topic = cluster.add_manifest("KafkaTopicTestTopic", load(_DIR, "topics/test-topic.yaml"))
+        test_topic.node.add_dependency(kafka_cr)
+
     @property
     def kafka_namespace(self) -> eks.KubernetesManifest:
         """kafka namespace の manifest リソース。

@@ -212,6 +212,22 @@ def test_kafka_cluster_manifest_includes_all_broker_node_ports(template):
             assert f'"advertisedPort":{advertised_port}' in literals
 
 
+def test_kafka_topic_test_topic_is_applied(template):
+    # KafkaTopic CR (test-topic) が manifest として apply される。
+    # Strimzi Topic Operator は strimzi.io/cluster ラベルで担当 Kafka CR を識別するため、
+    # ラベル付与とパーティション/レプリカ数が manifest に反映されていることを確認する。
+    all_k8s = template.find_resources("Custom::AWSCDK-EKS-KubernetesResource")
+    topics = [
+        res for res in all_k8s.values() if '"kind":"KafkaTopic"' in _manifest_literals(res["Properties"]["Manifest"])
+    ]
+    assert len(topics) == 1
+    literals = _manifest_literals(topics[0]["Properties"]["Manifest"])
+    assert '"name":"test-topic"' in literals
+    assert '"strimzi.io/cluster":"kafka-cluster"' in literals
+    assert '"partitions":3' in literals
+    assert '"replicas":3' in literals
+
+
 def test_eks_pod_identity_agent_addon_version_pinned(template):
     # aws_eks_v2.Cluster が自動追加する eks-pod-identity-agent Addon にも
     # 他 addon と同じく AddonVersion が明示されている（latest 追従を防ぐ）。
