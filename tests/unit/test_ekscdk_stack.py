@@ -178,6 +178,24 @@ def test_helm_chart_deployed(template, chart, namespace):
     )
 
 
+@pytest.mark.parametrize(
+    "chart",
+    [
+        "strimzi-kafka-operator",
+        "aws-load-balancer-controller",
+    ],
+)
+def test_helm_chart_has_topology_spread_constraints(template, chart):
+    # operator 系 Pod (replicas > 1) を AZ に分散させるための制約。
+    # AZ 単一障害で 2 Pod とも消えないよう topology.kubernetes.io/zone を指定する。
+    charts = template.find_resources("Custom::AWSCDK-EKS-HelmChart")
+    matched = [res for res in charts.values() if res["Properties"].get("Chart") == chart]
+    assert len(matched) == 1, f"chart {chart} not found"
+    values_literals = _manifest_literals(matched[0]["Properties"]["Values"])
+    assert "topologySpreadConstraints" in values_literals
+    assert "topology.kubernetes.io/zone" in values_literals
+
+
 def test_target_group_binding_count_matches_broker_count(template):
     # bootstrap 1 個 + broker_count 個の TargetGroupBinding が apply される
     all_k8s = template.find_resources("Custom::AWSCDK-EKS-KubernetesResource")

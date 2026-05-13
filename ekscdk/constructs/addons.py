@@ -136,6 +136,16 @@ class AddonsConstruct(Construct):
                 # toleration 不要：system-nodegroup には taint が無く、
                 # kafka nodegroup の DedicatedKafka taint を tolerate しないため
                 # 自然に system に schedule される
+                # ScheduleAnyway は best-effort（AZ 分散優先だが、満たせなくても schedule）。
+                # DoNotSchedule にすると node 障害で Pod が Pending に陥るリスクを取る。
+                "topologySpreadConstraints": [
+                    {
+                        "maxSkew": 1,
+                        "topologyKey": "topology.kubernetes.io/zone",
+                        "whenUnsatisfiable": "ScheduleAnyway",
+                        "labelSelector": {"matchLabels": {"name": "strimzi-cluster-operator"}},
+                    }
+                ],
             },
         )
 
@@ -189,6 +199,16 @@ class AddonsConstruct(Construct):
                 # toleration 不要：DedicatedKafka taint で kafka nodegroup から弾かれ、
                 # system-nodegroup（taint 無し）に自然に乗る
                 "replicaCount": 2,
+                # chart デフォルトの configureDefaultAffinity=true で「同 node に co-locate しない」
+                # podAntiAffinity が入る。それに加えて AZ 分散を topologySpreadConstraints で上乗せ。
+                "topologySpreadConstraints": [
+                    {
+                        "maxSkew": 1,
+                        "topologyKey": "topology.kubernetes.io/zone",
+                        "whenUnsatisfiable": "ScheduleAnyway",
+                        "labelSelector": {"matchLabels": {"app.kubernetes.io/name": "aws-load-balancer-controller"}},
+                    }
+                ],
             },
             wait=True,
             timeout=Duration.minutes(10),
