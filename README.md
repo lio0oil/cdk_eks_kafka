@@ -413,7 +413,7 @@ kubectl get pods -n kube-system -l app.kubernetes.io/name=aws-load-balancer-cont
 
 ### 7. NLB 経由の Kafka 接続確認
 
-NLB は internal なため、検証は **VPC 内（クラスタ Pod）から**行う。`system` / `kafka` ノードはそれぞれタイント付きのため、テスト Pod には toleration が必要。
+NLB は internal なため、検証は **VPC 内（クラスタ Pod）から**行う。検証 Pod は `system` ノードにのみ schedule する（`kafka` 系ノードは `DedicatedKafka` taint で弾かれるので toleration を付けない）。**toleration を付けて broker と同居させると、NLB の `preserve_client_ip` ON × Service の `externalTrafficPolicy: Local` の組み合わせで TCP の戻り経路が壊れ、その broker への接続だけ timeout する**。
 
 ```bash
 # NLB DNS と CA cert を取得
@@ -421,7 +421,8 @@ NLB_DNS=$(aws cloudformation describe-stacks --stack-name EksCdkStack \
   --query 'Stacks[0].Outputs[?OutputKey==`KafkaNlbDnsName`].OutputValue' --output text)
 kubectl get secret -n kafka kafka-cluster-cluster-ca-cert \
   -o jsonpath='{.data.ca\.crt}' | base64 -d > /tmp/ca.crt
-kubectl create configmap kafka-test-ca --from-file=/tmp/ca.crt -n default
+kubectl create configmap kafka-test-ca --from-file=/tmp/ca.crt -n default \
+  --dry-run=client -o yaml | kubectl apply -f -
 ```
 
 検証用 Pod を起動して、TLS handshake → Kafka メタデータ取得 → topic 一覧取得を一気通貫で確認：
@@ -435,8 +436,6 @@ metadata:
   namespace: default
 spec:
   restartPolicy: Never
-  tolerations:
-    - operator: Exists
   volumes:
     - name: ca
       configMap:
