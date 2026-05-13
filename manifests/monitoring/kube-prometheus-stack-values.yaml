@@ -7,10 +7,16 @@ prometheus:
   # CDK 側で Pod Identity 付き SA を作らない（in-cluster Prometheus は AWS API を
   # 叩かないため IAM 不要）。chart デフォルトの SA に任せる。
   prometheusSpec:
-    replicas: 1
+    # 2 replica HA。同じ scrape を 2 本独立に走らせ、片方の Pod や AZ 障害で
+    # メトリクスが完全に欠けないようにする。Service が 2 Pod 間で
+    # ロードバランスするため Grafana 側の datasource 設定は変更不要。
+    # データ重複排除（Thanos / Mimir 等）は導入しない: 短期保存の
+    # ダッシュボード用途では 2 系列の値が同等で実害が無い。
+    replicas: 2
     # 15 日保持。retention とサンプル取り込みレートで PVC 容量が決まる。
     # 60s scrape × ~70K series × 15 日 = 約 8GB（圧縮後）見込み。
     # gp3 20Gi はその約 2.5 倍のヘッドルームで、cardinality が増えても余裕がある。
+    # 各 replica が独立に保管するため EBS 代は replicas 数に比例（20Gi × 2 = 40Gi）。
     retention: 15d
     # 全 Namespace の ServiceMonitor / PodMonitor を対象にする（PodMonitor を
     # 任意 NS に置けるようにするため）。
@@ -27,6 +33,17 @@ prometheus:
       limits:
         memory: 1Gi
         cpu: 500m
+    # 2 replica を別 AZ に分散させて AZ 単一障害耐性を確保する。
+    # ScheduleAnyway は best-effort（AZ 偏りを許容してでも schedule する）。
+    # DoNotSchedule にすると Node 不足や AZ 不整合で Pod が Pending に陥り、
+    # 起動失敗が監視欠損に直結するため避ける。
+    topologySpreadConstraints:
+      - maxSkew: 1
+        topologyKey: topology.kubernetes.io/zone
+        whenUnsatisfiable: ScheduleAnyway
+        labelSelector:
+          matchLabels:
+            app.kubernetes.io/name: prometheus
     storageSpec:
       volumeClaimTemplate:
         spec:

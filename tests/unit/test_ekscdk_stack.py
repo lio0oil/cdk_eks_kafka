@@ -193,9 +193,11 @@ def test_kube_prometheus_stack_enables_prometheus_and_operator(template):
     # 無効化していたときは `enabled: false` を明示していたため、両 enable: false が無いことを assert
     assert '"prometheus":{"enabled":false' not in values_literals
     assert '"prometheusOperator":{"enabled":false' not in values_literals
-    # 1 replica / 15 day retention を assert（コスト・容量の前提）
-    assert '"replicas":1' in values_literals
+    # 2 replica HA / 15 day retention を assert（コスト・容量・可用性の前提）
+    assert '"replicas":2' in values_literals
     assert '"retention":"15d"' in values_literals
+    # AZ 跨ぎの topologySpread が外れると 2 replica が同 AZ に乗りうる
+    assert "topology.kubernetes.io/zone" in values_literals
 
 
 @pytest.mark.parametrize(
