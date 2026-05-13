@@ -43,6 +43,9 @@ class KafkaConstruct(Construct):
 
         # ── Namespace ─────────────────────────────────────────────────────────
         namespace = cluster.add_manifest("KafkaNamespace", load(_DIR, "namespace.yaml"))
+        # PodMonitor が kafka NS に lookup できるよう、MonitoringConstruct から
+        # 依存を張れる参照として外に公開する。
+        self.kafka_namespace = namespace
 
         # ── JMX メトリクス ConfigMap ──────────────────────────────────────────
         cm = cluster.add_manifest("KafkaMetricsCm", load(_DIR, "cm.yaml"))

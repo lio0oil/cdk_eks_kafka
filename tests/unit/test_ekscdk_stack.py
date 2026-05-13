@@ -161,9 +161,9 @@ def test_pod_identity_association_exists(template, namespace, service_account):
     )
 
 
-def test_in_cluster_prometheus_sa_not_created(template):
-    # AMP Managed Scraper に scrape を移譲したため in-cluster Prometheus は無効化。
-    # prometheus 用 Pod Identity も同時に消える。
+def test_in_cluster_prometheus_no_pod_identity(template):
+    # in-cluster Prometheus は AWS API を叩かないため Pod Identity 不要。
+    # chart 同梱の SA をそのまま使い、CDK は prometheus 用 PodIdentityAssociation を作らない。
     associations = template.find_resources("AWS::EKS::PodIdentityAssociation")
     sa_names = [res["Properties"].get("ServiceAccount") for res in associations.values()]
     assert "prometheus" not in sa_names
@@ -248,12 +248,36 @@ def test_amp_scrape_interval_is_60s(template):
     assert config["global"]["scrape_interval"] == "60s"
 
 
-def test_pod_monitor_manifests_not_applied(template):
-    # AMP Managed Scraper に移行したため、PodMonitor CRD ベースの manifest は deploy しない。
+@pytest.mark.parametrize(
+    "pod_monitor_name",
+    ["kafka-resources-metrics", "cluster-operator-metrics", "entity-operator-metrics"],
+)
+def test_pod_monitor_manifest_applied(template, pod_monitor_name):
+    # in-cluster Prometheus + Operator が動くため、Strimzi 系の PodMonitor 3 件は manifest
+    # として apply され、Operator がこれを scrape config に翻訳する。
     all_k8s = template.find_resources("Custom::AWSCDK-EKS-KubernetesResource")
-    for res in all_k8s.values():
-        literals = _manifest_literals(res["Properties"]["Manifest"])
-        assert '"kind":"PodMonitor"' not in literals
+    matched = [
+        res
+        for res in all_k8s.values()
+        if '"kind":"PodMonitor"' in _manifest_literals(res["Properties"]["Manifest"])
+        and f'"name":"{pod_monitor_name}"' in _manifest_literals(res["Properties"]["Manifest"])
+    ]
+    assert len(matched) == 1, f"PodMonitor {pod_monitor_name} が apply されていない"
+
+
+def test_kube_prometheus_stack_enables_prometheus_and_operator(template):
+    # chart values で prometheus / Operator を有効化していること（無効化していた頃の
+    # 設定を誤って残すと in-cluster Prometheus が立たず Grafana にデータが入らない）。
+    charts = template.find_resources("Custom::AWSCDK-EKS-HelmChart")
+    kps = [res for res in charts.values() if res["Properties"].get("Chart") == "kube-prometheus-stack"]
+    assert len(kps) == 1
+    values_literals = _manifest_literals(kps[0]["Properties"]["Values"])
+    # 無効化していたときは `enabled: false` を明示していたため、両 enable: false が無いことを assert
+    assert '"prometheus":{"enabled":false' not in values_literals
+    assert '"prometheusOperator":{"enabled":false' not in values_literals
+    # 1 replica / 15 day retention を assert（コスト・容量の前提）
+    assert '"replicas":1' in values_literals
+    assert '"retention":"15d"' in values_literals
 
 
 @pytest.mark.parametrize(
@@ -369,27 +393,6 @@ def test_cluster_control_plane_logging_enabled(template):
                     )
                 }
             }
-        },
-    )
-
-
-def test_grafana_role_attaches_amp_query_managed_policy(template):
-    # Grafana が AMP を SigV4 query する権限（AmazonPrometheusQueryAccess）を持つ
-    template.has_resource_properties(
-        "AWS::IAM::Role",
-        {
-            "ManagedPolicyArns": assertions.Match.array_with(
-                [
-                    assertions.Match.object_like(
-                        {
-                            "Fn::Join": [
-                                "",
-                                assertions.Match.array_with([":iam::aws:policy/AmazonPrometheusQueryAccess"]),
-                            ]
-                        }
-                    )
-                ]
-            )
         },
     )
 

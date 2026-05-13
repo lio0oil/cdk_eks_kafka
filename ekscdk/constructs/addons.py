@@ -30,7 +30,7 @@ class AddonsConstruct(Construct):
 
         self._add_eks_addons()
         self._add_external_snapshotter()
-        self._add_strimzi()
+        self._strimzi_chart = self._add_strimzi()
         self._aws_lbc_chart = self._add_aws_lbc()
 
     def _add_eks_addons(self) -> None:
@@ -109,10 +109,10 @@ class AddonsConstruct(Construct):
             *load_all(_DIR_SNAPSHOTTER, "crds.yaml"),
         )
 
-    def _add_strimzi(self) -> None:
+    def _add_strimzi(self) -> eks.HelmChart:
         self._cluster.add_manifest("Gp3StorageClass", load(_DIR, "gp3-storageclass.yaml"))
 
-        self._cluster.add_helm_chart(
+        return self._cluster.add_helm_chart(
             "StrimziOperator",
             chart="strimzi-kafka-operator",
             repository=self._config.strimzi_chart_repo,
@@ -148,6 +148,15 @@ class AddonsConstruct(Construct):
         kubectl apply されるよう順序を担保する。
         """
         return self._aws_lbc_chart
+
+    @property
+    def strimzi_chart(self) -> eks.HelmChart:
+        """Strimzi Operator Helm chart リソース。
+
+        strimzi-system Namespace を作るのも Strimzi chart のため、その NS に
+        置く PodMonitor は chart Ready を待つ必要がある（cluster-operator-pod-monitor.yaml）。
+        """
+        return self._strimzi_chart
 
     def _add_aws_lbc(self) -> eks.HelmChart:
         """AWS Load Balancer Controller を導入する。

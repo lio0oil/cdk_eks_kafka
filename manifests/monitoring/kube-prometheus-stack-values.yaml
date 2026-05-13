@@ -1,13 +1,43 @@
-# in-cluster Prometheus / Prometheus Operator / Alertmanager は無効化する。
-# scrape は AMP Managed Scraper（manifests/amp/scrape-config.yaml）に集約し、
-# 長期保存・query は AMP workspace に寄せている。Grafana は AMP datasource のみを使う。
-# kube-state-metrics と prometheus-node-exporter は chart デフォルトで有効のまま残し、
-# AMP Scraper の scrape_configs から scrape する。
+# in-cluster Prometheus（StatefulSet）を chart 同梱で動かす構成。
+# scrape は Prometheus Operator + PodMonitor / ServiceMonitor 経由（chart 同梱）。
+# Grafana は同 chart 同梱の in-cluster Prometheus を datasource として直接 query する。
+# Alertmanager は通知要件が出るまで無効化。
 prometheus:
-  enabled: false
+  enabled: true
+  # CDK 側で Pod Identity 付き SA を作らない（in-cluster Prometheus は AWS API を
+  # 叩かないため IAM 不要）。chart デフォルトの SA に任せる。
+  prometheusSpec:
+    replicas: 1
+    # 15 日保持。retention とサンプル取り込みレートで PVC 容量が決まる。
+    # 60s scrape × ~70K series × 15 日 = 約 8GB（圧縮後）見込み。
+    # gp3 20Gi はその約 2.5 倍のヘッドルームで、cardinality が増えても余裕がある。
+    retention: 15d
+    # 全 Namespace の ServiceMonitor / PodMonitor を対象にする（PodMonitor を
+    # 任意 NS に置けるようにするため）。
+    serviceMonitorSelectorNilUsesHelmValues: false
+    podMonitorSelectorNilUsesHelmValues: false
+    ruleSelectorNilUsesHelmValues: false
+    scrapeConfigSelectorNilUsesHelmValues: false
+    # tolerations 未指定で system-nodegroup に乗る（kafka nodegroup の
+    # DedicatedKafka taint には toleration を持たないため自然に弾かれる）
+    resources:
+      requests:
+        memory: 512Mi
+        cpu: 250m
+      limits:
+        memory: 1Gi
+        cpu: 500m
+    storageSpec:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: gp3
+          accessModes: [ReadWriteOnce]
+          resources:
+            requests:
+              storage: 20Gi
 
 prometheusOperator:
-  enabled: false
+  enabled: true
 
 alertmanager:
   enabled: false
@@ -18,11 +48,9 @@ grafana:
   grafana.ini:
     log:
       level: warn
-    # AMP datasource を SigV4 で query するため。デフォルトは false で、
-    # 明示有効化しないと sigV4Auth: true 指定済みでも署名が走らず、
-    # AMP から "Missing Authentication Token" (403) が返る。
-    auth:
-      sigv4_auth_enabled: true
+  # CDK 側で Pod Identity 紐付き SA を作成するため Helm からは作らない。
+  # IAM 不要（in-cluster Prometheus を query するだけ）。SA は CDK で作るため
+  # chart からは create: false にする。
   serviceAccount:
     create: false
     name: grafana
@@ -38,29 +66,14 @@ grafana:
       enabled: true
       searchNamespace: ALL
       logLevel: WARN
-      # 既定で in-cluster Prometheus 用 datasource (isDefault=true) が生成される。
-      # AMP datasource を additionalDataSources で isDefault=true 指定しているため
-      # 重複で Grafana 起動失敗（"Only one datasource per organization can be marked as default"）。
-      defaultDatasourceEnabled: false
-  # AMP を唯一の datasource として登録する。SigV4 で query するため Pod Identity 付き
-  # grafana SA に AmazonPrometheusQueryAccess を付与している。
-  # datasource 名は "Prometheus" を維持する。Strimzi 公式 dashboard を含む多くの
-  # 既存 dashboard が "Prometheus" datasource をハードコード参照するため。
-  # AMP は Prometheus 互換 API なので type=prometheus で繋ぐのが正攻法。
-  additionalDataSources:
-    - name: Prometheus
-      type: prometheus
-      access: proxy
-      url: <AMP_QUERY_URL>
-      isDefault: true
-      jsonData:
-        httpMethod: POST
-        sigV4Auth: true
-        sigV4AuthType: default
-        sigV4Region: <REGION>
-      editable: false
+  # chart デフォルトで in-cluster Prometheus を datasource (name: Prometheus,
+  # isDefault: true) として自動登録する。Strimzi 公式 dashboard が "Prometheus"
+  # 名でハードコード参照するため、デフォルトのまま維持。
 
 # node-exporter は DaemonSet なので全 Taint を許容する
 prometheus-node-exporter:
   tolerations:
     - operator: Exists
+
+# kube-state-metrics / prometheusOperator は toleration 未指定のまま system に乗る
+# （kafka nodegroup の DedicatedKafka taint で kafka ノードからは弾かれる）

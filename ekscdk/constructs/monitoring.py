@@ -14,6 +14,7 @@ from ekscdk.constructs.addons import AddonsConstruct
 
 _DIR = manifest_dir("monitoring")
 _DIR_AMP = manifest_dir("amp")
+_DIR_KAFKA = manifest_dir("kafka")
 
 
 class MonitoringConstruct(Construct):
@@ -40,6 +41,7 @@ class MonitoringConstruct(Construct):
         cluster: eks.ICluster,
         config: ClusterConfig,
         addons: AddonsConstruct,
+        kafka_namespace: eks.KubernetesManifest,
     ) -> None:
         super().__init__(scope, construct_id)
 
@@ -159,9 +161,8 @@ class MonitoringConstruct(Construct):
         )
 
         # ── Grafana Pod Identity ───────────────────────────────────────────────
-        # self-hosted Grafana が AMP を data source として SigV4 で query するため。
-        # AmazonPrometheusQueryAccess: aps:QueryMetrics / GetSeries / GetLabels /
-        # GetMetricMetadata / DescribeWorkspace 等 read 系を一括付与。
+        # in-cluster Prometheus を datasource として直接 query するため IAM は不要。
+        # SA だけ namespace 整列のために CDK で先に作っておく（chart 側は create: false）。
         grafana_sa = cluster.add_service_account(
             "GrafanaSa",
             name="grafana",
@@ -169,19 +170,15 @@ class MonitoringConstruct(Construct):
             identity_type=eks.IdentityType.POD_IDENTITY,
         )
         grafana_sa.node.add_dependency(namespace)
-        cast(iam.Role, grafana_sa.role).add_managed_policy(
-            iam.ManagedPolicy.from_aws_managed_policy_name("AmazonPrometheusQueryAccess")
-        )
 
         # ── kube-prometheus-stack（Helm）──────────────────────────────────────
-        # Prometheus / Operator / Alertmanager は無効化済み（values 参照）。
-        # Grafana / kube-state-metrics / node-exporter のみが deploy される。
-        amp_query_url = amp_workspace.attr_prometheus_endpoint.rstrip("/")
+        # in-cluster Prometheus + Operator + Grafana を chart 同梱で deploy。
+        # Alertmanager は無効化（values 参照）。Grafana datasource は chart デフォルトの
+        # in-cluster Prometheus（name: Prometheus, isDefault: true）をそのまま使う。
         kps_values = load_with_subs(
             _DIR,
             "kube-prometheus-stack-values.yaml",
             REGION=region,
-            AMP_QUERY_URL=amp_query_url,
         )
         kps = cluster.add_helm_chart(
             "KubePrometheusStack",
@@ -194,6 +191,32 @@ class MonitoringConstruct(Construct):
         )
         kps.node.add_dependency(namespace)
         kps.node.add_dependency(grafana_sa)
+
+        # ── Kafka / Strimzi PodMonitor ─────────────────────────────────────────
+        # broker / controller / cruise-control / kafka-exporter を 1 つの PodMonitor で
+        # 収集する。Prometheus Operator (kps) が PodMonitor CRD を提供するため kps Ready
+        # 後に apply、対象 NS の存在も依存に張る。
+        kafka_pm = cluster.add_manifest(
+            "KafkaResourcesPodMonitor",
+            load(_DIR_KAFKA, "kafka-pod-monitor.yaml"),
+        )
+        kafka_pm.node.add_dependency(kps)
+        kafka_pm.node.add_dependency(kafka_namespace)
+
+        cluster_op_pm = cluster.add_manifest(
+            "StrimziClusterOperatorPodMonitor",
+            load(_DIR_KAFKA, "cluster-operator-pod-monitor.yaml"),
+        )
+        cluster_op_pm.node.add_dependency(kps)
+        # strimzi-system NS は Strimzi chart が create_namespace=True で作るため依存する。
+        cluster_op_pm.node.add_dependency(addons.strimzi_chart)
+
+        entity_op_pm = cluster.add_manifest(
+            "StrimziEntityOperatorPodMonitor",
+            load(_DIR_KAFKA, "entity-operator-pod-monitor.yaml"),
+        )
+        entity_op_pm.node.add_dependency(kps)
+        entity_op_pm.node.add_dependency(kafka_namespace)
 
         # ── Grafana Dashboard ConfigMap ───────────────────────────────────────
         # kube-prometheus-stack の sidecar が monitoring namespace の

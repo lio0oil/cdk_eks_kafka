@@ -66,6 +66,7 @@ class EksCdkStack(Stack):
             cluster=eks_construct.cluster,
             config=config,
             addons=addons,
+            kafka_namespace=kafka.kafka_namespace,
         )
 
         CfnOutput(self, "KafkaNlbDnsName", value=network.kafka_nlb.load_balancer_dns_name)
