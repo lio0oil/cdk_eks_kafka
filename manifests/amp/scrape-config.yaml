@@ -27,6 +27,9 @@ scrape_configs:
       - source_labels: [__meta_kubernetes_pod_name]
         target_label: kubernetes_pod_name
         action: replace
+      - source_labels: [__meta_kubernetes_pod_container_name]
+        target_label: container
+        action: replace
       - source_labels: [__meta_kubernetes_pod_node_name]
         target_label: node_name
         action: replace
@@ -48,6 +51,9 @@ scrape_configs:
       - source_labels: [__meta_kubernetes_pod_container_port_name]
         action: keep
         regex: http
+      - source_labels: [__meta_kubernetes_pod_container_name]
+        target_label: container
+        action: replace
 
   # Strimzi Entity Operator (Topic / User Operator)
   - job_name: entity-operator-metrics
@@ -63,6 +69,9 @@ scrape_configs:
       - source_labels: [__meta_kubernetes_pod_container_port_name]
         action: keep
         regex: healthcheck
+      - source_labels: [__meta_kubernetes_pod_container_name]
+        target_label: container
+        action: replace
 
   # kube-state-metrics (kube-prometheus-stack 同梱)
   - job_name: kube-state-metrics
@@ -76,7 +85,9 @@ scrape_configs:
         regex: kube-state-metrics
 
   # prometheus-node-exporter (kube-prometheus-stack 同梱、DaemonSet)
-  - job_name: prometheus-node-exporter
+  # job 名は AWS observability solution の recording rule 規約 (`job="node-exporter"`)
+  # に合わせる。これにより kube-prometheus-stack 互換ダッシュボードがそのまま動く。
+  - job_name: node-exporter
     kubernetes_sd_configs:
       - role: endpoints
         namespaces:
@@ -87,6 +98,9 @@ scrape_configs:
         regex: prometheus-node-exporter
 
   # kubelet metrics (各 node の kubelet)
+  # kube-prometheus-stack の recording rule は `metrics_path="/metrics"` で kubelet
+  # 本体を識別するため、ラベルとして明示的に付与する（`__metrics_path__` は scrape 時の
+  # URL 指定で、最終メトリクスには残らない hidden ラベル）。
   - job_name: kubelet
     scheme: https
     authorization:
@@ -95,6 +109,8 @@ scrape_configs:
     kubernetes_sd_configs:
       - role: node
     relabel_configs:
+      - target_label: metrics_path
+        replacement: /metrics
       - action: labelmap
         regex: __meta_kubernetes_node_label_(.+)
       - replacement: kubernetes.default.svc:443
@@ -105,6 +121,9 @@ scrape_configs:
         replacement: /api/v1/nodes/$1/proxy/metrics
 
   # cAdvisor (container CPU/memory/IO、kubelet 経由)
+  # kube-prometheus-stack の recording rule は cadvisor メトリクスを `job="kubelet"`
+  # + `metrics_path="/metrics/cadvisor"` で識別する。
+  # job_name は識別用に "cadvisor" を残しつつ、relabel で job / metrics_path を上書き。
   - job_name: cadvisor
     scheme: https
     authorization:
@@ -113,6 +132,10 @@ scrape_configs:
     kubernetes_sd_configs:
       - role: node
     relabel_configs:
+      - target_label: job
+        replacement: kubelet
+      - target_label: metrics_path
+        replacement: /metrics/cadvisor
       - action: labelmap
         regex: __meta_kubernetes_node_label_(.+)
       - replacement: kubernetes.default.svc:443
@@ -123,7 +146,8 @@ scrape_configs:
         replacement: /api/v1/nodes/$1/proxy/metrics/cadvisor
 
   # Kubernetes API server
-  - job_name: kubernetes-apiservers
+  # job 名は AWS observability solution の recording rule 規約 (`job="apiserver"`) に合わせる
+  - job_name: apiserver
     scheme: https
     authorization:
       type: Bearer

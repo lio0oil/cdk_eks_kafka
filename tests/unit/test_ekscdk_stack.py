@@ -189,13 +189,14 @@ def test_amp_scraper_targets_eks_cluster(template):
         "kafka-resources-metrics",
         "cluster-operator-metrics",
         "entity-operator-metrics",
-        # Kubernetes 系（kube-prometheus-stack 同梱の kube-state-metrics / node-exporter
-        # + control plane / kubelet / cadvisor）
+        # Kubernetes 系。AWS observability solution の recording rule 規約
+        # （`job="node-exporter"` / `job="apiserver"` / `job="kubelet"` 等）に
+        # 合わせており、kube-prometheus-stack 互換ダッシュボードがそのまま動く。
         "kube-state-metrics",
-        "prometheus-node-exporter",
+        "node-exporter",
         "kubelet",
         "cadvisor",
-        "kubernetes-apiservers",
+        "apiserver",
     ],
 )
 def test_amp_scrape_config_contains_job(template, job_name):

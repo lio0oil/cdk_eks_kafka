@@ -107,6 +107,25 @@ class MonitoringConstruct(Construct):
         scraper.node.add_dependency(addons)
         scraper.node.add_dependency(addons.aws_lbc_chart)
 
+        # ── AMP Recording Rules ──────────────────────────────────────────────
+        # kube-prometheus-stack 84.5.0 chart 同梱の PrometheusRule 群から recording
+        # rule のみ抽出して AMP の Rule Manager に登録。chart の dashboards が参照する
+        # 事前集計メトリクス（node_namespace_pod_container:*, cluster:namespace:* 等）が
+        # AMP 側で発火し、"Kubernetes / Compute Resources / *" 系ダッシュボードがそのまま動く。
+        # 抽出元: helm template prometheus-community/kube-prometheus-stack --version 84.5.0
+        # の templates/prometheus/rules-1.14/*.yaml （94 rules / 16 groups）。
+        # AWS observability solution v3.0.0 の rule は古く一部 dashboard と乖離（例:
+        # node_namespace_pod_container:container_cpu_usage_seconds_total:sum_irate vs sum_rate5m）
+        # していたため、chart 由来の最新ルールを採用する。
+        rules_yaml = load_text_with_subs(_DIR_AMP, "recording-rules.yaml")
+        aps.CfnRuleGroupsNamespace(
+            self,
+            "AmpRecordingRules",
+            workspace=amp_workspace.attr_arn,
+            name="kube-prometheus-stack-recording-rules",
+            data=rules_yaml,
+        )
+
         # ── CloudWatch Log Group ──────────────────────────────────────────────
         log_group = logs.LogGroup(
             self,
