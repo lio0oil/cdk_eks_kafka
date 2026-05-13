@@ -1,4 +1,3 @@
-import base64
 from typing import cast
 
 from aws_cdk import Duration, Stack
@@ -11,6 +10,7 @@ from constructs import Construct
 
 from ekscdk.config import ClusterConfig
 from ekscdk.constructs._manifest import load, load_text_with_subs, load_with_subs, manifest_dir
+from ekscdk.constructs.addons import AddonsConstruct
 
 _DIR = manifest_dir("monitoring")
 _DIR_AMP = manifest_dir("amp")
@@ -39,6 +39,7 @@ class MonitoringConstruct(Construct):
         vpc: ec2.IVpc,
         cluster: eks.ICluster,
         config: ClusterConfig,
+        addons: AddonsConstruct,
     ) -> None:
         super().__init__(scope, construct_id)
 
@@ -73,9 +74,14 @@ class MonitoringConstruct(Construct):
             description="AMP Scraper to cluster pods/nodes",
         )
         scrape_yaml = load_text_with_subs(_DIR_AMP, "scrape-config.yaml", CLUSTER_NAME=config.cluster_name)
-        scrape_blob = base64.b64encode(scrape_yaml.encode("utf-8")).decode("ascii")
         private_subnets = vpc.select_subnets(subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS)
-        aps.CfnScraper(
+        # AWS::APS::Scraper の CFN handler は ConfigurationBlob を内部で base64 encode する。
+        # CFN 公式 doc には "base 64 encoded" と書かれているが、実装は raw 文字列を期待し
+        # 自前で encode する。base64 を渡すと二重 encode で AMP 側の YAML parse が失敗し、
+        # "ValidationException: Invalid Prometheus scrape configuration" として返ってくる。
+        # 参考: aws/aws-cdk-lib aws_aps の type は str だが、内部実装は CLI 同等の base64
+        # ではなく CFN handler 経由の自動 encode が走る。
+        scraper = aps.CfnScraper(
             self,
             "AmpScraper",
             alias=f"{config.cluster_name}-scraper",
@@ -85,7 +91,7 @@ class MonitoringConstruct(Construct):
                 ),
             ),
             scrape_configuration=aps.CfnScraper.ScrapeConfigurationProperty(
-                configuration_blob=scrape_blob,
+                configuration_blob=scrape_yaml,
             ),
             source=aps.CfnScraper.SourceProperty(
                 eks_configuration=aps.CfnScraper.EksConfigurationProperty(
@@ -95,6 +101,11 @@ class MonitoringConstruct(Construct):
                 ),
             ),
         )
+        # CreateScraper は cluster の internal state（access entry 伝播 / API 認可）が
+        # settle するまで失敗するため、AWS LBC chart (wait=True で Pod Ready まで待つ) と
+        # addon 群への依存で cluster が確実に動く状態まで scraper 作成を遅延させる。
+        scraper.node.add_dependency(addons)
+        scraper.node.add_dependency(addons.aws_lbc_chart)
 
         # ── CloudWatch Log Group ──────────────────────────────────────────────
         log_group = logs.LogGroup(

@@ -1,5 +1,3 @@
-import base64
-
 import aws_cdk as core
 import pytest
 from aws_cdk import assertions
@@ -204,16 +202,14 @@ def test_amp_scrape_config_contains_job(template, job_name):
     scrapers = template.find_resources("AWS::APS::Scraper")
     assert len(scrapers) == 1
     blob = next(iter(scrapers.values()))["Properties"]["ScrapeConfiguration"]["ConfigurationBlob"]
-    decoded = base64.b64decode(blob).decode("utf-8")
-    assert f"job_name: {job_name}" in decoded
+    assert f"job_name: {job_name}" in blob
 
 
 def test_amp_scrape_config_has_cluster_external_label(template):
     # external_labels.cluster でメトリクス側に cluster 名を残す（マルチクラスタ識別用）。
     scrapers = template.find_resources("AWS::APS::Scraper")
     blob = next(iter(scrapers.values()))["Properties"]["ScrapeConfiguration"]["ConfigurationBlob"]
-    decoded = base64.b64decode(blob).decode("utf-8")
-    assert f"cluster: {ClusterConfig.for_prd().cluster_name}" in decoded
+    assert f"cluster: {ClusterConfig.for_prd().cluster_name}" in blob
 
 
 def test_pod_monitor_manifests_not_applied(template):
