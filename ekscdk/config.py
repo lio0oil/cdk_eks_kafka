@@ -105,8 +105,8 @@ class ClusterConfig:
             # t4g.medium (2vCPU/4GB) で十分（allocatable 3.2GB に対し約 50% 余裕）
             system_instance_type="t4g.medium",
             system_min_size=2,
-            system_max_size=3,
-            system_desired_size=2,
+            system_max_size=4,
+            system_desired_size=3,
             # broker は JVM heap 2GB + page cache 用に余裕が必要なため t4g.large 維持
             # （t4g.medium にすると page cache が枯渇し dev でも本番と挙動が乖離する）
             kafka_broker_instance_type="t4g.large",
