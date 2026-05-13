@@ -20,11 +20,20 @@ def manifest_dir(*parts: str) -> str:
 
 
 def load_with_subs(base_dir: str, filename: str, **subs: str) -> dict:
+    return yaml.safe_load(load_text_with_subs(base_dir, filename, **subs))
+
+
+def load_text_with_subs(base_dir: str, filename: str, **subs: str) -> str:
+    """テンプレート変数を置換した raw text を返す（YAML パースしない）。
+
+    AMP Scraper の configurationBlob のように、YAML 文字列のまま base64 encode する
+    用途で使う。YAML として読みたい場合は load / load_with_subs を使う。
+    """
     with open(os.path.join(base_dir, filename)) as f:
         text = f.read()
     for placeholder, value in subs.items():
         text = text.replace(f"<{placeholder}>", value)
-    return yaml.safe_load(text)
+    return text
 
 
 def load(base_dir: str, filename: str) -> dict:

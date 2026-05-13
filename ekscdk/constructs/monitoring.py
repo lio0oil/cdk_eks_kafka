@@ -1,53 +1,100 @@
+import base64
 from typing import cast
 
 from aws_cdk import Duration, Stack
 from aws_cdk import aws_aps as aps
+from aws_cdk import aws_ec2 as ec2
 from aws_cdk import aws_eks_v2 as eks
 from aws_cdk import aws_iam as iam
 from aws_cdk import aws_logs as logs
 from constructs import Construct
 
 from ekscdk.config import ClusterConfig
-from ekscdk.constructs._manifest import load, load_with_subs, manifest_dir
+from ekscdk.constructs._manifest import load, load_text_with_subs, load_with_subs, manifest_dir
 
 _DIR = manifest_dir("monitoring")
-_KAFKA_DIR = manifest_dir("kafka")
+_DIR_AMP = manifest_dir("amp")
 
 
 class MonitoringConstruct(Construct):
     """監視環境 Construct
 
     AWS リソース:
-      - AMP（Prometheus メトリクス）
+      - AMP Workspace（Prometheus メトリクス保管・query）
+      - AMP Managed Scraper（agentless で Pod / Node を scrape して remote_write）
       - CloudWatch Log Group（コンテナログ）
 
-    Kubernetes リソース（CDK 管理 Helm）:
-      - kube-prometheus-stack: メトリクス収集 + 可視化
-          - Prometheus（SigV4 認証付き remote write → AMP）
-          - Grafana（self-hosted、AMP を SigV4 で query。dashboard sidecar で
-            ConfigMap ラベル grafana_dashboard=1 を自動取り込み）
-          - node-exporter（ノードメトリクス）
-          - kube-state-metrics（Pod/Node/PV メトリクス）
-          - PodMonitor（Kafka metrics）
+    Kubernetes リソース（CDK 管理 Helm / manifest）:
+      - kube-prometheus-stack: Grafana / kube-state-metrics / node-exporter のみ
+        （Prometheus / Prometheus Operator / Alertmanager は無効化、AMP に移譲）
       - Fluent Bit DaemonSet: ログ → CloudWatch Logs
+
+    Grafana は AMP datasource のみで query する。
     """
 
     def __init__(
         self,
         scope: Construct,
         construct_id: str,
+        vpc: ec2.IVpc,
         cluster: eks.ICluster,
         config: ClusterConfig,
-        strimzi_chart: eks.HelmChart,
-        kafka_namespace: eks.KubernetesManifest,
     ) -> None:
         super().__init__(scope, construct_id)
 
         region = Stack.of(self).region
 
-        # ── AMP ──────────────────────────────────────────────────────────────
+        # ── AMP Workspace ────────────────────────────────────────────────────
         amp_workspace = aps.CfnWorkspace(self, "AmpWorkspace", alias=config.cluster_name)
-        amp_remote_write_url = f"{amp_workspace.attr_prometheus_endpoint}api/v1/remote_write"
+
+        # ── AMP Managed Scraper ──────────────────────────────────────────────
+        # AWS マネージドの agentless scraper が EKS API server 経由で Pod / Node を
+        # discovery し、scrape して AMP workspace に remote_write する。
+        # aws_eks_v2.Cluster の AccessEntry ベース認証と組み合わさり、CfnScraper 作成時に
+        # EKS Access Entry policy が自動生成されて cluster API への read 権限が付く。
+        # EKS managed nodegroup は cluster SG が node に自動 attach されるため、
+        # cluster SG に scraper SG からの ingress を許可すれば Pod の /metrics に到達できる。
+        scraper_sg = ec2.SecurityGroup(
+            self,
+            "AmpScraperSg",
+            vpc=vpc,
+            description="AMP Managed Scraper ENIs",
+            allow_all_outbound=True,
+        )
+        cluster_sg = ec2.SecurityGroup.from_security_group_id(
+            self,
+            "ClusterSgRef",
+            cluster.cluster_security_group_id,
+            mutable=True,
+        )
+        cluster_sg.add_ingress_rule(
+            peer=scraper_sg,
+            connection=ec2.Port.all_traffic(),
+            description="AMP Scraper to cluster pods/nodes",
+        )
+        scrape_yaml = load_text_with_subs(_DIR_AMP, "scrape-config.yaml", CLUSTER_NAME=config.cluster_name)
+        scrape_blob = base64.b64encode(scrape_yaml.encode("utf-8")).decode("ascii")
+        private_subnets = vpc.select_subnets(subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS)
+        aps.CfnScraper(
+            self,
+            "AmpScraper",
+            alias=f"{config.cluster_name}-scraper",
+            destination=aps.CfnScraper.DestinationProperty(
+                amp_configuration=aps.CfnScraper.AmpConfigurationProperty(
+                    workspace_arn=amp_workspace.attr_arn,
+                ),
+            ),
+            scrape_configuration=aps.CfnScraper.ScrapeConfigurationProperty(
+                configuration_blob=scrape_blob,
+            ),
+            source=aps.CfnScraper.SourceProperty(
+                eks_configuration=aps.CfnScraper.EksConfigurationProperty(
+                    cluster_arn=cluster.cluster_arn,
+                    subnet_ids=private_subnets.subnet_ids,
+                    security_group_ids=[scraper_sg.security_group_id],
+                ),
+            ),
+        )
 
         # ── CloudWatch Log Group ──────────────────────────────────────────────
         log_group = logs.LogGroup(
@@ -60,27 +107,6 @@ class MonitoringConstruct(Construct):
 
         # ── monitoring Namespace ──────────────────────────────────────────────
         namespace = cluster.add_manifest("MonitoringNamespace", load(_DIR, "namespace.yaml"))
-
-        # ── Prometheus Pod Identity ────────────────────────────────────────────
-        # kube-prometheus-stack の serviceAccount.create=false で使用する SA を事前作成
-        prometheus_sa = cluster.add_service_account(
-            "PrometheusSa",
-            name="prometheus",
-            namespace="monitoring",
-            identity_type=eks.IdentityType.POD_IDENTITY,
-        )
-        prometheus_sa.node.add_dependency(namespace)
-        cast(iam.Role, prometheus_sa.role).add_to_policy(
-            iam.PolicyStatement(
-                actions=[
-                    "aps:RemoteWrite",
-                    "aps:GetSeries",
-                    "aps:GetLabels",
-                    "aps:GetMetricMetadata",
-                ],
-                resources=[amp_workspace.attr_arn],
-            )
-        )
 
         # ── Fluent Bit Pod Identity ───────────────────────────────────────────
         fluent_bit_sa = cluster.add_service_account(
@@ -118,15 +144,15 @@ class MonitoringConstruct(Construct):
         )
 
         # ── kube-prometheus-stack（Helm）──────────────────────────────────────
+        # Prometheus / Operator / Alertmanager は無効化済み（values 参照）。
+        # Grafana / kube-state-metrics / node-exporter のみが deploy される。
         amp_query_url = amp_workspace.attr_prometheus_endpoint.rstrip("/")
         kps_values = load_with_subs(
             _DIR,
             "kube-prometheus-stack-values.yaml",
             REGION=region,
-            AMP_REMOTE_WRITE_URL=amp_remote_write_url,
             AMP_QUERY_URL=amp_query_url,
         )
-        # timeout を延長して admission webhook の cert 生成 Job が完了するまで待機する
         kps = cluster.add_helm_chart(
             "KubePrometheusStack",
             chart="kube-prometheus-stack",
@@ -137,7 +163,6 @@ class MonitoringConstruct(Construct):
             timeout=Duration.minutes(15),
         )
         kps.node.add_dependency(namespace)
-        kps.node.add_dependency(prometheus_sa)
         kps.node.add_dependency(grafana_sa)
 
         # ── Grafana Dashboard ConfigMap ───────────────────────────────────────
@@ -153,33 +178,6 @@ class MonitoringConstruct(Construct):
             )
             cm = cluster.add_manifest(cm_id, load(_DIR, f"dashboards/{fname}"))
             cm.node.add_dependency(kps)
-
-        # ── Kafka PodMonitor ───────────────────────────────────────────────────
-        # data-on-eks リファレンスに従い、broker / controller / cruise-control /
-        # kafka-exporter を1つの PodMonitor (kafka-resources-metrics) で scrape する。
-        # ServiceMonitor は持たない（重複 scrape を避ける）。
-        kafka_pm = cluster.add_manifest("KafkaResourcesPodMonitor", load(_KAFKA_DIR, "kafka-pod-monitor.yaml"))
-        kafka_pm.node.add_dependency(kps)
-        kafka_pm.node.add_dependency(kafka_namespace)
-
-        # Strimzi Cluster Operator (strimzi-system namespace) のメトリクス
-        # PodMonitor は strimzi-system namespace に配置するため、namespace を作る
-        # Strimzi helm chart にも依存する。
-        cluster_op_pm = cluster.add_manifest(
-            "StrimziClusterOperatorPodMonitor",
-            load(_KAFKA_DIR, "cluster-operator-pod-monitor.yaml"),
-        )
-        cluster_op_pm.node.add_dependency(kps)
-        cluster_op_pm.node.add_dependency(strimzi_chart)
-
-        # Strimzi Entity Operator (Topic/User Operator, kafka namespace) のメトリクス
-        # PodMonitor は kafka namespace に配置するため、namespace 作成 manifest にも依存する。
-        entity_op_pm = cluster.add_manifest(
-            "StrimziEntityOperatorPodMonitor",
-            load(_KAFKA_DIR, "entity-operator-pod-monitor.yaml"),
-        )
-        entity_op_pm.node.add_dependency(kps)
-        entity_op_pm.node.add_dependency(kafka_namespace)
 
         # ── Fluent Bit DaemonSet（Helm）───────────────────────────────────────
         fluent_bit = cluster.add_helm_chart(

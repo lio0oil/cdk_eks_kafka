@@ -30,7 +30,7 @@ class AddonsConstruct(Construct):
 
         self._add_eks_addons()
         self._add_external_snapshotter()
-        self._strimzi_chart = self._add_strimzi()
+        self._add_strimzi()
         self._aws_lbc_chart = self._add_aws_lbc()
 
     def _add_eks_addons(self) -> None:
@@ -109,20 +109,10 @@ class AddonsConstruct(Construct):
             *load_all(_DIR_SNAPSHOTTER, "crds.yaml"),
         )
 
-    @property
-    def strimzi_chart(self) -> eks.HelmChart:
-        """Strimzi Kafka Operator の Helm chart リソース。
-
-        strimzi-system namespace に配置する PodMonitor 等は、namespace 作成
-        （chart 内の create_namespace=True）を待つ必要があるためこの chart に
-        依存を張る。
-        """
-        return self._strimzi_chart
-
-    def _add_strimzi(self) -> eks.HelmChart:
+    def _add_strimzi(self) -> None:
         self._cluster.add_manifest("Gp3StorageClass", load(_DIR, "gp3-storageclass.yaml"))
 
-        return self._cluster.add_helm_chart(
+        self._cluster.add_helm_chart(
             "StrimziOperator",
             chart="strimzi-kafka-operator",
             repository=self._config.strimzi_chart_repo,

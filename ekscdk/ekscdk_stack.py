@@ -59,16 +59,12 @@ class EksCdkStack(Stack):
             controller_count=config.kafka_controller_count,
         )
         kafka.node.add_dependency(addons)
-        # MonitoringConstruct は Strimzi PodMonitor を strimzi-system / kafka namespace に
-        # 配置するため、Strimzi chart（strimzi-system namespace を作る）と
-        # kafka namespace 作成 manifest 後に deploy する必要がある。
         MonitoringConstruct(
             self,
             "Monitoring",
+            vpc=network.vpc,
             cluster=eks_construct.cluster,
             config=config,
-            strimzi_chart=addons.strimzi_chart,
-            kafka_namespace=kafka.kafka_namespace,
         )
 
         CfnOutput(self, "KafkaNlbDnsName", value=network.kafka_nlb.load_balancer_dns_name)

@@ -1,3 +1,5 @@
+import base64
+
 import aws_cdk as core
 import pytest
 from aws_cdk import assertions
@@ -150,7 +152,6 @@ def test_eks_addon_present(template, addon_name):
     [
         ("kube-system", "ebs-csi-controller-sa"),
         ("kube-system", "aws-load-balancer-controller"),
-        ("monitoring", "prometheus"),
         ("monitoring", "fluent-bit"),
         ("monitoring", "grafana"),
     ],
@@ -160,6 +161,67 @@ def test_pod_identity_association_exists(template, namespace, service_account):
         "AWS::EKS::PodIdentityAssociation",
         {"Namespace": namespace, "ServiceAccount": service_account},
     )
+
+
+def test_in_cluster_prometheus_sa_not_created(template):
+    # AMP Managed Scraper に scrape を移譲したため in-cluster Prometheus は無効化。
+    # prometheus 用 Pod Identity も同時に消える。
+    associations = template.find_resources("AWS::EKS::PodIdentityAssociation")
+    sa_names = [res["Properties"].get("ServiceAccount") for res in associations.values()]
+    assert "prometheus" not in sa_names
+
+
+def test_amp_scraper_created(template):
+    template.resource_count_is("AWS::APS::Scraper", 1)
+
+
+def test_amp_scraper_targets_eks_cluster(template):
+    scrapers = template.find_resources("AWS::APS::Scraper")
+    assert len(scrapers) == 1
+    src = next(iter(scrapers.values()))["Properties"]["Source"]["EksConfiguration"]
+    # 2 AZ 以上 (AMP Scraper の必須要件)
+    assert len(src["SubnetIds"]) >= 2
+    assert len(src["SecurityGroupIds"]) >= 1
+
+
+@pytest.mark.parametrize(
+    "job_name",
+    [
+        # 旧 PodMonitor 由来
+        "kafka-resources-metrics",
+        "cluster-operator-metrics",
+        "entity-operator-metrics",
+        # Kubernetes 系（kube-prometheus-stack 同梱の kube-state-metrics / node-exporter
+        # + control plane / kubelet / cadvisor）
+        "kube-state-metrics",
+        "prometheus-node-exporter",
+        "kubelet",
+        "cadvisor",
+        "kubernetes-apiservers",
+    ],
+)
+def test_amp_scrape_config_contains_job(template, job_name):
+    scrapers = template.find_resources("AWS::APS::Scraper")
+    assert len(scrapers) == 1
+    blob = next(iter(scrapers.values()))["Properties"]["ScrapeConfiguration"]["ConfigurationBlob"]
+    decoded = base64.b64decode(blob).decode("utf-8")
+    assert f"job_name: {job_name}" in decoded
+
+
+def test_amp_scrape_config_has_cluster_external_label(template):
+    # external_labels.cluster でメトリクス側に cluster 名を残す（マルチクラスタ識別用）。
+    scrapers = template.find_resources("AWS::APS::Scraper")
+    blob = next(iter(scrapers.values()))["Properties"]["ScrapeConfiguration"]["ConfigurationBlob"]
+    decoded = base64.b64decode(blob).decode("utf-8")
+    assert f"cluster: {ClusterConfig.for_prd().cluster_name}" in decoded
+
+
+def test_pod_monitor_manifests_not_applied(template):
+    # AMP Managed Scraper に移行したため、PodMonitor CRD ベースの manifest は deploy しない。
+    all_k8s = template.find_resources("Custom::AWSCDK-EKS-KubernetesResource")
+    for res in all_k8s.values():
+        literals = _manifest_literals(res["Properties"]["Manifest"])
+        assert '"kind":"PodMonitor"' not in literals
 
 
 @pytest.mark.parametrize(

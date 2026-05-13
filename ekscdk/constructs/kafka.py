@@ -43,7 +43,6 @@ class KafkaConstruct(Construct):
 
         # ── Namespace ─────────────────────────────────────────────────────────
         namespace = cluster.add_manifest("KafkaNamespace", load(_DIR, "namespace.yaml"))
-        self._kafka_namespace = namespace
 
         # ── JMX メトリクス ConfigMap ──────────────────────────────────────────
         cm = cluster.add_manifest("KafkaMetricsCm", load(_DIR, "cm.yaml"))
@@ -139,12 +138,3 @@ class KafkaConstruct(Construct):
         # kafka_cr への依存だけで apply 順序は十分。
         test_topic = cluster.add_manifest("KafkaTopicTestTopic", load(_DIR, "topics/test-topic.yaml"))
         test_topic.node.add_dependency(kafka_cr)
-
-    @property
-    def kafka_namespace(self) -> eks.KubernetesManifest:
-        """kafka namespace の manifest リソース。
-
-        kafka namespace に配置する PodMonitor 等が namespace 作成完了後に
-        apply されるよう依存を張るために公開する。
-        """
-        return self._kafka_namespace

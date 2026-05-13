@@ -13,11 +13,14 @@ Auto Mode は EKS が compute / storage / networking のアドオンと Karpente
 ### monitoring Namespace は CDK が管理する
 `MonitoringConstruct` 内の `monitoring` Namespace は `manifests/` ではなく `cluster.add_manifest()` で CDK が直接管理している。IRSA の `add_service_account()` は kubectl apply 時に Namespace が存在していないと失敗するため、ArgoCD に任せると順序が保証できない。
 
-### メトリクススタックは kube-prometheus-stack
-当初 ADOT (opentelemetry-collector) を採用していたが、Strimzi 標準ダッシュボードが kube-prometheus-stack の標準ラベル（`strimzi_io_*` / `kubelet_volume_stats_*` 等）に依存していたため kube-prometheus-stack に置き換えた。Prometheus が AMP に SigV4 remote_write、self-hosted Grafana（kube-prometheus-stack 同梱）が AMP を SigV4 で query する構成。Grafana へは `kubectl port-forward svc/<release>-grafana -n monitoring 3000:80` でアクセス。
+### メトリクス収集は AMP Managed Scraper（in-cluster Prometheus を持たない）
+リファレンス（data-on-eks）は kube-prometheus-stack 同梱の in-cluster Prometheus が scrape + AMP に remote_write する構成だが、本プロジェクトは **AMP Managed Scraper（agentless、AWS マネージド）** を採用し、in-cluster Prometheus / Prometheus Operator / Alertmanager は無効化している。AMP Scraper は EKS cluster の API server を使って Pod / Node を discovery し、AWS マネージドで scrape + 長期保存する。HA・パッチ・スケールはすべて AWS 側で吸収され、in-cluster の StatefulSet + PVC を抱えなくて済む。トレードオフ: scrape_interval が 30 秒以上に制限される、PodMonitor / ServiceMonitor CRD は使えない（scrape_configs YAML に統一）。EKS cluster の private endpoint access が必須で、aws_eks_v2.Cluster の AccessEntry ベース認証と組み合わせて `CfnScraper` 作成時に EKS Access Entry policy が自動生成される。
 
-### Kafka メトリクスは PodMonitor 一つに集約
-Strimzi の broker / controller / cruise-control / kafka-exporter は `kafka-pod-monitor.yaml` 一つの PodMonitor で scrape する。ServiceMonitor は持たない（同じ Pod を Service 経由でも scrape すると二重計上が発生するため）。Strimzi Cluster Operator / Entity Operator は別 namespace（strimzi-system / kafka）に居るので別 PodMonitor。data-on-eks リファレンスの構成と同方針。Grafana ダッシュボードは `monitoring/dashboards/*.yaml` を ConfigMap ラベル `grafana_dashboard=1` で sidecar に自動取り込みさせる。
+### scrape 設定は `manifests/amp/scrape-config.yaml` に集約
+全 scrape job（Kafka resources / Strimzi cluster-operator / entity-operator / kube-state-metrics / node-exporter / kubelet / cAdvisor / apiserver）を 1 ファイルにまとめている。`AmpScraperConstruct` が `<CLUSTER_NAME>` 置換 + base64 化して `CfnScraper.ScrapeConfiguration` に渡す。旧 PodMonitor の relabel ロジック（`labelmap __meta_kubernetes_pod_label_(strimzi_io_.+)` 等）は scrape_configs の relabel_configs に変換済み。AMP Scraper の制約: `kubernetes_sd_config` の role に基づく selector しか使えない（PodMonitor の matchExpressions/matchLabels は relabel keep で再現）、authorization は Bearer + serviceaccount token のみ、DNS は `kubernetes.default.svc` 以外 IP 必須。
+
+### Grafana は AMP datasource のみ（in-cluster Prometheus は無い）
+kube-prometheus-stack の grafana subchart は残し、Prometheus / Operator / Alertmanager は無効化している。Grafana の datasource は AMP のみ（`isDefault: true`）で、SigV4 で query する。Grafana SA に `AmazonPrometheusQueryAccess` を Pod Identity で付与。Grafana ダッシュボードは `monitoring/dashboards/*.yaml` を ConfigMap ラベル `grafana_dashboard=1` で sidecar に自動取り込み。Grafana へは `kubectl port-forward svc/<release>-grafana -n monitoring 3000:80` でアクセス。
 
 ### Kafka 外部接続のポート設計
 `kafka-cluster.yaml` の external listener は NodePort 型。共有 NLB → NodePort → Kafka broker の経路で、bootstrap に 30094、broker 0〜2 に 30095〜30097 を使用する。advertised port（9095〜9097）はクライアントがブローカーに繋ぎ直す際のポートで NodePort とは別。`externalTrafficPolicy: Local` でクライアント送信元 IP 保持・余分なホップ排除。
