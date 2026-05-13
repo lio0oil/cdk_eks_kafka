@@ -197,6 +197,11 @@ def test_amp_scraper_targets_eks_cluster(template):
         "kubelet",
         "cadvisor",
         "apiserver",
+        # kube-prometheus-stack chart 同梱 ServiceMonitor 由来。
+        # in-cluster Prometheus 撤去時に意図せず欠落していた分を補う。
+        "coredns",
+        "kube-proxy",
+        "grafana",
     ],
 )
 def test_amp_scrape_config_contains_job(template, job_name):
@@ -204,6 +209,25 @@ def test_amp_scrape_config_contains_job(template, job_name):
     assert len(scrapers) == 1
     blob = next(iter(scrapers.values()))["Properties"]["ScrapeConfiguration"]["ConfigurationBlob"]
     assert f"job_name: {job_name}" in blob
+
+
+@pytest.mark.parametrize(
+    "job_name",
+    ["kafka-resources-metrics", "cluster-operator-metrics", "entity-operator-metrics"],
+)
+def test_pod_monitor_derived_job_emits_standard_labels(template, job_name):
+    # Prometheus Operator が PodMonitor を翻訳する際に常時付与する pod / node / endpoint
+    # の 3 ラベルを relabel で再現する。chart 同梱 recording rule の集約キー（pod / node）
+    # と dashboard の endpoint ペインが機能するために必要。
+    import yaml
+
+    scrapers = template.find_resources("AWS::APS::Scraper")
+    blob = next(iter(scrapers.values()))["Properties"]["ScrapeConfiguration"]["ConfigurationBlob"]
+    config = yaml.safe_load(blob)
+    job = next(j for j in config["scrape_configs"] if j["job_name"] == job_name)
+    target_labels = {r.get("target_label") for r in job.get("relabel_configs", [])}
+    for label in ("pod", "node", "endpoint"):
+        assert label in target_labels, f"job {job_name} is missing standard label '{label}'"
 
 
 def test_amp_scrape_config_has_cluster_external_label(template):
