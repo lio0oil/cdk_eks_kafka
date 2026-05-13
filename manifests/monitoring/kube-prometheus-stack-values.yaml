@@ -22,12 +22,6 @@ grafana:
     create: false
     name: grafana
   adminPassword: admin
-  persistence:
-    enabled: true
-    type: pvc
-    storageClassName: gp3
-    size: 10Gi
-    accessModes: [ReadWriteOnce]
   sidecar:
     dashboards:
       enabled: true
@@ -35,8 +29,6 @@ grafana:
       labelValue: "1"
       searchNamespace: ALL
       logLevel: WARN
-      provider:
-        allowUiUpdates: true
     datasources:
       enabled: true
       searchNamespace: ALL
