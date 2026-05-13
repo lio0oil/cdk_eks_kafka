@@ -213,6 +213,17 @@ def test_amp_scrape_config_has_cluster_external_label(template):
     assert f"cluster: {ClusterConfig.for_prd().cluster_name}" in blob
 
 
+def test_amp_scrape_interval_is_60s(template):
+    # ingestion sample 数に直結するため、コスト削減目的で 60s に設定。
+    # 30s に戻すと AMP ingestion が約 2 倍になる。AMP Scraper の最小値は 30s。
+    import yaml
+
+    scrapers = template.find_resources("AWS::APS::Scraper")
+    blob = next(iter(scrapers.values()))["Properties"]["ScrapeConfiguration"]["ConfigurationBlob"]
+    config = yaml.safe_load(blob)
+    assert config["global"]["scrape_interval"] == "60s"
+
+
 def test_pod_monitor_manifests_not_applied(template):
     # AMP Managed Scraper に移行したため、PodMonitor CRD ベースの manifest は deploy しない。
     all_k8s = template.find_resources("Custom::AWSCDK-EKS-KubernetesResource")

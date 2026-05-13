@@ -1,5 +1,8 @@
 global:
-  scrape_interval: 30s
+  # ingestion sample 数 = active series 数 / scrape_interval × 月秒数 で効くため、
+  # 60s にすることで AMP ingestion コストが 30s 構成の約半分になる。
+  # AMP Managed Scraper は 30s が下限なので 30s 未満は設定不可。
+  scrape_interval: 60s
   external_labels:
     cluster: <CLUSTER_NAME>
 
