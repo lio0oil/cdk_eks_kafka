@@ -467,7 +467,7 @@ spec:
           echo "=== broker メタデータ取得 ==="
           /opt/kafka/bin/kafka-broker-api-versions.sh \
             --bootstrap-server ${NLB_DNS}:9094 \
-            --command-config /work/client.properties | head -1
+            --command-config /work/client.properties | grep " (id:"
 
           echo "=== topic 一覧 ==="
           /opt/kafka/bin/kafka-topics.sh \
@@ -499,6 +499,8 @@ Verification: OK
 
 === broker メタデータ取得 ===
 kafka-shared-nlb-xxx.elb.ap-northeast-1.amazonaws.com:9095 (id: 0 rack: ap-northeast-1c isFenced: false) -> ...
+kafka-shared-nlb-xxx.elb.ap-northeast-1.amazonaws.com:9096 (id: 1 rack: ap-northeast-1d isFenced: false) -> ...
+kafka-shared-nlb-xxx.elb.ap-northeast-1.amazonaws.com:9097 (id: 2 rack: ap-northeast-1a isFenced: false) -> ...
 
 === topic 一覧 ===
 strimzi.cruisecontrol.metrics
