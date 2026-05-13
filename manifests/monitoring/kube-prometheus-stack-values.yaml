@@ -18,6 +18,11 @@ grafana:
   grafana.ini:
     log:
       level: warn
+    # AMP datasource を SigV4 で query するため。デフォルトは false で、
+    # 明示有効化しないと sigV4Auth: true 指定済みでも署名が走らず、
+    # AMP から "Missing Authentication Token" (403) が返る。
+    auth:
+      sigv4_auth_enabled: true
   serviceAccount:
     create: false
     name: grafana
@@ -33,10 +38,17 @@ grafana:
       enabled: true
       searchNamespace: ALL
       logLevel: WARN
+      # 既定で in-cluster Prometheus 用 datasource (isDefault=true) が生成される。
+      # AMP datasource を additionalDataSources で isDefault=true 指定しているため
+      # 重複で Grafana 起動失敗（"Only one datasource per organization can be marked as default"）。
+      defaultDatasourceEnabled: false
   # AMP を唯一の datasource として登録する。SigV4 で query するため Pod Identity 付き
   # grafana SA に AmazonPrometheusQueryAccess を付与している。
+  # datasource 名は "Prometheus" を維持する。Strimzi 公式 dashboard を含む多くの
+  # 既存 dashboard が "Prometheus" datasource をハードコード参照するため。
+  # AMP は Prometheus 互換 API なので type=prometheus で繋ぐのが正攻法。
   additionalDataSources:
-    - name: AMP
+    - name: Prometheus
       type: prometheus
       access: proxy
       url: <AMP_QUERY_URL>
