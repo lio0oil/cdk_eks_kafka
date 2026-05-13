@@ -72,8 +72,12 @@ def test_nlb_target_group_count_matches_kafka_config(template):
     template.resource_count_is("AWS::ElasticLoadBalancingV2::TargetGroup", len(ports))
 
 
-def test_amp_workspace_exists(template):
-    template.resource_count_is("AWS::APS::Workspace", 1)
+def test_amp_resources_removed(template):
+    # AMP から self-hosted Prometheus に切り戻したため、AMP 系 CFN リソースは
+    # 一切残らないことを invariant として固定する。
+    assert template.find_resources("AWS::APS::Workspace") == {}
+    assert template.find_resources("AWS::APS::Scraper") == {}
+    assert template.find_resources("AWS::APS::RuleGroupsNamespace") == {}
 
 
 def test_kafka_nlb_is_internal(template):
@@ -106,13 +110,6 @@ def test_kafka_nlb_sg_ingress_restricted_to_vpc(template):
                 ]
             )
         },
-    )
-
-
-def test_amp_workspace_alias_matches_cluster_name(template):
-    template.has_resource_properties(
-        "AWS::APS::Workspace",
-        {"Alias": ClusterConfig.for_prd().cluster_name},
     )
 
 
@@ -167,85 +164,6 @@ def test_in_cluster_prometheus_no_pod_identity(template):
     associations = template.find_resources("AWS::EKS::PodIdentityAssociation")
     sa_names = [res["Properties"].get("ServiceAccount") for res in associations.values()]
     assert "prometheus" not in sa_names
-
-
-def test_amp_scraper_created(template):
-    template.resource_count_is("AWS::APS::Scraper", 1)
-
-
-def test_amp_scraper_targets_eks_cluster(template):
-    scrapers = template.find_resources("AWS::APS::Scraper")
-    assert len(scrapers) == 1
-    src = next(iter(scrapers.values()))["Properties"]["Source"]["EksConfiguration"]
-    # 2 AZ 以上 (AMP Scraper の必須要件)
-    assert len(src["SubnetIds"]) >= 2
-    assert len(src["SecurityGroupIds"]) >= 1
-
-
-@pytest.mark.parametrize(
-    "job_name",
-    [
-        # 旧 PodMonitor 由来
-        "kafka-resources-metrics",
-        "cluster-operator-metrics",
-        "entity-operator-metrics",
-        # Kubernetes 系。AWS observability solution の recording rule 規約
-        # （`job="node-exporter"` / `job="apiserver"` / `job="kubelet"` 等）に
-        # 合わせており、kube-prometheus-stack 互換ダッシュボードがそのまま動く。
-        "kube-state-metrics",
-        "node-exporter",
-        "kubelet",
-        "cadvisor",
-        "apiserver",
-        # kube-prometheus-stack chart 同梱 ServiceMonitor 由来。
-        # in-cluster Prometheus 撤去時に意図せず欠落していた分を補う。
-        "coredns",
-        "kube-proxy",
-        "grafana",
-    ],
-)
-def test_amp_scrape_config_contains_job(template, job_name):
-    scrapers = template.find_resources("AWS::APS::Scraper")
-    assert len(scrapers) == 1
-    blob = next(iter(scrapers.values()))["Properties"]["ScrapeConfiguration"]["ConfigurationBlob"]
-    assert f"job_name: {job_name}" in blob
-
-
-@pytest.mark.parametrize(
-    "job_name",
-    ["kafka-resources-metrics", "cluster-operator-metrics", "entity-operator-metrics"],
-)
-def test_pod_monitor_derived_job_emits_standard_labels(template, job_name):
-    # Prometheus Operator が PodMonitor を翻訳する際に常時付与する pod / node / endpoint
-    # の 3 ラベルを relabel で再現する。chart 同梱 recording rule の集約キー（pod / node）
-    # と dashboard の endpoint ペインが機能するために必要。
-    import yaml
-
-    scrapers = template.find_resources("AWS::APS::Scraper")
-    blob = next(iter(scrapers.values()))["Properties"]["ScrapeConfiguration"]["ConfigurationBlob"]
-    config = yaml.safe_load(blob)
-    job = next(j for j in config["scrape_configs"] if j["job_name"] == job_name)
-    target_labels = {r.get("target_label") for r in job.get("relabel_configs", [])}
-    for label in ("pod", "node", "endpoint"):
-        assert label in target_labels, f"job {job_name} is missing standard label '{label}'"
-
-
-def test_amp_scrape_config_has_cluster_external_label(template):
-    # external_labels.cluster でメトリクス側に cluster 名を残す（マルチクラスタ識別用）。
-    scrapers = template.find_resources("AWS::APS::Scraper")
-    blob = next(iter(scrapers.values()))["Properties"]["ScrapeConfiguration"]["ConfigurationBlob"]
-    assert f"cluster: {ClusterConfig.for_prd().cluster_name}" in blob
-
-
-def test_amp_scrape_interval_is_60s(template):
-    # ingestion sample 数に直結するため、コスト削減目的で 60s に設定。
-    # 30s に戻すと AMP ingestion が約 2 倍になる。AMP Scraper の最小値は 30s。
-    import yaml
-
-    scrapers = template.find_resources("AWS::APS::Scraper")
-    blob = next(iter(scrapers.values()))["Properties"]["ScrapeConfiguration"]["ConfigurationBlob"]
-    config = yaml.safe_load(blob)
-    assert config["global"]["scrape_interval"] == "60s"
 
 
 @pytest.mark.parametrize(

@@ -62,7 +62,6 @@ class EksCdkStack(Stack):
         MonitoringConstruct(
             self,
             "Monitoring",
-            vpc=network.vpc,
             cluster=eks_construct.cluster,
             config=config,
             addons=addons,
