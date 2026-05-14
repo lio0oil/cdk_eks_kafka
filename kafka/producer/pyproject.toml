@@ -3,5 +3,10 @@ name = "producer"
 version = "0.1.0"
 description = "Add your description here"
 readme = "README.md"
-requires-python = ">=3.12"
-dependencies = []
+# EMR 7.13.0 が Python 3.11 をデフォルトに採用しているためローカル開発も 3.11 に揃える
+requires-python = ">=3.11,<3.12"
+dependencies = [
+    "confluent-kafka>=2.6.0",
+    # EMR 7.13.0 同梱の Spark 3.5.6 が依存する protobuf-java 3.25 系と互換のラインを選ぶ
+    "protobuf>=5.29,<6",
+]

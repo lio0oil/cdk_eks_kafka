@@ -85,6 +85,15 @@ class ClusterConfig:
     # dev は False（コスト削減、監査要件なし）、stg/prd は True（インシデント調査・監査用）
     # 3 種類の粒度を分ける運用価値が薄いためまとめて on/off する
     enable_control_plane_logs: bool
+    # S3 Tables の table-bucket 名 (アカウント内ユニーク・3-63 文字 lowercase/numbers/hyphens)。
+    # consumer (kafka/consumer) の Iceberg 書き込み先。
+    s3_table_bucket_name: str
+    # S3 Tables の table-bucket を CDK destroy 時に残すか削除するか。
+    # dev は DESTROY (環境破棄を容易に)、stg/prd は RETAIN (データ保護)。
+    s3_table_bucket_removal_policy: RemovalPolicy
+    # consumer (Spark Structured Streaming) の checkpointLocation 用 S3 バケット名 suffix。
+    # 実名は `kafka-consumer-checkpoint-{account}-{suffix}` (アカウント+環境でグローバル衝突を回避)。
+    s3_consumer_checkpoint_suffix: str
     # external-snapshotter のリリースタグ。
     # manifests/snapshotter/{crds.yaml, controller.yaml} は以下で再生成する:
     #   VER=v8.5.0
@@ -131,6 +140,9 @@ class ClusterConfig:
             deletion_protection=False,
             enable_vpc_flow_logs=False,
             enable_control_plane_logs=False,
+            s3_table_bucket_name="kafka-events-dev",
+            s3_table_bucket_removal_policy=RemovalPolicy.DESTROY,
+            s3_consumer_checkpoint_suffix="dev",
             external_snapshotter_version="v8.5.0",
         )
 
@@ -166,6 +178,9 @@ class ClusterConfig:
             deletion_protection=True,
             enable_vpc_flow_logs=True,
             enable_control_plane_logs=True,
+            s3_table_bucket_name="kafka-events-stg",
+            s3_table_bucket_removal_policy=RemovalPolicy.RETAIN,
+            s3_consumer_checkpoint_suffix="stg",
             external_snapshotter_version="v8.5.0",
         )
 
@@ -201,5 +216,8 @@ class ClusterConfig:
             deletion_protection=True,
             enable_vpc_flow_logs=True,
             enable_control_plane_logs=True,
+            s3_table_bucket_name="kafka-events",
+            s3_table_bucket_removal_policy=RemovalPolicy.RETAIN,
+            s3_consumer_checkpoint_suffix="prd",
             external_snapshotter_version="v8.5.0",
         )

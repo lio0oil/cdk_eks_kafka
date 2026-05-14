@@ -8,6 +8,7 @@ from aws_cdk import aws_iam as iam
 from ekscdk.config import ClusterConfig
 from ekscdk.ekscdk_stack import EksCdkStack
 from ekscdk.iam_stack import IamStack
+from ekscdk.s3tables_stack import S3TablesStack
 from ekscdk.test_ec2_stack import TestEc2Stack
 
 app = cdk.App()
@@ -51,7 +52,17 @@ infra_stack = EksCdkStack(
 )
 infra_stack.add_dependency(iam_stack)
 
-# Stack 2: テスト用 EC2（dev のみ）
+# Stack 2: S3 Tables (Iceberg) リソース
+# kafka/consumer (EMR Spark Structured Streaming) の書き込み先。
+# EKS と独立した別スタックとしてデプロイし、テーブル拡張時の影響範囲を分離する。
+S3TablesStack(
+    app,
+    "S3TablesStack",
+    config=config,
+    env=env,
+)
+
+# Stack 3: テスト用 EC2（dev のみ）
 # Session Manager で接続して EKS / Kafka NLB を検証する踏み台。
 # stg/prd には残さない（恒久踏み台が必要になった時点で別途検討）。
 if _env_name == "dev":

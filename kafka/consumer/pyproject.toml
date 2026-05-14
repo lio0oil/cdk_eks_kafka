@@ -1,0 +1,19 @@
+[project]
+name = "consumer"
+version = "0.1.0"
+description = "Kafka Structured Streaming (Trigger.AvailableNow) batch consumer for EMR"
+readme = "README.md"
+# EMR 7.13.0 が Python 3.11 をデフォルトに採用しているためローカル開発も 3.11 に揃える
+requires-python = ">=3.11,<3.12"
+# protobuf は driver で events.desc を読んで SCHEMAS リストを展開するために必要 (worker は JVM 側の from_protobuf を使うので不要)。
+# EMR 7.13.0 同梱の Spark 3.5.6 が依存する protobuf-java 3.25 系と互換のラインを選ぶ。
+dependencies = [
+    "protobuf>=5.29,<6",
+]
+
+[project.optional-dependencies]
+# PySpark は EMR / EMR Serverless 上で事前同梱されているため本番では不要。
+# ローカル動作確認用に dev extra として分離する。EMR 7.13.0 同梱版に pin。
+dev = [
+    "pyspark==3.5.6",
+]

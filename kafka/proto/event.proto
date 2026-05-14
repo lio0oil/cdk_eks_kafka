@@ -1,0 +1,19 @@
+// Kafka topic "sample-events-event" に流れるイベントのスキーマ。
+// テーブル分割 (案 R-1) 構成では、message 名 (Event) から派生して以下が決まる:
+//   - Kafka topic: sample-events-event (consumer の topic_for() が小文字化して付与)
+//   - Iceberg table: s3tablesbucket.events.sample_events_event (consumer の table_for() が生成)
+//   - checkpoint: <CHECKPOINT_BASE>/event/ (consumer の checkpoint_for() が生成)
+//
+// 新しい message を追加する場合は別の .proto を作って `events.desc` を再生成する。
+// consumer 側は events.desc から SCHEMAS を自動展開するので、コード変更不要 (CDK の
+// テーブル定義のみ追加が必要)。
+
+syntax = "proto3";
+
+package ekscdk.kafka;
+
+message Event {
+  int64 id = 1;
+  string datetime = 2;  // ISO8601 形式の UTC 文字列
+  string name = 3;
+}
