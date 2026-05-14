@@ -5,35 +5,40 @@ repos:
     rev: v8.21.2
     hooks:
       - id: gitleaks
+
   - repo: https://github.com/commitizen-tools/commitizen
     rev: v4.15.1
     hooks:
       - id: commitizen
         stages: [commit-msg]
+
   - repo: local
     hooks:
-      - id: ruff-check
-        name: ruff check
-        entry: uv run ruff check --fix
+      - id: cdk-ruff-check
+        name: cdk / ruff check
+        entry: uv run --project cdk ruff check --fix
         language: system
         types: [python]
+        files: ^cdk/
         require_serial: true
-      - id: ruff-format
-        name: ruff format
-        entry: uv run ruff format
+      - id: cdk-ruff-format
+        name: cdk / ruff format
+        entry: uv run --project cdk ruff format
         language: system
         types: [python]
+        files: ^cdk/
         require_serial: true
-      - id: pyright
-        name: pyright
-        entry: uv run pyright
+      - id: cdk-pyright
+        name: cdk / pyright
+        entry: uv run --directory cdk pyright
         language: system
         types: [python]
+        files: ^cdk/
         pass_filenames: false
-      - id: pytest
-        name: pytest
-        entry: uv run pytest
+      - id: cdk-pytest
+        name: cdk / pytest
+        entry: uv run --directory cdk pytest
         language: system
+        files: ^cdk/
         pass_filenames: false
-        always_run: true
         stages: [pre-commit]

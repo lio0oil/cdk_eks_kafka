@@ -1,4 +1,5 @@
 from aws_cdk import CfnOutput, Stack
+from aws_cdk import aws_ec2 as ec2
 from aws_cdk import aws_iam as iam
 from constructs import Construct
 
@@ -34,6 +35,7 @@ class EksCdkStack(Stack):
         external_listener_name, _ = parse_kafka_external_listener(kafka_dir)
 
         network = NetworkConstruct(self, "Network", nlb_ports=nlb_ports, config=config)
+        self._vpc = network.vpc
         eks_construct = EksClusterConstruct(
             self,
             "EksCluster",
@@ -69,3 +71,7 @@ class EksCdkStack(Stack):
         )
 
         CfnOutput(self, "KafkaNlbDnsName", value=network.kafka_nlb.load_balancer_dns_name)
+
+    @property
+    def vpc(self) -> ec2.IVpc:
+        return self._vpc

@@ -1,0 +1,63 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: kafka-producer-script
+  namespace: kafka
+data:
+  produce.py: |
+    import json
+    import os
+    import time
+
+    from kafka import KafkaProducer
+
+    bootstrap = os.environ["KAFKA_BOOTSTRAP"]
+    topic = os.environ.get("KAFKA_TOPIC", "test-topic")
+    count = int(os.environ.get("KAFKA_COUNT", "10"))
+
+    producer = KafkaProducer(
+        bootstrap_servers=bootstrap,
+        value_serializer=lambda v: json.dumps(v).encode("utf-8"),
+        acks="all",
+    )
+    for i in range(count):
+        fut = producer.send(topic, {"n": i, "ts": time.time()})
+        md = fut.get(timeout=30)
+        print(f"sent n={i} -> partition={md.partition} offset={md.offset}", flush=True)
+        time.sleep(0.5)
+    producer.flush()
+    print("done", flush=True)
+---
+apiVersion: batch/v1
+kind: Job
+metadata:
+  name: kafka-producer-test
+  namespace: kafka
+spec:
+  ttlSecondsAfterFinished: 600
+  template:
+    spec:
+      restartPolicy: Never
+      containers:
+        - name: producer
+          image: python:3.12-slim
+          command: ["sh", "-c"]
+          args:
+            - |
+              set -e
+              pip install --quiet kafka-python
+              python /scripts/produce.py
+          env:
+            - name: KAFKA_BOOTSTRAP
+              value: "<NLB_DNS>:9094"
+            - name: KAFKA_TOPIC
+              value: "test-topic"
+            - name: KAFKA_COUNT
+              value: "10"
+          volumeMounts:
+            - name: script
+              mountPath: /scripts
+      volumes:
+        - name: script
+          configMap:
+            name: kafka-producer-script

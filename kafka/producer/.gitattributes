@@ -1,0 +1,66 @@
+# Git の属性定義: 改行コード・差分・バイナリ判定
+# https://git-scm.com/docs/gitattributes
+
+# ---- デフォルト ----
+# テキストは自動判定、リポジトリ内では LF に正規化
+* text=auto eol=lf
+
+# ---- Python ----
+*.py    text eol=lf diff=python
+*.pyi   text eol=lf diff=python
+
+# ---- 設定・ドキュメント（明示的に LF） ----
+*.toml   text eol=lf
+*.yaml   text eol=lf
+*.yml    text eol=lf
+*.json   text eol=lf
+*.jsonc  text eol=lf
+*.md     text eol=lf
+*.cfg    text eol=lf
+*.ini    text eol=lf
+*.txt    text eol=lf
+Dockerfile      text eol=lf
+Dockerfile.*    text eol=lf
+*.dockerfile    text eol=lf
+
+# ---- シェルスクリプト（LF 必須。CRLF だと shebang が壊れる） ----
+*.sh    text eol=lf
+*.bash  text eol=lf
+*.zsh   text eol=lf
+
+# ---- Windows 固有スクリプト（CRLF 必須） ----
+*.bat   text eol=crlf
+*.cmd   text eol=crlf
+*.ps1   text eol=crlf
+
+# ---- 画像・ドキュメント・アーカイブ（バイナリ扱い） ----
+*.png   binary
+*.jpg   binary
+*.jpeg  binary
+*.gif   binary
+*.ico   binary
+*.webp  binary
+*.pdf   binary
+*.xlsx  binary
+*.xls   binary
+*.docx  binary
+*.doc   binary
+*.pptx  binary
+*.ppt   binary
+*.zip   binary
+*.gz    binary
+*.tar   binary
+*.7z    binary
+*.whl   binary
+*.sqlite  binary
+*.sqlite3 binary
+*.db    binary
+
+# ---- git archive（release zip 等）から除外 ----
+.gitattributes          export-ignore
+.gitignore              export-ignore
+.github/                export-ignore
+.vscode/                export-ignore
+.pre-commit-config.yaml export-ignore
+.python-version         export-ignore
+tests/                  export-ignore
