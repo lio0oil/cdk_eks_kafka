@@ -11,9 +11,9 @@ dependencies = [
     "protobuf>=6,<7",
 ]
 
-[project.optional-dependencies]
+[dependency-groups]
 # PySpark は EMR / EMR Serverless 上で事前同梱されているため本番では不要。
-# ローカル動作確認用に dev extra として分離する。EMR 7.13.0 同梱版に pin。
+# ローカル動作確認用に dev グループとして分離する。EMR 7.13.0 同梱版に pin。
 dev = [
     "pyspark==3.5.6",
 ]
