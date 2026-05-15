@@ -41,7 +41,7 @@ DEFAULT_STARTING_OFFSETS = "earliest"
 # Spark の from_protobuf 第 3 引数に渡す統合 FileDescriptorSet (kafka/proto/events.desc)。
 # 内部に全 message を含み、各 message を messageName 引数で選び分ける。
 # 実環境では S3 URI に置き換える。例: "s3://<アーティファクトバケット>/proto/events.desc"
-DESCRIPTOR_FILE = str(Path(__file__).resolve() / "events.desc")
+DESCRIPTOR_FILE = str(Path(__file__).resolve().parent / "events.desc")
 
 # デシリアライズ失敗データの退避先 (Dead Letter Queue)。全 schema 共通の 1 テーブル。
 DLQ_TARGET_TABLE = "s3tablesbucket.events.sample_events_dlq"
