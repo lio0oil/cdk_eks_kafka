@@ -24,6 +24,8 @@ class SchemaConfig:
     topic: Kafka topic 名 (producer 側と一致)
     target_table: Iceberg テーブル名 (CDK の S3TablesStack で作成したもの)
     checkpoint_location: Structured Streaming の checkpointLocation (実環境では s3:// に置換)
+    max_supported_version: 受信処理する ProtoBuf schema の最大 major version。
+        header の proto-version がこれを超える行は DLQ (reason=unsupported_version) 行き
     """
 
     schema_name: str
@@ -31,6 +33,7 @@ class SchemaConfig:
     topic: str
     target_table: str
     checkpoint_location: str
+    max_supported_version: int
 
 
 # Kafka bootstrap 接続先。実環境では NLB / VPC Endpoint Service の DNS に置き換える。
@@ -44,8 +47,16 @@ DEFAULT_STARTING_OFFSETS = "earliest"
 # 実環境では S3 URI に置き換える。例: "s3://<アーティファクトバケット>/proto/events.desc"
 DESCRIPTOR_FILE = str(Path(__file__).resolve().parent / "events.desc")
 
-# デシリアライズ失敗データの退避先 (Dead Letter Queue)。全 schema 共通の 1 テーブル。
+# DLQ 行きデータの退避先。全 schema 共通の 1 テーブル。reason 列に下記の DLQ_REASON_* を入れる。
 DLQ_TARGET_TABLE = "s3tablesbucket.events.sample_events_dlq"
+
+# ProtoBuf schema バージョンを伝達する Kafka header key。producer 側 (constants.py) と一致させる。
+PROTO_VERSION_HEADER_KEY = "proto-version"
+
+# DLQ の reason 列に入れる分類値。集計・アラート設定で参照する。
+DLQ_REASON_MISSING_VERSION = "missing_version"  # header に proto-version が無い
+DLQ_REASON_UNSUPPORTED_VERSION = "unsupported_version"  # version が max_supported_version を超える
+DLQ_REASON_DESERIALIZE_ERROR = "deserialize_error"  # from_protobuf がデコードできなかった
 
 # checkpointLocation 用 S3 バケット名 (CDK の S3TablesStack で作成: kafka-consumer-checkpoint-<account>-<env>)。
 # バケット名にアカウント ID と env 名が含まれるため、リポジトリには持たず環境変数で受ける。
@@ -61,6 +72,7 @@ SCHEMAS: list[SchemaConfig] = [
         topic="sample-events-event",
         target_table="s3tablesbucket.events.sample_events_event",
         checkpoint_location=f"s3a://{CHECKPOINT_BUCKET}/event/",
+        max_supported_version=1,
     ),
     # 新型を追加する場合は以下のように 1 エントリ追加 (例: Notification):
     # SchemaConfig(
@@ -69,5 +81,6 @@ SCHEMAS: list[SchemaConfig] = [
     #     topic="sample-events-notification",
     #     target_table="s3tablesbucket.events.sample_events_notification",
     #     checkpoint_location=f"s3a://{CHECKPOINT_BUCKET}/notification/",
+    #     max_supported_version=1,
     # ),
 ]

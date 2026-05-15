@@ -29,7 +29,11 @@ from constants import (
     BOOTSTRAP_SERVERS,
     DEFAULT_STARTING_OFFSETS,
     DESCRIPTOR_FILE,
+    DLQ_REASON_DESERIALIZE_ERROR,
+    DLQ_REASON_MISSING_VERSION,
+    DLQ_REASON_UNSUPPORTED_VERSION,
     DLQ_TARGET_TABLE,
+    PROTO_VERSION_HEADER_KEY,
     SCHEMAS,
     SchemaConfig,
 )
@@ -49,7 +53,8 @@ def build_spark() -> SparkSession:
 def start_query_for(spark: SparkSession, config: SchemaConfig, starting_offsets: str) -> StreamingQuery:
     """1 つの SchemaConfig に対応する独立した StreamingQuery を起動する (non-blocking)。
 
-    プランは「Kafka topic 読み込み → from_protobuf 1 回 → foreachBatch で MERGE」と軽量。
+    プランは「Kafka topic 読み込み → header から proto-version 抽出 → from_protobuf 1 回
+    → foreachBatch で route 列に応じて MERGE / DLQ」と軽量。
     start() を呼んだ瞬間に query が非同期起動するので、ループで複数呼ぶと並列実行になる。
     """
     raw = (
@@ -57,10 +62,16 @@ def start_query_for(spark: SparkSession, config: SchemaConfig, starting_offsets:
         .option("kafka.bootstrap.servers", BOOTSTRAP_SERVERS)
         .option("subscribe", config.topic)
         .option("startingOffsets", starting_offsets)
+        .option("includeHeaders", "true")
         .load()
     )
 
     # PERMISSIVE モードでデシリアライズ失敗時は payload が null になる (DLQ 行き)。
+    # headers は array<struct<key:string, value:binary>>。proto-version の value (binary) を
+    # UTF-8 string にデコードして cast し、route 判定に使う。
+    version_expr = F.expr(
+        f"filter(headers, h -> h.key = '{PROTO_VERSION_HEADER_KEY}')[0].value"
+    )
     parsed = raw.select(
         F.col("value").alias("rawdata"),
         from_protobuf(
@@ -69,9 +80,10 @@ def start_query_for(spark: SparkSession, config: SchemaConfig, starting_offsets:
             DESCRIPTOR_FILE,
             {"mode": "PERMISSIVE"},
         ).alias("payload"),
+        version_expr.cast("string").cast("int").alias("proto_version"),
     )
 
-    upsert = _build_upsert(config.target_table)
+    upsert = _build_upsert(config.target_table, config.max_supported_version)
 
     return (
         parsed.writeStream
@@ -84,20 +96,34 @@ def start_query_for(spark: SparkSession, config: SchemaConfig, starting_offsets:
     )
 
 
-def _build_upsert(target_table: str):
+def _build_upsert(target_table: str, max_supported_version: int):
     """target_table 専用の foreachBatch コールバックを返す。
 
     各 query が別 target_table を持つので、commit は別の snapshot 履歴に記録され
     並列実行可能 (Iceberg の楽観ロック競合なし)。DLQ は全 query 共通の 1 テーブル。
+
+    行の振り分けは次の優先順:
+      1. proto_version IS NULL  → DLQ (missing_version)
+      2. proto_version > max    → DLQ (unsupported_version)
+      3. payload IS NULL        → DLQ (deserialize_error)
+      4. 上記以外               → target_table へ MERGE
     """
 
     def _upsert(batch_df: DataFrame, batch_id: int) -> None:
         spark = batch_df.sparkSession
-        batch_df.cache()
+        # 上から順に評価する when/otherwise 連鎖で route 列を計算 (相互排他)。
+        routed = batch_df.withColumn(
+            "route",
+            F.when(F.col("proto_version").isNull(), F.lit(DLQ_REASON_MISSING_VERSION))
+            .when(F.col("proto_version") > F.lit(max_supported_version), F.lit(DLQ_REASON_UNSUPPORTED_VERSION))
+            .when(F.col("payload").isNull(), F.lit(DLQ_REASON_DESERIALIZE_ERROR))
+            .otherwise(F.lit("ok")),
+        )
+        routed.cache()
         try:
             # 成功行: payload を全フィールド展開し、datetime を timestamp 化、id で重複除去
             valid = (
-                batch_df.where(F.col("payload").isNotNull())
+                routed.where(F.col("route") == "ok")
                 .select(
                     F.col("payload.*"),
                     F.col("rawdata"),
@@ -114,9 +140,10 @@ def _build_upsert(target_table: str):
             )
 
             # 失敗行: DLQ (全 schema 共通) に append。count > 0 のときだけ書く。
-            invalid = batch_df.where(F.col("payload").isNull()).select(
+            invalid = routed.where(F.col("route") != "ok").select(
                 F.current_timestamp().alias("failed_at"),
                 F.col("rawdata"),
+                F.col("route").alias("reason"),
             )
             invalid_count = invalid.count()
             if invalid_count > 0:
@@ -131,7 +158,7 @@ def _build_upsert(target_table: str):
             else:
                 logger.info("target=%s batch_id=%s upserted", target_table, batch_id)
         finally:
-            batch_df.unpersist()
+            routed.unpersist()
 
     return _upsert
 

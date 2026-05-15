@@ -16,6 +16,7 @@ from constants import (
     DEFAULT_COUNT,
     DEFAULT_INTERVAL_SECONDS,
     PRODUCERS,
+    PROTO_VERSION_HEADER_KEY,
 )
 
 logger = logging.getLogger("producer")
@@ -61,6 +62,7 @@ def run(
                 pcfg.topic,
                 key=key,
                 value=pcfg.make_payload(i),
+                headers=[(PROTO_VERSION_HEADER_KEY, str(pcfg.schema_version).encode("utf-8"))],
                 on_delivery=on_delivery,
             )
             sent += 1

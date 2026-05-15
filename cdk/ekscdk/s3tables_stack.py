@@ -14,7 +14,7 @@ class S3TablesStack(Stack):
 
     現状はサンプルとして Event 1 種類のみ:
       - sample_events_event       (id, datetime, name, rawdata)
-      - sample_events_dlq         (failed_at, rawdata) ※全 schema 共通
+      - sample_events_dlq         (failed_at, rawdata, reason) ※全 schema 共通
 
     新しい ProtoBuf 型を追加する場合 (例えば Notification):
       1. kafka/proto/notification.proto を作って events.desc を再生成
@@ -104,6 +104,7 @@ class S3TablesStack(Stack):
                     schema_field_list=[
                         s3tables.CfnTable.SchemaFieldProperty(id=1, name="failed_at", type="timestamp", required=True),
                         s3tables.CfnTable.SchemaFieldProperty(id=2, name="rawdata", type="binary", required=True),
+                        s3tables.CfnTable.SchemaFieldProperty(id=3, name="reason", type="string", required=True),
                     ]
                 ),
                 iceberg_partition_spec=s3tables.CfnTable.IcebergPartitionSpecProperty(
