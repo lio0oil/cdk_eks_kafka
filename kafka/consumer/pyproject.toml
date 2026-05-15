@@ -6,9 +6,9 @@ readme = "README.md"
 # EMR 7.13.0 が Python 3.11 をデフォルトに採用しているためローカル開発も 3.11 に揃える
 requires-python = ">=3.11,<3.12"
 # protobuf は driver で events.desc を読んで SCHEMAS リストを展開するために必要 (worker は JVM 側の from_protobuf を使うので不要)。
-# EMR 7.13.0 同梱の Spark 3.5.6 が依存する protobuf-java 3.25 系と互換のラインを選ぶ。
+# events.desc を protoc 6.x で生成しているため、Python ランタイムも同じメジャーに揃える。
 dependencies = [
-    "protobuf>=5.29,<6",
+    "protobuf>=6,<7",
 ]
 
 [project.optional-dependencies]
