@@ -2,28 +2,24 @@
   "version": "0.2.0",
   "inputs": [
     {
-      "id": "envName",
+      "id": "startingOffsets",
       "type": "pickString",
-      "description": "CDK context env",
-      "options": ["dev", "stg", "prd"],
-      "default": "dev"
+      "description": "初回起動時のフォールバック offset",
+      "options": ["latest", "earliest"],
+      "default": "latest"
     }
   ],
   "configurations": [
     {
-      "name": "cdk synth (app.py)",
+      "name": "consumer.py",
       "type": "debugpy",
       "request": "launch",
-      "program": "${workspaceFolder}/app.py",
+      "program": "${workspaceFolder}/consumer.py",
       "cwd": "${workspaceFolder}",
       "python": "${workspaceFolder}/.venv/bin/python3",
       "console": "integratedTerminal",
       "justMyCode": false,
-      "env": {
-        "CDK_DEFAULT_ACCOUNT": "123456789012",
-        "CDK_DEFAULT_REGION": "ap-northeast-1",
-        "CDK_CONTEXT_JSON": "{\"env\": \"${input:envName}\"}"
-      }
+      "args": ["--starting-offsets", "${input:startingOffsets}"]
     }
   ]
 }
