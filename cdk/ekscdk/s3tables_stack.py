@@ -48,6 +48,7 @@ class S3TablesStack(Stack):
             table_bucket_arn=table_bucket.attr_table_bucket_arn,
             namespace="events",
         )
+        namespace.add_dependency(table_bucket)
 
         # sample_events_event テーブル (Event スキーマ専用)。
         # consumer.py の foreachBatch では `from_protobuf(...).payload.*` で全フィールドを展開し、
@@ -57,7 +58,7 @@ class S3TablesStack(Stack):
             self,
             "SampleEventsEventTable",
             table_bucket_arn=table_bucket.attr_table_bucket_arn,
-            namespace=namespace.ref,
+            namespace=namespace.namespace,
             table_name="sample_events_event",
             open_table_format="ICEBERG",
             iceberg_metadata=s3tables.CfnTable.IcebergMetadataProperty(
@@ -95,7 +96,7 @@ class S3TablesStack(Stack):
             self,
             "SampleEventsDlqTable",
             table_bucket_arn=table_bucket.attr_table_bucket_arn,
-            namespace=namespace.ref,
+            namespace=namespace.namespace,
             table_name="sample_events_dlq",
             open_table_format="ICEBERG",
             iceberg_metadata=s3tables.CfnTable.IcebergMetadataProperty(
@@ -141,7 +142,7 @@ class S3TablesStack(Stack):
         )
 
         self._table_bucket_arn = table_bucket.attr_table_bucket_arn
-        self._namespace_name = namespace.ref
+        self._namespace_name = namespace.namespace
         self._event_table_name = "sample_events_event"
         self._dlq_table_name = "sample_events_dlq"
         self._checkpoint_bucket_name = checkpoint_bucket.bucket_name
