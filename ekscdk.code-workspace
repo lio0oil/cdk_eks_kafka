@@ -1,0 +1,33 @@
+{
+  "folders": [
+    { "name": "root", "path": "." },
+    { "name": "cdk", "path": "cdk" },
+    { "name": "kafka/producer", "path": "kafka/producer" },
+    { "name": "kafka/consumer", "path": "kafka/consumer" }
+  ],
+  "settings": {
+    "files.eol": "\n",
+    "files.insertFinalNewline": true,
+    "files.trimTrailingWhitespace": true,
+    "editor.rulers": [120],
+    "editor.formatOnSave": true,
+    "editor.codeActionsOnSave": {
+      "source.fixAll.ruff": "explicit",
+      "source.organizeImports.ruff": "explicit"
+    },
+    "[python]": {
+      "editor.defaultFormatter": "charliermarsh.ruff"
+    },
+    "[json]": {
+      "editor.defaultFormatter": "vscode.json-language-features"
+    },
+    "[jsonc]": {
+      "editor.defaultFormatter": "vscode.json-language-features"
+    },
+    "python.languageServer": "Pylance",
+    "python.testing.pytestEnabled": true,
+    "python.testing.unittestEnabled": false,
+    "ruff.importStrategy": "fromEnvironment",
+    "terminal.integrated.defaultProfile.linux": "zsh"
+  }
+}
