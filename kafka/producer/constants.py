@@ -5,7 +5,7 @@ from dataclasses import dataclass
 from datetime import UTC, datetime
 
 # kafka/proto/ を import path に追加して、生成済み Protocol Buffer Python クラスを参照する
-from event_pb2 import Event  # noqa: E402
+from event_pb2 import Event  # noqa: E402  # pyright: ignore[reportAttributeAccessIssue]
 
 # Kafka bootstrap 接続先。実環境では NLB / VPC Endpoint Service の DNS に置き換える。
 # 例: "kafka-bootstrap.example.internal:9094"

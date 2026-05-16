@@ -20,6 +20,11 @@ EMR Serverless 7.13.0 / EMR on EKS 7.13.0 / ローカル PySpark 3.5.6 で動作
 import argparse
 import logging
 
+from pyspark.sql import DataFrame, SparkSession
+from pyspark.sql import functions as F
+from pyspark.sql.protobuf.functions import from_protobuf
+from pyspark.sql.streaming.query import StreamingQuery
+
 from constants import (
     BOOTSTRAP_SERVERS,
     DEFAULT_STARTING_OFFSETS,
@@ -32,10 +37,6 @@ from constants import (
     SCHEMAS,
     SchemaConfig,
 )
-from pyspark.sql import DataFrame, SparkSession
-from pyspark.sql import functions as F
-from pyspark.sql.protobuf.functions import from_protobuf
-from pyspark.sql.streaming import StreamingQuery
 
 logger = logging.getLogger("consumer")
 
