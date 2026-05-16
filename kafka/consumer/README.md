@@ -106,6 +106,17 @@ EMR 7.13.0 同梱の以下のバージョンを前提とする。spark-submit `-
 | Python | 3.11 |
 | Scala (Spark) | 2.12 |
 
+## ローカル開発: PySpark の Hadoop バンドル差し替え
+
+PySpark 3.5.6 wheel は Hadoop 3.3.4 を同梱するが、本リポジトリは `hadoop-aws:3.4.1` (AWS SDK v2 採用版) とクラスパスを揃える必要があるため、`.venv` 生成後に Hadoop client jar を 3.4.1 系に差し替える。本番 EMR 7.13.0 では Hadoop 3.4 系が同梱済みのため不要。
+
+```bash
+uv sync --all-groups
+bash scripts/patch-pyspark-hadoop.sh
+```
+
+`scripts/patch-pyspark-hadoop.sh` は冪等。`.venv` を再生成したら毎回走らせる。
+
 ## 実行例
 
 ### 事前準備: constants.py を実行環境に合わせて編集する
