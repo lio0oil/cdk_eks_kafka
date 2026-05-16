@@ -1,0 +1,11 @@
+[tool.commitizen]
+name = "cz_conventional_commits"
+version = "0.1.0"
+tag_format = "v$version"
+major_version_zero = true
+update_changelog_on_bump = false
+version_files = [
+    "cdk/pyproject.toml:version",
+    "kafka/producer/pyproject.toml:version",
+    "kafka/consumer/pyproject.toml:version",
+]
