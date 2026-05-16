@@ -92,6 +92,7 @@ for PORT in 9094 9095 9096 9097; do
 done
 echo "${PIDS[@]}" > /tmp/ssm-tunnel.pids
 echo "tunnels up: ${PIDS[@]}"
+echo "127.0.0.1 ${NLB_DNS}" | sudo tee -a /etc/hosts
 ```
 
 停止用。
