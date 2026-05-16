@@ -132,20 +132,26 @@ def _build_batch_writer(target_table: str, expected_schema_name: str, max_suppor
         )
         routed.cache()
         try:
-            # 成功行: payload を全フィールド展開し、datetime を timestamp 化して append。
+            # 成功行: target_table のスキーマ (id, datetime, schema_name, rawdata) に合わせて
+            # 明示 select する。schema_name は header 由来の proto_schema を流す
+            # (route で OK 判定済みなので NULL にはならず、expected_schema_name と一致する)。
             valid = (
                 routed.where(F.col("route") == "ok")
                 .select(
-                    F.col("payload.*"),
+                    F.col("payload.id").alias("id"),
+                    F.to_timestamp(F.col("payload.datetime")).alias("datetime"),
+                    F.col("proto_schema").alias("schema_name"),
                     F.col("rawdata"),
                 )
-                .withColumn("datetime", F.to_timestamp(F.col("datetime")))
             )
             valid.writeTo(target_table).append()
 
             # 失敗行: DLQ (全 schema 共通) に append。count > 0 のときだけ書く。
+            # schema_name は header 由来の proto_schema をそのまま流す (DLQ 側列は nullable)。
+            # missing_schema 行は NULL になるが、reason 列で 'missing_schema' と識別できる。
             invalid = routed.where(F.col("route") != "ok").select(
                 F.current_timestamp().alias("failed_at"),
+                F.col("proto_schema").alias("schema_name"),
                 F.col("rawdata"),
                 F.col("route").alias("reason"),
             )

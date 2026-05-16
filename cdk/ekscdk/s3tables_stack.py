@@ -13,8 +13,15 @@ class S3TablesStack(Stack):
     schema_name (ProtoBuf message 名) ごとに別 Iceberg テーブルを定義する。
 
     現状はサンプルとして Event 1 種類のみ:
-      - sample_events_event       (id, datetime, name, rawdata)
-      - sample_events_dlq         (failed_at, rawdata, reason) ※全 schema 共通
+      - sample_events_event       (id, datetime, schema_name, rawdata)
+      - sample_events_dlq         (failed_at, schema_name, rawdata, reason) ※全 schema 共通
+
+    schema_name 列はどの ProtoBuf 型由来かを行ごとに記録する。
+      - event 側: consumer が Kafka header の proto-schema 列をそのまま流す (route=ok のみが
+                  入るため必ず非 NULL → required=True)
+      - DLQ 側:   consumer が Kafka header の proto-schema 列をそのまま流す。
+                  missing_schema 行 (header に proto-schema が無い失敗) は NULL になるため
+                  required=False。NULL の意味は reason 列で識別できる。
 
     新しい ProtoBuf 型を追加する場合 (例えば Notification):
       1. kafka/proto/notification.proto を作って events.desc を再生成
@@ -51,8 +58,8 @@ class S3TablesStack(Stack):
         namespace.add_dependency(table_bucket)
 
         # sample_events_event テーブル (Event スキーマ専用)。
-        # consumer.py の foreachBatch では `from_protobuf(...).payload.*` で全フィールドを展開し、
-        # rawdata 列と合わせて INSERT する。各列は ProtoBuf Event の field id と一致させている。
+        # consumer.py の foreachBatch では from_protobuf 結果の id / datetime と、
+        # header 由来の proto_schema (= schema_name) と rawdata を明示 select して INSERT する。
         # day(datetime) パーティション・Copy-on-Write モードは前構成から踏襲。
         event_table = s3tables.CfnTable(
             self,
@@ -66,17 +73,25 @@ class S3TablesStack(Stack):
                     schema_field_list=[
                         s3tables.CfnTable.SchemaFieldProperty(id=1, name="id", type="long", required=True),
                         s3tables.CfnTable.SchemaFieldProperty(id=2, name="datetime", type="timestamp", required=True),
-                        s3tables.CfnTable.SchemaFieldProperty(id=3, name="name", type="string", required=True),
+                        s3tables.CfnTable.SchemaFieldProperty(id=3, name="schema_name", type="string", required=True),
                         s3tables.CfnTable.SchemaFieldProperty(id=4, name="rawdata", type="binary", required=True),
                     ]
                 ),
                 iceberg_partition_spec=s3tables.CfnTable.IcebergPartitionSpecProperty(
                     fields=[
+                        # 先頭は低カーディナリティ + 等値フィルタの identity(schema_name)。
+                        # 続けて day(datetime) で時系列 prune。
+                        s3tables.CfnTable.IcebergPartitionFieldProperty(
+                            source_id=3,
+                            transform="identity",
+                            name="schema_name",
+                            field_id=1000,
+                        ),
                         s3tables.CfnTable.IcebergPartitionFieldProperty(
                             source_id=2,
                             transform="day",
                             name="datetime_day",
-                            field_id=1000,
+                            field_id=1001,
                         ),
                     ],
                 ),
@@ -103,17 +118,28 @@ class S3TablesStack(Stack):
                 iceberg_schema=s3tables.CfnTable.IcebergSchemaProperty(
                     schema_field_list=[
                         s3tables.CfnTable.SchemaFieldProperty(id=1, name="failed_at", type="timestamp", required=True),
-                        s3tables.CfnTable.SchemaFieldProperty(id=2, name="rawdata", type="binary", required=True),
-                        s3tables.CfnTable.SchemaFieldProperty(id=3, name="reason", type="string", required=True),
+                        # header 由来の proto-schema をそのまま入れる。missing_schema 行 (header
+                        # に proto-schema が無い失敗) は NULL になるため required=False。
+                        s3tables.CfnTable.SchemaFieldProperty(id=2, name="schema_name", type="string", required=False),
+                        s3tables.CfnTable.SchemaFieldProperty(id=3, name="rawdata", type="binary", required=True),
+                        s3tables.CfnTable.SchemaFieldProperty(id=4, name="reason", type="string", required=True),
                     ]
                 ),
                 iceberg_partition_spec=s3tables.CfnTable.IcebergPartitionSpecProperty(
                     fields=[
+                        # 先頭は schema 別の集計を等値 prune できる identity(schema_name)。
+                        # 続けて day(failed_at) で時系列 prune (アラート / lifecycle)。
+                        s3tables.CfnTable.IcebergPartitionFieldProperty(
+                            source_id=2,
+                            transform="identity",
+                            name="schema_name",
+                            field_id=1000,
+                        ),
                         s3tables.CfnTable.IcebergPartitionFieldProperty(
                             source_id=1,
                             transform="day",
                             name="failed_at_day",
-                            field_id=1000,
+                            field_id=1001,
                         ),
                     ],
                 ),
