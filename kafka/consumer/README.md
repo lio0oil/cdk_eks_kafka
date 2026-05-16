@@ -17,7 +17,7 @@ EMR Serverless 7.13.0 / EMR on EKS 7.13.0 / ローカル PySpark 3.5.6 で動作
 └ Executor プール (全 query で共有)
 
 各 StreamingQuery:
-  Kafka 1 topic → from_protobuf (1 種類) → foreachBatch → MERGE INTO 専用テーブル
+  Kafka 1 topic → from_protobuf (1 種類) → foreachBatch → append 専用テーブル
 
 DLQ: 全 query 共通の sample_events_dlq に append (失敗データ用)
 ```
@@ -192,7 +192,7 @@ EMR Serverless Job Role / EMR on EKS Execution Role に付与する。
 - **テーブル定義を CDK で持つ**: スキーマと partition spec を IaC で表現することで、レビューと環境間差分管理が CFN 経由で一元化される。新型追加時は CDK に CfnTable を 1 件足す必要あり。
 - **DLQ は全 query 共通の 1 テーブル**: 失敗データの頻度は低い前提で、100 query が並列書き込みしても Iceberg 楽観ロックの retry は許容範囲。
 
-## 重複排除 (exactly-once) と DLQ
+## 書き込みと DLQ
 
 各 StreamingQuery の foreachBatch で以下を実行する:
 
@@ -200,18 +200,17 @@ EMR Serverless Job Role / EMR on EKS Execution Role に付与する。
 2. `payload != null` の行 (デシリアライズ成功):
    - `payload.*` で ProtoBuf の全フィールドを展開
    - `datetime` 列を `to_timestamp` でキャスト
-   - `dropDuplicates(["id"])` でバッチ内重複を除去
-   - 一時 view に登録 → `MERGE INTO sample_events_<schema> ON t.id = s.id WHEN NOT MATCHED THEN INSERT *`
+   - `sample_events_<schema>` に append (`writeTo(...).append()`)
 3. `payload == null` の行 (デシリアライズ失敗):
    - `(failed_at, rawdata)` を全 query 共通 DLQ `sample_events_dlq` に append
    - 件数を `logger.warning` で運用通知
 
 これにより:
 
-- **バッチ内重複**: producer 再送で同じ id が複数届いても `dropDuplicates` で除去
-- **バッチ間重複**: 前回バッチが commits 書き込み前に失敗 → 再実行で同じ id を書こうとしても既存行とぶつかって INSERT されない
 - **形式不正データ**: 全件破棄ではなく DLQ に蓄積され、後から原因解析・再処理が可能
 - **並列書き込み**: 各 query が別テーブルに書くので Iceberg snapshot 履歴が独立、commit が並列で完了
+
+> at-least-once 配信なので、ジョブ再実行やリトライで同一レコードが複数回 append される可能性がある。重複が問題になる場合は下流 (集計クエリ・後段ジョブ) で排除する想定。
 
 ### DLQ 行の確認 (Athena)
 

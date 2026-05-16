@@ -20,11 +20,6 @@ EMR Serverless 7.13.0 / EMR on EKS 7.13.0 / ローカル PySpark 3.5.6 で動作
 import argparse
 import logging
 
-from pyspark.sql import DataFrame, SparkSession
-from pyspark.sql import functions as F
-from pyspark.sql.protobuf.functions import from_protobuf
-from pyspark.sql.streaming import StreamingQuery
-
 from constants import (
     BOOTSTRAP_SERVERS,
     DEFAULT_STARTING_OFFSETS,
@@ -37,6 +32,10 @@ from constants import (
     SCHEMAS,
     SchemaConfig,
 )
+from pyspark.sql import DataFrame, SparkSession
+from pyspark.sql import functions as F
+from pyspark.sql.protobuf.functions import from_protobuf
+from pyspark.sql.streaming import StreamingQuery
 
 logger = logging.getLogger("consumer")
 
@@ -50,11 +49,13 @@ def build_spark() -> SparkSession:
     return SparkSession.builder.appName("kafka-batch-consumer").getOrCreate()
 
 
-def start_query_for(spark: SparkSession, config: SchemaConfig, starting_offsets: str) -> StreamingQuery:
+def start_query_for(
+    spark: SparkSession, config: SchemaConfig, starting_offsets: str
+) -> StreamingQuery:
     """1 つの SchemaConfig に対応する独立した StreamingQuery を起動する (non-blocking)。
 
     プランは「Kafka topic 読み込み → header から proto-version 抽出 → from_protobuf 1 回
-    → foreachBatch で route 列に応じて MERGE / DLQ」と軽量。
+    → foreachBatch で route 列に応じて append / DLQ」と軽量。
     start() を呼んだ瞬間に query が非同期起動するので、ループで複数呼ぶと並列実行になる。
     """
     raw = (
@@ -83,20 +84,19 @@ def start_query_for(spark: SparkSession, config: SchemaConfig, starting_offsets:
         version_expr.cast("string").cast("int").alias("proto_version"),
     )
 
-    upsert = _build_upsert(config.target_table, config.max_supported_version)
+    writer = _build_batch_writer(config.target_table, config.max_supported_version)
 
     return (
-        parsed.writeStream
-        .queryName(f"consumer-{config.schema_name}")
+        parsed.writeStream.queryName(f"consumer-{config.schema_name}")
         .option("checkpointLocation", config.checkpoint_location)
         .outputMode("append")
         .trigger(availableNow=True)
-        .foreachBatch(upsert)
+        .foreachBatch(writer)
         .start()
     )
 
 
-def _build_upsert(target_table: str, max_supported_version: int):
+def _build_batch_writer(target_table: str, max_supported_version: int):
     """target_table 専用の foreachBatch コールバックを返す。
 
     各 query が別 target_table を持つので、commit は別の snapshot 履歴に記録され
@@ -106,22 +106,24 @@ def _build_upsert(target_table: str, max_supported_version: int):
       1. proto_version IS NULL  → DLQ (missing_version)
       2. proto_version > max    → DLQ (unsupported_version)
       3. payload IS NULL        → DLQ (deserialize_error)
-      4. 上記以外               → target_table へ MERGE
+      4. 上記以外               → target_table へ append
     """
 
-    def _upsert(batch_df: DataFrame, batch_id: int) -> None:
-        spark = batch_df.sparkSession
+    def _write(batch_df: DataFrame, batch_id: int) -> None:
         # 上から順に評価する when/otherwise 連鎖で route 列を計算 (相互排他)。
         routed = batch_df.withColumn(
             "route",
             F.when(F.col("proto_version").isNull(), F.lit(DLQ_REASON_MISSING_VERSION))
-            .when(F.col("proto_version") > F.lit(max_supported_version), F.lit(DLQ_REASON_UNSUPPORTED_VERSION))
+            .when(
+                F.col("proto_version") > F.lit(max_supported_version),
+                F.lit(DLQ_REASON_UNSUPPORTED_VERSION),
+            )
             .when(F.col("payload").isNull(), F.lit(DLQ_REASON_DESERIALIZE_ERROR))
             .otherwise(F.lit("ok")),
         )
         routed.cache()
         try:
-            # 成功行: payload を全フィールド展開し、datetime を timestamp 化、id で重複除去
+            # 成功行: payload を全フィールド展開し、datetime を timestamp 化して append。
             valid = (
                 routed.where(F.col("route") == "ok")
                 .select(
@@ -129,15 +131,8 @@ def _build_upsert(target_table: str, max_supported_version: int):
                     F.col("rawdata"),
                 )
                 .withColumn("datetime", F.to_timestamp(F.col("datetime")))
-                .dropDuplicates(["id"])
             )
-            valid.createOrReplaceTempView("_consumer_batch_staging")
-            spark.sql(
-                f"MERGE INTO {target_table} t "
-                "USING _consumer_batch_staging s "
-                "ON t.id = s.id "
-                "WHEN NOT MATCHED THEN INSERT *"
-            )
+            valid.writeTo(target_table).append()
 
             # 失敗行: DLQ (全 schema 共通) に append。count > 0 のときだけ書く。
             invalid = routed.where(F.col("route") != "ok").select(
@@ -156,11 +151,11 @@ def _build_upsert(target_table: str, max_supported_version: int):
                 )
                 invalid.writeTo(DLQ_TARGET_TABLE).append()
             else:
-                logger.info("target=%s batch_id=%s upserted", target_table, batch_id)
+                logger.info("target=%s batch_id=%s appended", target_table, batch_id)
         finally:
             routed.unpersist()
 
-    return _upsert
+    return _write
 
 
 def parse_args(argv: list[str] | None = None) -> argparse.Namespace:
