@@ -47,12 +47,10 @@ def build_spark() -> SparkSession:
     Executor プールはこのセッションの所有物として 1 ジョブ内に 1 つ。executor 数や
     core 数は spark-submit の --conf で調整する。
     """
-    return SparkSession.builder.appName("kafka-batch-consumer").getOrCreate()
+    return SparkSession.builder.appName("kafka-batch-consumer").getOrCreate()  # pyright: ignore[reportAttributeAccessIssue]
 
 
-def start_query_for(
-    spark: SparkSession, config: SchemaConfig, starting_offsets: str
-) -> StreamingQuery:
+def start_query_for(spark: SparkSession, config: SchemaConfig, starting_offsets: str) -> StreamingQuery:
     """1 つの SchemaConfig に対応する独立した StreamingQuery を起動する (non-blocking)。
 
     プランは「Kafka topic 読み込み → header から proto-version 抽出 → from_protobuf 1 回
@@ -71,9 +69,7 @@ def start_query_for(
     # PERMISSIVE モードでデシリアライズ失敗時は payload が null になる (DLQ 行き)。
     # headers は array<struct<key:string, value:binary>>。proto-version の value (binary) を
     # UTF-8 string にデコードして cast し、route 判定に使う。
-    version_expr = F.expr(
-        f"filter(headers, h -> h.key = '{PROTO_VERSION_HEADER_KEY}')[0].value"
-    )
+    version_expr = F.expr(f"filter(headers, h -> h.key = '{PROTO_VERSION_HEADER_KEY}')[0].value")
     parsed = raw.select(
         F.col("value").alias("rawdata"),
         from_protobuf(
