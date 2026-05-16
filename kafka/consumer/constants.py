@@ -55,11 +55,15 @@ PROTO_VERSION_HEADER_KEY = "proto-version"
 
 # DLQ の reason 列に入れる分類値。集計・アラート設定で参照する。
 DLQ_REASON_MISSING_VERSION = "missing_version"  # header に proto-version が無い
-DLQ_REASON_UNSUPPORTED_VERSION = "unsupported_version"  # version が max_supported_version を超える
-DLQ_REASON_DESERIALIZE_ERROR = "deserialize_error"  # from_protobuf がデコードできなかった
+DLQ_REASON_UNSUPPORTED_VERSION = (
+    "unsupported_version"  # version が max_supported_version を超える
+)
+DLQ_REASON_DESERIALIZE_ERROR = (
+    "deserialize_error"  # from_protobuf がデコードできなかった
+)
 
-# checkpointLocation 用 S3 バケット名 (CDK の S3TablesStack で作成: kafka-consumer-checkpoint-<account>-<env>)。
-# バケット名にアカウント ID と env 名が含まれるため、リポジトリには持たず環境変数で受ける。
+# checkpointLocation 用 S3 バケット名。バケット名にアカウント ID と env 名が含まれるため
+# リポジトリには持たず .env 経由で受ける (launch.json の envFile で読み込む)。
 CHECKPOINT_BUCKET = os.environ["CHECKPOINT_BUCKET"]
 
 

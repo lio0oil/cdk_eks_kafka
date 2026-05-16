@@ -106,6 +106,19 @@ EMR 7.13.0 同梱の以下のバージョンを前提とする。spark-submit `-
 | Python | 3.11 |
 | Scala (Spark) | 2.12 |
 
+## ローカル開発: .env で環境変数を渡す
+
+consumer.py / launch.json は AWS アカウント依存の値 (`TABLE_BUCKET_ARN`, `CHECKPOINT_BUCKET`) を環境変数で受け取る。リポジトリには placeholder を置かず、各開発者が `.env` を作って埋める。
+
+```bash
+cp .env.example .env
+# .env を編集して <アカウントID> 等を実値に置き換える
+```
+
+`.vscode/launch.json` の `envFile` 設定が `.env` を読み込むので、VS Code から debugpy で `consumer.py` を起動すれば自動で適用される。`.env` はルート `.gitignore` で除外済み。
+
+ターミナルから直接 `python consumer.py` を叩く場合は事前に `set -a; source .env; set +a` で読み込む。
+
 ## ローカル開発: PySpark の Hadoop バンドル差し替え
 
 PySpark 3.5.6 wheel は Hadoop 3.3.4 を同梱するが、本リポジトリは `hadoop-aws:3.4.1` (AWS SDK v2 採用版) とクラスパスを揃える必要があるため、`.venv` 生成後に Hadoop client jar を 3.4.1 系に差し替える。本番 EMR 7.13.0 では Hadoop 3.4 系が同梱済みのため不要。
