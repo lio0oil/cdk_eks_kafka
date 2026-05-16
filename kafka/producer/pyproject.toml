@@ -26,4 +26,4 @@ venv = ".venv"
 typeCheckingMode = "standard"
 include = ["producer.py", "constants.py"]
 # protoc 自動生成ファイルは動的属性が多く pyright と相性が悪いので型チェック対象外。
-exclude = ["**/__pycache__", "**/.*", ".venv", "**/*_pb2.py"]
+exclude = ["**/__pycache__", "**/.*", ".venv", "**/*_pb2.py", "**/node_modules"]
