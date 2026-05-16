@@ -14,8 +14,9 @@ BOOTSTRAP_SERVERS = "localhost:9094"
 DEFAULT_COUNT = 10
 DEFAULT_INTERVAL_SECONDS = 1.0
 
-# ProtoBuf schema バージョンを伝達する Kafka header key。consumer 側 (constants.py) と一致させる。
+# ProtoBuf schema を伝達する Kafka header key。consumer 側 (constants.py) と一致させる。
 PROTO_VERSION_HEADER_KEY = "proto-version"
+PROTO_SCHEMA_HEADER_KEY = "proto-schema"
 
 
 @dataclass(frozen=True)
@@ -24,12 +25,15 @@ class ProducerConfig:
 
     topic: 送信先 Kafka topic。consumer 側 SchemaConfig.topic と一致させる
     make_payload: index (int) を受け取り、ProtoBuf SerializeToString() した bytes を返す
+    schema_name: ProtoBuf message 型名 (例: "Event")。Kafka header で消費側に伝え、
+        (schema_name, schema_version) の組で型を一意に特定する
     schema_version: ProtoBuf スキーマの major version。Kafka header で消費側に伝える。
         互換性が壊れる変更 (型変更・意味の再定義) を行う時にだけ上げる
     """
 
     topic: str
     make_payload: Callable[[int], bytes]
+    schema_name: str
     schema_version: int
 
 
@@ -49,12 +53,14 @@ PRODUCERS: list[ProducerConfig] = [
     ProducerConfig(
         topic="sample-events-event",
         make_payload=_make_event_payload,
+        schema_name="Event",
         schema_version=1,
     ),
     # 新型を追加する場合は ProducerConfig を 1 件追加 (例: Notification):
     # ProducerConfig(
     #     topic="sample-events-notification",
     #     make_payload=_make_notification_payload,
+    #     schema_name="Notification",
     #     schema_version=1,
     # ),
 ]

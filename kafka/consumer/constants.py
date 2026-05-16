@@ -19,7 +19,8 @@ from pathlib import Path
 class SchemaConfig:
     """1 つの ProtoBuf 型に紐付く全リソース名をまとめる。
 
-    schema_name: ProtoBuf message 名 (Spark UI / ログ識別用)
+    schema_name: ProtoBuf message 名。Spark UI / ログ識別用に加え、Kafka header の
+        proto-schema との一致確認に使う (不一致行は DLQ reason=schema_mismatch 行き)
     protobuf_full_name: Spark の from_protobuf 第 2 引数に渡す package.message
     topic: Kafka topic 名 (producer 側と一致)
     target_table: Iceberg テーブル名 (CDK の S3TablesStack で作成したもの)
@@ -50,17 +51,16 @@ DESCRIPTOR_FILE = str(Path(__file__).resolve().parent / "events.desc")
 # DLQ 行きデータの退避先。全 schema 共通の 1 テーブル。reason 列に下記の DLQ_REASON_* を入れる。
 DLQ_TARGET_TABLE = "s3tablesbucket.events.sample_events_dlq"
 
-# ProtoBuf schema バージョンを伝達する Kafka header key。producer 側 (constants.py) と一致させる。
+# ProtoBuf schema を伝達する Kafka header key。producer 側 (constants.py) と一致させる。
 PROTO_VERSION_HEADER_KEY = "proto-version"
+PROTO_SCHEMA_HEADER_KEY = "proto-schema"
 
 # DLQ の reason 列に入れる分類値。集計・アラート設定で参照する。
+DLQ_REASON_MISSING_SCHEMA = "missing_schema"  # header に proto-schema が無い
 DLQ_REASON_MISSING_VERSION = "missing_version"  # header に proto-version が無い
-DLQ_REASON_UNSUPPORTED_VERSION = (
-    "unsupported_version"  # version が max_supported_version を超える
-)
-DLQ_REASON_DESERIALIZE_ERROR = (
-    "deserialize_error"  # from_protobuf がデコードできなかった
-)
+DLQ_REASON_SCHEMA_MISMATCH = "schema_mismatch"  # proto-schema が SchemaConfig.schema_name と一致しない
+DLQ_REASON_UNSUPPORTED_VERSION = "unsupported_version"  # version が max_supported_version を超える
+DLQ_REASON_DESERIALIZE_ERROR = "deserialize_error"  # from_protobuf がデコードできなかった
 
 # checkpointLocation 用 S3 バケット名。バケット名にアカウント ID と env 名が含まれるため
 # リポジトリには持たず .env 経由で受ける (launch.json の envFile で読み込む)。

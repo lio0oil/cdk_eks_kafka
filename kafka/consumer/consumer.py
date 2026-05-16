@@ -30,9 +30,12 @@ from constants import (
     DEFAULT_STARTING_OFFSETS,
     DESCRIPTOR_FILE,
     DLQ_REASON_DESERIALIZE_ERROR,
+    DLQ_REASON_MISSING_SCHEMA,
     DLQ_REASON_MISSING_VERSION,
+    DLQ_REASON_SCHEMA_MISMATCH,
     DLQ_REASON_UNSUPPORTED_VERSION,
     DLQ_TARGET_TABLE,
+    PROTO_SCHEMA_HEADER_KEY,
     PROTO_VERSION_HEADER_KEY,
     SCHEMAS,
     SchemaConfig,
@@ -53,8 +56,8 @@ def build_spark() -> SparkSession:
 def start_query_for(spark: SparkSession, config: SchemaConfig, starting_offsets: str) -> StreamingQuery:
     """1 つの SchemaConfig に対応する独立した StreamingQuery を起動する (non-blocking)。
 
-    プランは「Kafka topic 読み込み → header から proto-version 抽出 → from_protobuf 1 回
-    → foreachBatch で route 列に応じて append / DLQ」と軽量。
+    プランは「Kafka topic 読み込み → header から proto-schema / proto-version 抽出 →
+    from_protobuf 1 回 → foreachBatch で route 列に応じて append / DLQ」と軽量。
     start() を呼んだ瞬間に query が非同期起動するので、ループで複数呼ぶと並列実行になる。
     """
     raw = (
@@ -67,8 +70,9 @@ def start_query_for(spark: SparkSession, config: SchemaConfig, starting_offsets:
     )
 
     # PERMISSIVE モードでデシリアライズ失敗時は payload が null になる (DLQ 行き)。
-    # headers は array<struct<key:string, value:binary>>。proto-version の value (binary) を
+    # headers は array<struct<key:string, value:binary>>。各ヘッダーの value (binary) を
     # UTF-8 string にデコードして cast し、route 判定に使う。
+    schema_expr = F.expr(f"filter(headers, h -> h.key = '{PROTO_SCHEMA_HEADER_KEY}')[0].value")
     version_expr = F.expr(f"filter(headers, h -> h.key = '{PROTO_VERSION_HEADER_KEY}')[0].value")
     parsed = raw.select(
         F.col("value").alias("rawdata"),
@@ -78,10 +82,11 @@ def start_query_for(spark: SparkSession, config: SchemaConfig, starting_offsets:
             DESCRIPTOR_FILE,
             {"mode": "PERMISSIVE"},
         ).alias("payload"),
+        schema_expr.cast("string").alias("proto_schema"),
         version_expr.cast("string").cast("int").alias("proto_version"),
     )
 
-    writer = _build_batch_writer(config.target_table, config.max_supported_version)
+    writer = _build_batch_writer(config.target_table, config.schema_name, config.max_supported_version)
 
     return (
         parsed.writeStream.queryName(f"consumer-{config.schema_name}")
@@ -93,24 +98,31 @@ def start_query_for(spark: SparkSession, config: SchemaConfig, starting_offsets:
     )
 
 
-def _build_batch_writer(target_table: str, max_supported_version: int):
+def _build_batch_writer(target_table: str, expected_schema_name: str, max_supported_version: int):
     """target_table 専用の foreachBatch コールバックを返す。
 
     各 query が別 target_table を持つので、commit は別の snapshot 履歴に記録され
     並列実行可能 (Iceberg の楽観ロック競合なし)。DLQ は全 query 共通の 1 テーブル。
 
     行の振り分けは次の優先順:
-      1. proto_version IS NULL  → DLQ (missing_version)
-      2. proto_version > max    → DLQ (unsupported_version)
-      3. payload IS NULL        → DLQ (deserialize_error)
-      4. 上記以外               → target_table へ append
+      1. proto_schema IS NULL      → DLQ (missing_schema)
+      2. proto_version IS NULL     → DLQ (missing_version)
+      3. proto_schema != expected  → DLQ (schema_mismatch)
+      4. proto_version > max       → DLQ (unsupported_version)
+      5. payload IS NULL           → DLQ (deserialize_error)
+      6. 上記以外                  → target_table へ append
     """
 
     def _write(batch_df: DataFrame, batch_id: int) -> None:
         # 上から順に評価する when/otherwise 連鎖で route 列を計算 (相互排他)。
         routed = batch_df.withColumn(
             "route",
-            F.when(F.col("proto_version").isNull(), F.lit(DLQ_REASON_MISSING_VERSION))
+            F.when(F.col("proto_schema").isNull(), F.lit(DLQ_REASON_MISSING_SCHEMA))
+            .when(F.col("proto_version").isNull(), F.lit(DLQ_REASON_MISSING_VERSION))
+            .when(
+                F.col("proto_schema") != F.lit(expected_schema_name),
+                F.lit(DLQ_REASON_SCHEMA_MISMATCH),
+            )
             .when(
                 F.col("proto_version") > F.lit(max_supported_version),
                 F.lit(DLQ_REASON_UNSUPPORTED_VERSION),

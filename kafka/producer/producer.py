@@ -16,6 +16,7 @@ from constants import (
     DEFAULT_COUNT,
     DEFAULT_INTERVAL_SECONDS,
     PRODUCERS,
+    PROTO_SCHEMA_HEADER_KEY,
     PROTO_VERSION_HEADER_KEY,
 )
 
@@ -62,7 +63,10 @@ def run(
                 pcfg.topic,
                 key=key,
                 value=pcfg.make_payload(i),
-                headers=[(PROTO_VERSION_HEADER_KEY, str(pcfg.schema_version).encode("utf-8"))],
+                headers=[
+                    (PROTO_SCHEMA_HEADER_KEY, pcfg.schema_name.encode("utf-8")),
+                    (PROTO_VERSION_HEADER_KEY, str(pcfg.schema_version).encode("utf-8")),
+                ],
                 on_delivery=on_delivery,
             )
             sent += 1
