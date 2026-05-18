@@ -119,8 +119,7 @@ def test_instance_in_private_subnet(template):
 
 
 def test_transfer_bucket_is_secure(template):
-    # ローカル <-> EC2 のファイル転送用バケット。dev のテスト用なので
-    # スタック削除で消える設計 + lifecycle で滞留物を 14 日で expire。
+    # ローカル <-> EC2 のファイル転送用バケット。
     template.resource_count_is("AWS::S3::Bucket", 1)
     template.has_resource_properties(
         "AWS::S3::Bucket",
@@ -133,11 +132,6 @@ def test_transfer_bucket_is_secure(template):
                 "BlockPublicPolicy": True,
                 "IgnorePublicAcls": True,
                 "RestrictPublicBuckets": True,
-            },
-            "LifecycleConfiguration": {
-                "Rules": assertions.Match.array_with(
-                    [assertions.Match.object_like({"ExpirationInDays": 14, "Status": "Enabled"})]
-                )
             },
         },
     )

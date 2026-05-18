@@ -1,6 +1,6 @@
 from typing import cast
 
-from aws_cdk import CfnOutput, Duration, RemovalPolicy, Stack
+from aws_cdk import CfnOutput, RemovalPolicy, Stack
 from aws_cdk import aws_ec2 as ec2
 from aws_cdk import aws_iam as iam
 from aws_cdk import aws_s3 as s3
@@ -38,7 +38,6 @@ class TestEc2Stack(Stack):
 
         # ── ローカル <-> EC2 ファイル転送用 S3 バケット ──────────────────────────
         # SSH 不可方針のため scp/rsync は使わず、S3 を中継して双方向転送する。
-        # dev 用途に限定するため 14 日で expire、スタック削除時はオブジェクトごと消す。
         transfer_bucket = s3.Bucket(
             self,
             "TransferBucket",
@@ -46,8 +45,6 @@ class TestEc2Stack(Stack):
             block_public_access=s3.BlockPublicAccess.BLOCK_ALL,
             enforce_ssl=True,
             removal_policy=RemovalPolicy.DESTROY,
-            auto_delete_objects=True,
-            lifecycle_rules=[s3.LifecycleRule(expiration=Duration.days(14))],
         )
         transfer_bucket.grant_read_write(role)
 
