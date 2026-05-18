@@ -108,7 +108,7 @@ EMR 7.13.0 同梱の以下のバージョンを前提とする。spark-submit `-
 
 ## ローカル開発: .env で環境変数を渡す
 
-consumer.py / launch.json は AWS アカウント依存の値 (`TABLE_BUCKET_ARN`, `CHECKPOINT_BUCKET`) を環境変数で受け取る。リポジトリには placeholder を置かず、各開発者が `.env` を作って埋める。
+consumer.py / launch.json は AWS アカウント依存の値 (`CHECKPOINT_BUCKET`, `PYSPARK_SUBMIT_ARGS` 内の TableBucket ARN) を環境変数で受け取る。リポジトリには placeholder を置かず、各開発者が `.env` を作って埋める。
 
 ```bash
 cp .env.example .env
