@@ -36,11 +36,11 @@ def test_dlq_table_has_reason_column(template):
     )
 
 
-def test_event_table_has_schema_name_column(template):
-    """sample_events_event に schema_name 列があり、どの ProtoBuf 型由来かを保持する。
+def test_event_table_has_extra_type_column(template):
+    """sample_events_event に extra_type 列があり、Envelope の oneof case 名を保持する。
 
-    分析時に「どの consumer query から書かれた行か」を 1 テーブル内で識別できるようにする。
-    consumer は Kafka header の proto-schema 列をそのまま流し込む。
+    Envelope 構造を採用したため schema_name (常に "Envelope") では行を区別できず、
+    代わりに oneof case (order_event / user_event / ...) を extra_type に書く。
     """
     template.has_resource_properties(
         "AWS::S3Tables::Table",
@@ -49,7 +49,7 @@ def test_event_table_has_schema_name_column(template):
             "IcebergMetadata": {
                 "IcebergSchema": {
                     "SchemaFieldList": assertions.Match.array_with(
-                        [assertions.Match.object_like({"Name": "schema_name", "Type": "string", "Required": True})]
+                        [assertions.Match.object_like({"Name": "extra_type", "Type": "string", "Required": True})]
                     )
                 }
             },
@@ -57,11 +57,11 @@ def test_event_table_has_schema_name_column(template):
     )
 
 
-def test_event_table_does_not_have_name_column(template):
-    """sample_events_event から name 列を削除したことを invariant 化する。
+def test_event_table_columns_are_envelope_aware(template):
+    """sample_events_event の列は Envelope 構造に対応する 4 列のみ。
 
-    proto 側 Event.name は残るが、Iceberg テーブルでは持たない。consumer の select で
-    drop しているかは別途 ロジックテスト範囲。
+    proto 側 Event.name や schema_name はテーブルには持たない。rawdata に Envelope の
+    bytes をそのまま保存するため、後段で再 deserialize して全フィールドを取り出せる。
     """
     event_tables = template.find_resources(
         "AWS::S3Tables::Table",
@@ -71,15 +71,15 @@ def test_event_table_does_not_have_name_column(template):
     [resource] = event_tables.values()
     fields = resource["Properties"]["IcebergMetadata"]["IcebergSchema"]["SchemaFieldList"]
     names = [f["Name"] for f in fields]
-    assert "name" not in names, f"name column must be removed, got: {names}"
+    assert names == ["event_id", "event_datetime", "extra_type", "rawdata"], names
 
 
-def test_event_table_partition_spec_is_schema_name_then_day(template):
-    """event テーブルの partition は identity(schema_name) → day(datetime) の順。
+def test_event_table_partition_spec_is_extra_type_then_day(template):
+    """event テーブルの partition は identity(extra_type) → day(event_datetime) の順。
 
-    順序の意図: Iceberg では先頭 partition のカーディナリティが低いほどファイル爆発を抑え、
-    等値フィルタ (schema_name = 'X') を完全 prune できる。範囲フィルタ (datetime BETWEEN ...)
-    は後ろでも prune される。
+    Envelope 採用後は schema_name が常に "Envelope" で prune の役に立たないため、
+    oneof case (extra_type) で等値 prune できるようにする。後段の day(event_datetime) は
+    時系列スキャン用。
     """
     event_tables = template.find_resources(
         "AWS::S3Tables::Table",
@@ -88,8 +88,8 @@ def test_event_table_partition_spec_is_schema_name_then_day(template):
     [resource] = event_tables.values()
     fields = resource["Properties"]["IcebergMetadata"]["IcebergPartitionSpec"]["Fields"]
     assert [(f["Name"], f["Transform"]) for f in fields] == [
-        ("schema_name", "identity"),
-        ("datetime_day", "day"),
+        ("extra_type", "identity"),
+        ("event_datetime_day", "day"),
     ]
 
 

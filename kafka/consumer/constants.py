@@ -1,13 +1,14 @@
-"""consumer の動作設定値 (案 R-1)。
+"""consumer の動作設定値。
 
-各 ProtoBuf 型に対し (schema_name / protobuf_full_name / topic / table / checkpoint) を
-SchemaConfig としてまとめ、SCHEMAS リストに並べて指定する。値は動的派生せず固定値で書く
-ので、CDK 側のテーブル名と直接対応していることが目視で確認できる。
+Envelope 採用後は Kafka に流れる proto は常に 1 種類 (Envelope) のため SCHEMAS は
+1 件に集約される。Envelope.extra (oneof) の case が増えても本ファイルは変更不要で、
+consumer.py 側が extra_type 列に case 名を流すだけ。
 
-新しい型を追加する場合:
-  1. kafka/proto/ に .proto を追加して events.desc を再生成
-  2. 本ファイルの SCHEMAS リストに SchemaConfig を 1 件追加
-  3. cdk/ekscdk/s3tables_stack.py にも対応する CfnTable 定義を追加
+新しい extra 型を追加する場合:
+  1. kafka/proto/event.proto の Envelope.extra に oneof case を追加し、events.desc /
+     event_pb2.py を再生成
+  2. producer の _make_envelope_payload の振り分けロジックを拡張
+  3. consumer / CDK の定義変更は不要
 """
 
 import os
@@ -61,30 +62,23 @@ DLQ_REASON_MISSING_VERSION = "missing_version"  # header に proto-version が�
 DLQ_REASON_SCHEMA_MISMATCH = "schema_mismatch"  # proto-schema が SchemaConfig.schema_name と一致しない
 DLQ_REASON_UNSUPPORTED_VERSION = "unsupported_version"  # version が max_supported_version を超える
 DLQ_REASON_DESERIALIZE_ERROR = "deserialize_error"  # from_protobuf がデコードできなかった
+DLQ_REASON_UNKNOWN_EXTRA = "unknown_extra"  # Envelope.extra の oneof case がどれにも該当しない
 
 # checkpointLocation 用 S3 バケット名。バケット名にアカウント ID と env 名が含まれるため
 # リポジトリには持たず .env 経由で受ける (launch.json の envFile で読み込む)。
 CHECKPOINT_BUCKET = os.environ["CHECKPOINT_BUCKET"]
 
 
-# 処理対象スキーマのリスト。各 SchemaConfig の値は CDK の S3TablesStack 内のテーブル名と一致させる。
-# サンプル実装では Event 1 種類のみ。
+# 処理対象スキーマのリスト。Envelope 採用後は 1 件に集約される。
+# Envelope.extra の oneof case を増やしてもこのリストは変更不要 (consumer.py が
+# 動的に extra_type 列を埋める)。
 SCHEMAS: list[SchemaConfig] = [
     SchemaConfig(
-        schema_name="Event",
-        protobuf_full_name="ekscdk.kafka.Event",
+        schema_name="Envelope",
+        protobuf_full_name="ekscdk.kafka.Envelope",
         topic="sample-events-event",
         target_table="s3tablesbucket.events.sample_events_event",
-        checkpoint_location=f"s3a://{CHECKPOINT_BUCKET}/event/",
+        checkpoint_location=f"s3a://{CHECKPOINT_BUCKET}/envelope/",
         max_supported_version=1,
     ),
-    # 新型を追加する場合は以下のように 1 エントリ追加 (例: Notification):
-    # SchemaConfig(
-    #     schema_name="Notification",
-    #     protobuf_full_name="ekscdk.kafka.Notification",
-    #     topic="sample-events-notification",
-    #     target_table="s3tablesbucket.events.sample_events_notification",
-    #     checkpoint_location=f"s3a://{CHECKPOINT_BUCKET}/notification/",
-    #     max_supported_version=1,
-    # ),
 ]

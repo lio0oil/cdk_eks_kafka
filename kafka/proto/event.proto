@@ -1,12 +1,21 @@
 // Kafka topic "sample-events-event" に流れるイベントのスキーマ。
-// テーブル分割 (案 R-1) 構成では、message 名 (Event) から派生して以下が決まる:
-//   - Kafka topic: sample-events-event (consumer の topic_for() が小文字化して付与)
-//   - Iceberg table: s3tablesbucket.events.sample_events_event (consumer の table_for() が生成)
-//   - checkpoint: <CHECKPOINT_BASE>/event/ (consumer の checkpoint_for() が生成)
 //
-// 新しい message を追加する場合は別の .proto を作って `events.desc` を再生成する。
-// consumer 側は events.desc から SCHEMAS を自動展開するので、コード変更不要 (CDK の
-// テーブル定義のみ追加が必要)。
+// 1 レコード = 1 つの Envelope。Envelope は常に Event を含み、oneof extra で
+// 追加情報 (OrderEvent / UserEvent / ...) を 1 つだけ持つ。consumer は Envelope を
+// from_protobuf でデコードし、Event を共通フィールドとして取り出した上で、
+// extra の oneof case を見て「未知 extra (どの case にも該当しない)」を DLQ に振る。
+//
+// Iceberg テーブル sample_events_event には Envelope の bytes をそのまま rawdata
+// 列に保存する (= "raw envelope を保管する" 設計)。後段の分析・再処理は events.desc を
+// 使って Envelope を再 deserialize すれば extra の中身を全部取り出せる。
+//
+// 新しい extra 型を追加する場合:
+//   1. ここに `message FooEvent {}` を追加し、Envelope.extra の oneof に新 case を足す
+//   2. events.desc / event_pb2.py を再生成
+//   3. producer の payload 生成と consumer 側 SCHEMAS の max_supported_version を確認
+// consumer 側は oneof case 名を extra_type 列に流すだけなのでロジック変更は不要。
+// CDK のテーブル定義 (sample_events_event) も extra_type が string カラムである限り
+// 変更不要。
 
 syntax = "proto3";
 
@@ -16,4 +25,22 @@ message Event {
   int64 id = 1;
   string datetime = 2;  // ISO8601 形式の UTC 文字列
   string name = 3;
+}
+
+message OrderEvent {
+  int64 id = 1;
+  string ordername = 2;
+}
+
+message UserEvent {
+  int64 id = 1;
+  string eventname = 2;
+}
+
+message Envelope {
+  Event event = 1;
+  oneof extra {
+    OrderEvent order_event = 2;
+    UserEvent user_event = 3;
+  }
 }

@@ -24,7 +24,7 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x0b\x65vent.proto\x12\x0c\x65kscdk.kafka\"3\n\x05\x45vent\x12\n\n\x02id\x18\x01 \x01(\x03\x12\x10\n\x08\x64\x61tetime\x18\x02 \x01(\t\x12\x0c\n\x04name\x18\x03 \x01(\tb\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x0b\x65vent.proto\x12\x0c\x65kscdk.kafka\"3\n\x05\x45vent\x12\n\n\x02id\x18\x01 \x01(\x03\x12\x10\n\x08\x64\x61tetime\x18\x02 \x01(\t\x12\x0c\n\x04name\x18\x03 \x01(\t\"+\n\nOrderEvent\x12\n\n\x02id\x18\x01 \x01(\x03\x12\x11\n\tordername\x18\x02 \x01(\t\"*\n\tUserEvent\x12\n\n\x02id\x18\x01 \x01(\x03\x12\x11\n\teventname\x18\x02 \x01(\t\"\x97\x01\n\x08\x45nvelope\x12\"\n\x05\x65vent\x18\x01 \x01(\x0b\x32\x13.ekscdk.kafka.Event\x12/\n\x0border_event\x18\x02 \x01(\x0b\x32\x18.ekscdk.kafka.OrderEventH\x00\x12-\n\nuser_event\x18\x03 \x01(\x0b\x32\x17.ekscdk.kafka.UserEventH\x00\x42\x07\n\x05\x65xtrab\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -33,4 +33,10 @@ if not _descriptor._USE_C_DESCRIPTORS:
   DESCRIPTOR._loaded_options = None
   _globals['_EVENT']._serialized_start=29
   _globals['_EVENT']._serialized_end=80
+  _globals['_ORDEREVENT']._serialized_start=82
+  _globals['_ORDEREVENT']._serialized_end=125
+  _globals['_USEREVENT']._serialized_start=127
+  _globals['_USEREVENT']._serialized_end=169
+  _globals['_ENVELOPE']._serialized_start=172
+  _globals['_ENVELOPE']._serialized_end=323
 # @@protoc_insertion_point(module_scope)

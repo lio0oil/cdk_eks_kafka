@@ -9,24 +9,32 @@ from ekscdk.config import ClusterConfig
 class S3TablesStack(Stack):
     """consumer (EMR Spark Structured Streaming) が使う AWS リソース群。
 
-    案 R-1 (テーブル分割 + 並列 streaming query) の構造に従って、
-    schema_name (ProtoBuf message 名) ごとに別 Iceberg テーブルを定義する。
+    Envelope 構造の採用により、Kafka に流れる proto は常に Envelope 1 種類。
+    Envelope は Event を共通フィールドとして持ち、`oneof extra { OrderEvent; UserEvent; ... }`
+    で追加情報を 1 つだけ含む。consumer はこれを 1 テーブルに集約する:
 
-    現状はサンプルとして Event 1 種類のみ:
-      - sample_events_event       (id, datetime, schema_name, rawdata)
+      - sample_events_event       (event_id, event_datetime, extra_type, rawdata)
       - sample_events_dlq         (failed_at, schema_name, rawdata, reason) ※全 schema 共通
 
-    schema_name 列はどの ProtoBuf 型由来かを行ごとに記録する。
-      - event 側: consumer が Kafka header の proto-schema 列をそのまま流す (route=ok のみが
-                  入るため必ず非 NULL → required=True)
-      - DLQ 側:   consumer が Kafka header の proto-schema 列をそのまま流す。
-                  missing_schema 行 (header に proto-schema が無い失敗) は NULL になるため
-                  required=False。NULL の意味は reason 列で識別できる。
+    sample_events_event 列の意図:
+      - event_id / event_datetime: Envelope.event.id / Envelope.event.datetime を flatten
+        (頻出フィルタ条件かつ Iceberg partition の source)
+      - extra_type: Envelope.extra の oneof case 名 (order_event / user_event / ...)
+        を入れる。partition prune と分析時の振り分けに使う
+      - rawdata: Envelope の bytes をそのまま保存。後段の分析や再処理は events.desc を
+        使って再 deserialize する (=「raw envelope を保管する」設計)
 
-    新しい ProtoBuf 型を追加する場合 (例えば Notification):
-      1. kafka/proto/notification.proto を作って events.desc を再生成
-      2. 本ファイルに sample_events_notification の CfnTable 定義を追加
-      3. consumer 側は SCHEMAS が events.desc から自動展開されるのでコード変更不要
+    DLQ 列の意図:
+      - schema_name: Kafka header の proto-schema をそのまま流す。Envelope 採用後は
+        success 行では常に "Envelope" だが、missing_schema 行は NULL、schema_mismatch 行は
+        "Envelope" 以外の値が入るため、required=False のままにする
+      - reason: missing_schema / missing_version / schema_mismatch / unsupported_version /
+        deserialize_error / unknown_extra のいずれか
+
+    新しい extra 型を追加する場合:
+      1. kafka/proto/event.proto の Envelope.extra に新 oneof case を追加し、events.desc /
+         event_pb2.py を再生成
+      2. consumer / producer / 本ファイルの変更は不要 (extra_type 列に新 case 名が増えるだけ)
 
     Glue Data Catalog 統合 (`s3tablescatalog`) はアカウント・リージョン単位で 1 つの
     リソースのため本スタックでは作成しない。EMR Spark から S3TablesCatalog 経由で書き込む
@@ -57,10 +65,10 @@ class S3TablesStack(Stack):
         )
         namespace.add_dependency(table_bucket)
 
-        # sample_events_event テーブル (Event スキーマ専用)。
-        # consumer.py の foreachBatch では from_protobuf 結果の id / datetime と、
-        # header 由来の proto_schema (= schema_name) と rawdata を明示 select して INSERT する。
-        # day(datetime) パーティション・Copy-on-Write モードは前構成から踏襲。
+        # sample_events_event テーブル (Envelope 専用)。
+        # consumer.py の foreachBatch では from_protobuf 結果の payload.event.id /
+        # payload.event.datetime を flatten し、oneof case 名を extra_type に書き込み、
+        # 元の Envelope bytes を rawdata に保存する。
         event_table = s3tables.CfnTable(
             self,
             "SampleEventsEventTable",
@@ -71,26 +79,28 @@ class S3TablesStack(Stack):
             iceberg_metadata=s3tables.CfnTable.IcebergMetadataProperty(
                 iceberg_schema=s3tables.CfnTable.IcebergSchemaProperty(
                     schema_field_list=[
-                        s3tables.CfnTable.SchemaFieldProperty(id=1, name="id", type="long", required=True),
-                        s3tables.CfnTable.SchemaFieldProperty(id=2, name="datetime", type="timestamp", required=True),
-                        s3tables.CfnTable.SchemaFieldProperty(id=3, name="schema_name", type="string", required=True),
+                        s3tables.CfnTable.SchemaFieldProperty(id=1, name="event_id", type="long", required=True),
+                        s3tables.CfnTable.SchemaFieldProperty(
+                            id=2, name="event_datetime", type="timestamp", required=True
+                        ),
+                        s3tables.CfnTable.SchemaFieldProperty(id=3, name="extra_type", type="string", required=True),
                         s3tables.CfnTable.SchemaFieldProperty(id=4, name="rawdata", type="binary", required=True),
                     ]
                 ),
                 iceberg_partition_spec=s3tables.CfnTable.IcebergPartitionSpecProperty(
                     fields=[
-                        # 先頭は低カーディナリティ + 等値フィルタの identity(schema_name)。
-                        # 続けて day(datetime) で時系列 prune。
+                        # 先頭は低カーディナリティ + 等値フィルタの identity(extra_type)。
+                        # 続けて day(event_datetime) で時系列 prune。
                         s3tables.CfnTable.IcebergPartitionFieldProperty(
                             source_id=3,
                             transform="identity",
-                            name="schema_name",
+                            name="extra_type",
                             field_id=1000,
                         ),
                         s3tables.CfnTable.IcebergPartitionFieldProperty(
                             source_id=2,
                             transform="day",
-                            name="datetime_day",
+                            name="event_datetime_day",
                             field_id=1001,
                         ),
                     ],

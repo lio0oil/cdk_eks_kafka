@@ -1,18 +1,15 @@
 """Kafka を PySpark Structured Streaming + Trigger.AvailableNow で取得するバッチ consumer。
 
-案 R-1 (テーブル分割 + 並列 streaming query)。1 つの EMR ジョブ内で SCHEMAS の各エントリに
-対して独立した StreamingQuery を起動し、それぞれが別 topic を subscribe → 別 Iceberg
-テーブルに書き込む構造:
+Envelope 採用後は SCHEMAS が 1 件 (Envelope) のみで、1 ジョブ = 1 StreamingQuery 構成:
 
     1 つの EMR ジョブ (= 1 spark-submit プロセス)
-    ├ SparkSession (1 つ。全 query が共有する Executor プールのオーナー)
-    │   ├ StreamingQuery (SCHEMAS[0])   topic → target_table
-    │   ├ StreamingQuery (SCHEMAS[1])   ... (将来追加された場合)
-    │   └ ...
-    └ Executor プール (全 query で共有)
+    └ SparkSession
+        └ StreamingQuery (Envelope)   topic → sample_events_event
 
-start() は non-blocking なので、SCHEMAS を for ループで回して全部 start() した時点で
-全 query が並列実行中になる。最後に awaitTermination でまとめて完了待ち。
+Envelope は Event を共通フィールドとして持ち、`oneof extra` で追加情報を 1 つだけ含む。
+consumer は extra の oneof case 名を extra_type 列に書き込み、どの case にも該当しない
+(producer が未知 field 番号で送ってきた) 行は DLQ に振る。oneof case の列挙は起動時に
+events.desc から動的に行うため、新しい extra 型を追加しても本ファイルは変更不要。
 
 EMR Serverless 7.13.0 / EMR on EKS 7.13.0 / ローカル PySpark 3.5.6 で動作する。
 """
@@ -20,7 +17,8 @@ EMR Serverless 7.13.0 / EMR on EKS 7.13.0 / ローカル PySpark 3.5.6 で動作
 import argparse
 import logging
 
-from pyspark.sql import DataFrame, SparkSession
+from google.protobuf import descriptor_pb2
+from pyspark.sql import Column, DataFrame, SparkSession
 from pyspark.sql import functions as F
 from pyspark.sql.protobuf.functions import from_protobuf
 from pyspark.sql.streaming.query import StreamingQuery
@@ -33,6 +31,7 @@ from constants import (
     DLQ_REASON_MISSING_SCHEMA,
     DLQ_REASON_MISSING_VERSION,
     DLQ_REASON_SCHEMA_MISMATCH,
+    DLQ_REASON_UNKNOWN_EXTRA,
     DLQ_REASON_UNSUPPORTED_VERSION,
     DLQ_TARGET_TABLE,
     PROTO_SCHEMA_HEADER_KEY,
@@ -40,6 +39,8 @@ from constants import (
     SCHEMAS,
     SchemaConfig,
 )
+
+EXTRA_ONEOF_NAME = "extra"
 
 logger = logging.getLogger("consumer")
 
@@ -53,7 +54,54 @@ def build_spark() -> SparkSession:
     return SparkSession.builder.appName("kafka-batch-consumer").getOrCreate()  # pyright: ignore[reportAttributeAccessIssue]
 
 
-def start_query_for(spark: SparkSession, config: SchemaConfig, starting_offsets: str) -> StreamingQuery:
+def discover_oneof_cases(desc_path: str, message_full_name: str, oneof_name: str) -> list[str]:
+    """events.desc を読んで指定 message の oneof 配下にある field 名を列挙する。
+
+    Envelope.extra に oneof case を追加しても consumer.py のコード変更が不要になるよう、
+    起動時に case 名を動的取得して Spark 側 extra_type 列の計算式を組み立てる。
+    対象の message が見つからない場合は RuntimeError。oneof 自体が無い message は [] を返す。
+    """
+    fds = descriptor_pb2.FileDescriptorSet()
+    with open(desc_path, "rb") as f:
+        fds.ParseFromString(f.read())
+    for fd in fds.file:
+        for msg in fd.message_type:
+            if f"{fd.package}.{msg.name}" != message_full_name:
+                continue
+            oneof_idx = next(
+                (i for i, o in enumerate(msg.oneof_decl) if o.name == oneof_name),
+                None,
+            )
+            if oneof_idx is None:
+                return []
+            return [
+                field.name
+                for field in msg.field
+                if field.HasField("oneof_index") and field.oneof_index == oneof_idx
+            ]
+    raise RuntimeError(f"message '{message_full_name}' not found in {desc_path}")
+
+
+def _build_extra_type_expr(extra_cases: list[str]) -> Column:
+    """payload.<case> のうち非 NULL の最初の case 名を返す Spark 式を組み立てる。
+
+    proto3 oneof は Spark protobuf でそれぞれの case が nullable struct としてフラットに
+    展開され、set されていない case の struct 全体が NULL になる。どの case も NULL の
+    行 (= producer が未知 field 番号で送ってきた行) は extra_type = NULL となり、
+    後段の route 判定で unknown_extra に振り分けられる。
+    """
+    expr: Column = F.lit(None).cast("string")
+    for case in reversed(extra_cases):
+        expr = F.when(F.col(f"payload.{case}").isNotNull(), F.lit(case)).otherwise(expr)
+    return expr
+
+
+def start_query_for(
+    spark: SparkSession,
+    config: SchemaConfig,
+    starting_offsets: str,
+    extra_cases: list[str],
+) -> StreamingQuery:
     """1 つの SchemaConfig に対応する独立した StreamingQuery を起動する (non-blocking)。
 
     プランは「Kafka topic 読み込み → header から proto-schema / proto-version 抽出 →
@@ -86,7 +134,12 @@ def start_query_for(spark: SparkSession, config: SchemaConfig, starting_offsets:
         version_expr.cast("string").cast("int").alias("proto_version"),
     )
 
-    writer = _build_batch_writer(config.target_table, config.schema_name, config.max_supported_version)
+    writer = _build_batch_writer(
+        config.target_table,
+        config.schema_name,
+        config.max_supported_version,
+        extra_cases,
+    )
 
     return (
         parsed.writeStream.queryName(f"consumer-{config.schema_name}")
@@ -98,24 +151,31 @@ def start_query_for(spark: SparkSession, config: SchemaConfig, starting_offsets:
     )
 
 
-def _build_batch_writer(target_table: str, expected_schema_name: str, max_supported_version: int):
+def _build_batch_writer(
+    target_table: str,
+    expected_schema_name: str,
+    max_supported_version: int,
+    extra_cases: list[str],
+):
     """target_table 専用の foreachBatch コールバックを返す。
 
-    各 query が別 target_table を持つので、commit は別の snapshot 履歴に記録され
-    並列実行可能 (Iceberg の楽観ロック競合なし)。DLQ は全 query 共通の 1 テーブル。
+    DLQ は全 query 共通の 1 テーブル。Envelope 採用後は SCHEMAS が 1 件のため
+    target_table も 1 つだが、汎用性のために構造は前構成から踏襲する。
 
-    行の振り分けは次の優先順:
-      1. proto_schema IS NULL      → DLQ (missing_schema)
-      2. proto_version IS NULL     → DLQ (missing_version)
-      3. proto_schema != expected  → DLQ (schema_mismatch)
-      4. proto_version > max       → DLQ (unsupported_version)
-      5. payload IS NULL           → DLQ (deserialize_error)
-      6. 上記以外                  → target_table へ append
+    行の振り分けは次の優先順 (相互排他):
+      1. proto_schema IS NULL                 → DLQ (missing_schema)
+      2. proto_version IS NULL                → DLQ (missing_version)
+      3. proto_schema != expected             → DLQ (schema_mismatch)
+      4. proto_version > max_supported        → DLQ (unsupported_version)
+      5. payload IS NULL                      → DLQ (deserialize_error)
+      6. extra_type IS NULL (どの oneof case にも入らない) → DLQ (unknown_extra)
+      7. 上記以外                             → target_table へ append
     """
 
     def _write(batch_df: DataFrame, batch_id: int) -> None:
-        # 上から順に評価する when/otherwise 連鎖で route 列を計算 (相互排他)。
-        routed = batch_df.withColumn(
+        # まず extra_type 列を計算し、続けて route 列を when/otherwise 連鎖で決める。
+        enriched = batch_df.withColumn("extra_type", _build_extra_type_expr(extra_cases))
+        routed = enriched.withColumn(
             "route",
             F.when(F.col("proto_schema").isNull(), F.lit(DLQ_REASON_MISSING_SCHEMA))
             .when(F.col("proto_version").isNull(), F.lit(DLQ_REASON_MISSING_VERSION))
@@ -128,21 +188,18 @@ def _build_batch_writer(target_table: str, expected_schema_name: str, max_suppor
                 F.lit(DLQ_REASON_UNSUPPORTED_VERSION),
             )
             .when(F.col("payload").isNull(), F.lit(DLQ_REASON_DESERIALIZE_ERROR))
+            .when(F.col("extra_type").isNull(), F.lit(DLQ_REASON_UNKNOWN_EXTRA))
             .otherwise(F.lit("ok")),
         )
         routed.cache()
         try:
-            # 成功行: target_table のスキーマ (id, datetime, schema_name, rawdata) に合わせて
-            # 明示 select する。schema_name は header 由来の proto_schema を流す
-            # (route で OK 判定済みなので NULL にはならず、expected_schema_name と一致する)。
-            valid = (
-                routed.where(F.col("route") == "ok")
-                .select(
-                    F.col("payload.id").alias("id"),
-                    F.to_timestamp(F.col("payload.datetime")).alias("datetime"),
-                    F.col("proto_schema").alias("schema_name"),
-                    F.col("rawdata"),
-                )
+            # 成功行: target_table のスキーマ (event_id, event_datetime, extra_type, rawdata)
+            # に合わせて明示 select する。route で OK 判定済みなので extra_type は非 NULL。
+            valid = routed.where(F.col("route") == "ok").select(
+                F.col("payload.event.id").alias("event_id"),
+                F.to_timestamp(F.col("payload.event.datetime")).alias("event_datetime"),
+                F.col("extra_type"),
+                F.col("rawdata"),
             )
             valid.writeTo(target_table).append()
 
@@ -201,13 +258,15 @@ def main() -> None:
     # start() は non-blocking なので、ループ終了時には全 query が並列実行中になる。
     queries: list[StreamingQuery] = []
     for config in SCHEMAS:
+        extra_cases = discover_oneof_cases(DESCRIPTOR_FILE, config.protobuf_full_name, EXTRA_ONEOF_NAME)
         logger.info(
-            "starting query for %s: topic=%s table=%s",
+            "starting query for %s: topic=%s table=%s extra_cases=%s",
             config.schema_name,
             config.topic,
             config.target_table,
+            extra_cases,
         )
-        q = start_query_for(spark, config, args.starting_offsets)
+        q = start_query_for(spark, config, args.starting_offsets, extra_cases)
         queries.append(q)
 
     logger.info("started %s parallel streaming queries", len(queries))
