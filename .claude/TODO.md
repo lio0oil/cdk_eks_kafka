@@ -67,8 +67,26 @@ dev では暫定値で動くが、本番で同じ値を使ってはいけない�
 
 dev では「external listener (9094) は平文 + 認証なし」で動かす。internal listener の plain/tls と broker 間通信（Strimzi 自動 TLS）はそのまま。
 
-- **本番で external listener に TLS を入れるかどうか決定する**
-  - 現状: external listener は dev 検証のために [manifests/kafka/kafka-cluster.yaml](manifests/kafka/kafka-cluster.yaml) で `tls: false`（NLB → broker まで平文）。本番化で TLS を入れる場合、(a) Kafka 終端（broker 側で TLS、Strimzi 自己署名 CA をクライアントに配布。証明書配布の運用負荷あり、mTLS 認証が使える）か (b) NLB 終端（NLB に ACM 証明書を attach、broker 数 + 1 個の TLS listener を NLB に作る、カスタムドメイン要、mTLS は不可で SASL 認証に限定）かを選ぶ必要がある。Strimzi 標準は (a)、SaaS 流は (b)。
-- **SASL/SCRAM 認証を導入する**
-  - 現状: 全 listener で `authentication` 未指定 = 認証なし（[manifests/kafka/kafka-cluster.yaml](manifests/kafka/kafka-cluster.yaml)）。anonymous Kafka は VPC 境界のみで守られている状態で、複数チーム・複数アプリが使う段階の前に SASL/SCRAM を入れる必要がある。Strimzi の `KafkaUser` CR でユーザー定義、パスワードは Secret に自動生成される。導入時は `listeners[].authentication: type: scram-sha-512` を有効化し、ACL（トピック単位の認可）も同時設計する。SCRAM はチャレンジレスポンスでパスワード自体は通信路に流れないが、偽 broker への接続を防ぐにはサーバー証明書で broker を認証する必要があるため、**TLS 導入とセット**で検討する。
+- **本番で application-layer 暗号化（Kafka TLS）が必要かを決定し、必要なら external listener に TLS を入れる**
+  - 現状: [manifests/kafka/kafka-cluster.yaml](manifests/kafka/kafka-cluster.yaml) の external listener は `tls: false`、NLB listener も [ekscdk/constructs/network.py](ekscdk/constructs/network.py) で `Protocol.TCP`。つまり**クライアント → NLB → broker の全 hop が Kafka プロトコル / アプリ層で平文**。ただし AWS ネットワーク層では PrivateLink 経由（クライアント → VPC Endpoint）と同一 VPC 内（NLB ↔ broker NodePort）の双方が Nitro / VPC backbone により自動暗号化されており、加えて VPC Endpoint Service + PrivateLink で到達可能なクライアントが限定されているため、**「全経路平文のまま」も一つの正解**である（盗聴・改ざんへの防御を AWS ネットワーク境界に委ねる構成）。
+  - 決定事項: 監査・コンプライアンス・契約上の要件として「アプリ層での終端間暗号化」が必須かを先に確定する。
+    - **不要なら**: 現状維持（external listener `tls: false` / NLB listener TCP）。ただし SASL/SCRAM を入れる場合は偽 broker 防止のためサーバー証明書が要るので、その時点で本判断は再評価。
+    - **必要なら**: (a) Kafka 終端（broker 側で TLS、Strimzi 自己署名 CA をクライアントに配布。証明書配布の運用負荷あり、mTLS 認証が使える）か (b) NLB 終端（NLB に ACM 証明書を attach、broker 数 + 1 個の TLS listener を NLB に作る、カスタムドメイン要、mTLS は不可で SASL 認証に限定）かを選ぶ。Strimzi 標準は (a)、SaaS 流は (b)。
+  - 証明書ライフサイクルの運用リスク（採用前に対策を設計に含めること）:
+    - (a) を選ぶ場合: Strimzi の cluster CA / clients CA はデフォルト validity 365 日、`renewalDays`（既定 30 日前）で operator が自動更新するが、**(1) operator が renewal タイミングで停止 / reconcile 失敗していると CA 期限切れで全 TLS 通信停止、(2) 外部クライアントは Secret に新しい cert が入っても起動時の keystore を保持するため明示 reload しないと期限切れを迎える、(3) CA rotate はローリング再起動を誘発する**。Reloader / volume watcher 等で Secret 変更検知 → アプリ reload、operator 停止アラート、CA 期限の監視（`x509_cert_expiry` メトリクス相当）をセットで設計する。
+    - (b) を選ぶ場合: ACM 証明書は AWS が DNS 検証ベースで自動更新するため、クライアント側 reload も CA 配布も不要。期限切れリスクは ACM の DNS 検証レコードが壊れた場合に限られる（DNS レコード変更時に検証用 CNAME を消さない運用ルールが必要）。**この観点では (a) より運用リスクは小さい**。
+- **本番で external listener に必要な認証方式を決定して有効化する**
+  - 現状: 全 listener で `authentication` 未指定 = 認証なし（[manifests/kafka/kafka-cluster.yaml](manifests/kafka/kafka-cluster.yaml)）。external listener に到達できるクライアントは VPC Endpoint Service + PrivateLink で経路限定されているのみで、クライアント個別の認証は無い。複数チーム・複数アプリが使う段階の前に「誰が接続しているか」を識別できる手段を入れる必要がある（個別ユーザー単位の audit / 失効 / ACL のため）。
+  - 選択肢（Strimzi の `listeners[].authentication.type` がサポート、`KafkaUser` CR 連携可能なもの）:
+    - **`tls` (mTLS)**: クライアント証明書による相互認証。`KafkaUser` で証明書発行を自動化、broker 側も Strimzi 自己署名 CA で認証される。**単独でクライアント認証 + broker 認証の両方が成立**するため SASL を別途足さなくて済む。証明書配布 / rotate / 失効の運用コストが主負担。listener 側 `tls: true` 必須。**証明書期限切れ運用リスク**: client cert もデフォルト validity 365 日で Strimzi が Secret を自動更新するが、外部クライアントが Secret 変更を検知して keystore を reload しない限り古い証明書を握ったまま突然認証失敗する。Reloader / volume watcher + アプリ側 reload 機構が前提（詳細は上の TLS 項目の (a) を選んだ場合と同じ運用課題）。
+    - **`scram-sha-512` (SASL/SCRAM-SHA-512)**: ユーザー名 + パスワード方式。`KafkaUser` でユーザー定義、パスワードは Secret に自動生成。チャレンジレスポンスでパスワード自体は通信路に流れない。ただし**サーバー (broker) 認証機能は SCRAM 単体には無い**ため、偽 broker 防止には TLS（サーバー証明書）とのセット必須。証明書配布は不要。
+    - **`scram-sha-256`**: 上記のハッシュ違い。新規採用は基本 512 で良い。
+    - **`oauth` (SASL/OAUTHBEARER)**: OAuth 2.0 / OIDC トークン認証。既存 IdP（Cognito / Auth0 / Keycloak 等）を使いたい場合の選択肢。トークン検証用 JWKS エンドポイント等の追加設定が必要。同じく broker 認証のため TLS 必須。
+    - **`plain` (SASL/PLAIN)**: パスワード平文送信。TLS が無いと素抜けで、TLS ありでも broker 側がパスワード平文を保持しないといけないため SCRAM より弱い。**選ばない**。
+    - **SASL/AWS_MSK_IAM**: MSK 専用。Strimzi on EKS では不可。
+  - 決定軸:
+    - クライアント台数が少なく、証明書ライフサイクル管理（rotate / 失効）の運用を許容できるなら **mTLS 単独**が最もシンプル（TLS 化 + 認証が一枚で済む、cert-manager 等で自動化可能）。
+    - クライアント台数が多い・人/サービス単位で発行/失効を頻繁にやりたい・既存 IdP 連携が要るなら **SCRAM + TLS** または **OAUTHBEARER + TLS**。
+  - 関連: 上の「application-layer 暗号化が必要か」の判断と密結合。mTLS / SCRAM / OAUTHBEARER のいずれを選んでも TLS が前提なので、**「TLS 不要」と決めた場合はこの認証導入も再設計が必要**になる（VPC + PrivateLink の経路限定だけを認可境界として運用し続ける、という方針整理を含む）。
+  - 同時に **ACL（`KafkaUser.spec.authorization`）の設計**: トピック単位の read / write / describe 等を `KafkaUser` で宣言。認証だけ入れて全 topic 全権だと意味が薄いため、認証導入時にトピック命名規約 + ACL ポリシーをセットで決める。
 
