@@ -84,6 +84,29 @@ AWS CDK（Python）で EKS クラスター上に Kafka 基盤を構築するプ�
 
 将来ユーザーワークロードを cluster に追加する場合は `system-nodegroup` に `CriticalAddonsOnly` taint を再導入し、各 Helm values に matching toleration を加える必要がある。
 
+### 可用性と AZ 障害時の影響
+
+3 AZ 構成（`max_azs=3`）前提。各 nodegroup の `desired_size` も 3 AZ に整合させる（[SPEC.md の「system-nodegroup の desired_size は VPC の AZ 数と一致させる」](.claude/SPEC.md) 参照）。Pod Disruption Budget は現状どのワークロードにも未定義（alertmanager 採用時に併せて整備する課題は [.claude/TODO.md](.claude/TODO.md)）。
+
+| Pod | replicas | HA 設定 | 1 AZ 障害時の影響 | 2 AZ 障害時の影響 |
+|---|---|---|---|---|
+| Kafka broker | 3 | podAntiAffinity(host) + topologySpread(zone) | 1 broker 喪失。RF=3 / `min.insync.replicas=2` のため write / read とも継続 | 2 broker 喪失。`min.insync.replicas` 違反で write 不可、read は残 1 replica から可能 |
+| KRaft controller | 3 | 同上 | quorum 2/3 維持、leader 選出可 | quorum 喪失。既存 partition の I/O は継続するがメタデータ更新（topic 作成・broker 追加等）不可 |
+| Prometheus | 2 | topologySpread(zone, ScheduleAnyway) + EBS PVC | 1 replica + 該当 PVC 喪失。残 1 が scrape 継続、Service が LB するため Grafana 表示は劣化のみ。EBS は AZ をまたげないため被災 AZ 復旧まで PVC 再利用不可 | 全 replica 喪失 → メトリクス停止 |
+| Strimzi Operator | 2 | topologySpread(zone, ScheduleAnyway) | 別 AZ なら 1 replica で継続。`ScheduleAnyway` のため同 AZ 偏在の可能性あり（その場合は共倒れ。既存 Kafka I/O は影響なし） | 全停止。Kafka CR の reconcile 停止 |
+| AWS LBC | 2 | topologySpread 宣言なし | AZ 偏在時は共倒れリスク。既存 NLB / TargetGroupBinding は AWS 側で稼働継続、TargetGroupBinding の動的更新のみ停止 | 同左（全停止） |
+| Grafana | 1 | なし | 該当 AZ で Pod 停止 → port-forward 不可。Prometheus 側のメトリクスは保持され、Pod 再スケジュール後に復帰 | 同左 |
+| Prometheus Operator | 1 | なし | ServiceMonitor / PodMonitor の reconcile 停止。既存 scrape 設定は継続稼働 | 同左 |
+| Cruise Control / Entity Operator | 1 | なし | Cruise Control のリバランス、Entity Operator の KafkaTopic / KafkaUser reconcile が停止。既存 Kafka I/O は影響なし | 同左 |
+| node-exporter / fluent-bit (DaemonSet) | 全ノード | DaemonSet | 被災 AZ のノード分のメトリクス・ログが欠落。他 AZ 分は継続 | 同左（範囲が拡大） |
+| NLB / Endpoint Service | AWS マネージド | 3 AZ | AWS 側で他 AZ にルーティング切替 | 残 1 AZ の broker への接続継続 |
+
+**前提と限界**:
+
+- `ScheduleAnyway` の topologySpread は best-effort のため、AZ 偏在は理論上起こり得る。`DoNotSchedule` にすると Node 不足時に Pod Pending → 観測欠損に直結するためトレードオフで現方針を採用（[kube-prometheus-stack-values.yaml](manifests/monitoring/kube-prometheus-stack-values.yaml)）。
+- Grafana / Prometheus Operator / Cruise Control / Entity Operator は単一レプリカで、AZ 障害だけでなく通常のノード退避（更新・スケールイン）でも一時的に停止する。Kafka データプレーンの可用性には影響しない。
+- PDB が無いため、ノードドレイン時には Kafka broker / controller が同時に複数 Pod 退避される可能性がある。Strimzi 側の rolling update は順次更新だが、`kubectl drain` 等の手動操作では保護されない。
+
 ## CDK スタック構成
 
 ### `IamStack`（Stack 0）
