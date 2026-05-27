@@ -200,6 +200,18 @@ def test_kube_prometheus_stack_enables_prometheus_and_operator(template):
     assert "topology.kubernetes.io/zone" in values_literals
 
 
+def test_kube_prometheus_stack_enables_prometheus_pdb(template):
+    """Prometheus は 2 replica HA active-active 構成だが、chart デフォルトは
+    prometheus.podDisruptionBudget.enabled: false で PDB が生成されない。
+    enabled: true だけ渡せば chart デフォルトの minAvailable: 1 がそのまま乗る。
+    """
+    charts = template.find_resources("Custom::AWSCDK-EKS-HelmChart")
+    kps = [res for res in charts.values() if res["Properties"].get("Chart") == "kube-prometheus-stack"]
+    assert len(kps) == 1
+    values_literals = _manifest_literals(kps[0]["Properties"]["Values"])
+    assert '"podDisruptionBudget":{"enabled":true}' in values_literals
+
+
 @pytest.mark.parametrize(
     ("chart", "namespace"),
     [
@@ -232,6 +244,35 @@ def test_helm_chart_has_topology_spread_constraints(template, chart):
     values_literals = _manifest_literals(matched[0]["Properties"]["Values"])
     assert "topologySpreadConstraints" in values_literals
     assert "topology.kubernetes.io/zone" in values_literals
+
+
+def test_aws_lbc_helm_chart_declares_pdb(template):
+    """AWS LBC は replicaCount: 2 だが、chart の podDisruptionBudget デフォルトは空 dict {} で
+    templates/pdb.yaml の `if .Values.podDisruptionBudget` が falsy 評価されて PDB が生成されない。
+    明示的に値を渡して PDB を生成させていることを invariant 化する。
+
+    AWS LBC が完全停止すると MutatingWebhook が止まり、TargetGroupBinding 等の apply が詰まる。
+    Strimzi Operator の minAvailable: 1 と非対称に maxUnavailable: 1 を選ぶ理由は、replicaCount
+    を将来増やしたときに「同時に 1 Pod までしか evict 不可」を維持できるため（minAvailable: 1 だと
+    replicaCount 増えるほど許容喪失が増えてしまう）。
+    """
+    charts = template.find_resources("Custom::AWSCDK-EKS-HelmChart")
+    lbc = [res for res in charts.values() if res["Properties"].get("Chart") == "aws-load-balancer-controller"]
+    assert len(lbc) == 1
+    values_literals = _manifest_literals(lbc[0]["Properties"]["Values"])
+    assert '"podDisruptionBudget":{"maxUnavailable":1}' in values_literals
+
+
+def test_strimzi_operator_helm_chart_enables_pdb(template):
+    """Strimzi Cluster Operator は replicas: 2 の leader-election 構成だが、chart デフォルトでは
+    PodDisruptionBudget が enabled: false になっている。これを明示的に有効化していること。
+    enabled: true だけ渡せば chart デフォルトの minAvailable: 1 がそのまま乗る。
+    """
+    charts = template.find_resources("Custom::AWSCDK-EKS-HelmChart")
+    strimzi = [res for res in charts.values() if res["Properties"].get("Chart") == "strimzi-kafka-operator"]
+    assert len(strimzi) == 1
+    values_literals = _manifest_literals(strimzi[0]["Properties"]["Values"])
+    assert '"podDisruptionBudget":{"enabled":true}' in values_literals
 
 
 def test_target_group_binding_count_matches_broker_count(template):

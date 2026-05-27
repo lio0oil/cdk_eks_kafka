@@ -136,6 +136,13 @@ class AddonsConstruct(Construct):
                         "labelSelector": {"matchLabels": {"name": "strimzi-cluster-operator"}},
                     }
                 ],
+                # chart デフォルトは enabled: false。replicas: 2 の leader-election 構成だが
+                # PDB 無効のままノードドレインが走ると 2 Pod が同時に evict されうるため明示的に有効化する。
+                # 値は chart デフォルトの minAvailable: 1 にそのまま乗る（templates は
+                # minAvailable / maxUnavailable それぞれ truthy なら spec に書く実装、chart デフォルトの
+                # maxUnavailable は空値で falsy 評価される）。1 Pod 残れば leader election で
+                # そちらが leader を引き継ぐため reconcile 速度は落ちるが機能停止には至らない。
+                "podDisruptionBudget": {"enabled": True},
             },
         )
 
@@ -208,6 +215,13 @@ class AddonsConstruct(Construct):
                         "labelSelector": {"matchLabels": {"app.kubernetes.io/name": "aws-load-balancer-controller"}},
                     }
                 ],
+                # chart デフォルトは空 dict {} で、templates/pdb.yaml の `if .Values.podDisruptionBudget`
+                # が falsy 評価されて PDB が生成されない。Strimzi / Prometheus chart と違い
+                # minAvailable のデフォルト値も持たないため、値を明示しないと spec が空になる。
+                # MutatingWebhook が止まると TargetGroupBinding 等の apply が詰まるため、
+                # replicaCount を将来増やしても同時喪失を 1 に固定できる maxUnavailable で表現する
+                # （minAvailable: 1 だと replicaCount 増えるほど許容喪失が増えてしまう）。
+                "podDisruptionBudget": {"maxUnavailable": 1},
             },
             wait=True,
             timeout=Duration.minutes(10),

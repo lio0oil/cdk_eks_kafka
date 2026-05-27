@@ -52,6 +52,12 @@ prometheus:
           resources:
             requests:
               storage: 20Gi
+  # chart デフォルトは enabled: false で、2 replica HA でもノードドレインで両 Pod が
+  # 同時 evict されうる。active-active で片肺残しを保証するため有効化する。
+  # 値は chart デフォルトの minAvailable: 1 にそのまま乗る（templates が omit "enabled" で
+  # 残りを spec にダンプする実装で、maxUnavailable はコメントアウト済みなので値が無い）。
+  podDisruptionBudget:
+    enabled: true
 
 prometheusOperator:
   enabled: true
