@@ -103,6 +103,8 @@ EKS が cluster に最初から組み込む基盤コンポーネント。CDK は
 | **CoreDNS** | cluster 内 DNS。`*.svc.cluster.local` の名前解決 |
 | **kube-proxy** | Service の ClusterIP / NodePort を iptables / IPVS で実現 |
 | **EBS CSI Driver** | StorageClass `gp3` の PVC を EBS Volume として provision / attach。Kafka broker / controller / Prometheus が利用 |
+| **metrics-server** | Pod / Node の CPU・メモリ使用量を Metrics API（`metrics.k8s.io`）で公開。`kubectl top` / HPA の判定ソース（Prometheus には流れない短期スナップショット）。EKS で 2 replica HA |
+| **eks-node-monitoring-agent** | kernel deadlock / readonly filesystem / 各種 EC2 instance status check 異常などノード低レイヤの問題を検出し Node Condition として報告。**Node Auto Repair**（本構成では全 nodegroup で `enable_node_auto_repair=True`）が検出結果を元にノードを自動置換 |
 | **eks-pod-identity-agent** | Pod Identity による IAM 権限注入（EKS が自動インストール、CDK 管理外） |
 
 ## Pod 配置設計
