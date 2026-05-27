@@ -50,6 +50,61 @@ AWS CDK（Python）で EKS クラスター上に Kafka 基盤を構築するプ�
 | 可視化 | self-hosted Grafana（同 chart 同梱）/ datasource は in-cluster Prometheus のみ（chart デフォルト name=`Prometheus`）/ kubectl port-forward でアクセス |
 | ログ | Fluent Bit (chart 0.57.3) → CloudWatch Logs |
 
+## 構成 Pod の役割
+
+cluster 上で常時稼働する Pod を機能ドメイン別に整理する。配置先は「[Pod の配置先](#pod-の配置先)」、HA 設定と AZ 障害時の影響は「[可用性と AZ 障害時の影響](#可用性と-az-障害時の影響)」を参照。
+
+### Kafka データプレーン
+
+| Pod | replicas | 役割 |
+|---|---|---|
+| **Kafka broker** | 3 | produce / consume / replication を処理するデータプレーン本体。各 partition の replica を保持し、leader が write/read を受け付け、follower に複製。EBS PVC（20Gi）にログを永続化 |
+| **KRaft controller** | 3 | Kafka cluster のメタデータ管理。topic / partition / broker 構成、partition leader election、broker 登録、ACL を Raft quorum で合意。broker 障害時は新 leader を選出。produce / consume の経路には**入らない** |
+| **kafka-exporter** | 1 | Kafka 内部メトリクス（partition lag / ISR / topic offset 等）を Prometheus 形式で公開。Prometheus Operator の PodMonitor で scrape |
+
+### Strimzi 管理プレーン
+
+| Pod | replicas | 役割 |
+|---|---|---|
+| **Strimzi Cluster Operator** | 2 | Kafka / KafkaNodePool / KafkaRebalance CR を reconcile して broker・controller の StatefulSet 等を生成。cluster CA / clients CA の**自動ローテーション**（365 日有効、30 日前に更新）も担当 |
+| **Topic Operator**（Entity Operator 同梱） | 1 | KafkaTopic CR を `CreateTopics` RPC に変換して Kafka に反映。topic の作成・削除・config 変更を CR で管理 |
+| **User Operator**（Entity Operator 同梱） | 1 | KafkaUser CR を ACL / SCRAM credentials に変換して Kafka に反映。本構成は plaintext / TLS 認証なしのため実質未使用 |
+| **Cruise Control** | 1 | broker 間の partition 配置を分析し、`KafkaRebalance` CR で**自動リバランス**を実行。broker 追加・削除時の load 均等化に使う。kafka-exporter とは別経路で broker メトリクスを直接収集 |
+
+### 監視 / 可視化（kube-prometheus-stack 同梱）
+
+| Pod | replicas | 役割 |
+|---|---|---|
+| **Prometheus** | 2 | メトリクスの scrape / 保存 / クエリ。2 replica active-active で同じ scrape を独立に走らせる HA 構成。retention 15 日、gp3 PVC 20Gi に時系列保存 |
+| **Prometheus Operator** | 1 | PodMonitor / ServiceMonitor / PrometheusRule CR を reconcile し、Prometheus の scrape config を動的生成。`scrapeConfigSelectorNilUsesHelmValues=false` で全 namespace の CR を拾う |
+| **Grafana** | 1 | ダッシュボード可視化。datasource は in-cluster Prometheus のみ（chart デフォルト name=`Prometheus`）。`kubectl port-forward` でアクセス。本構成では永続化なし（dashboard は ConfigMap 管理） |
+| **kube-state-metrics** | 1 | Kubernetes API オブジェクト（Pod / Node / Deployment 等）の状態を Prometheus 形式メトリクスとして公開 |
+| **node-exporter** | DaemonSet | Node の OS レベルメトリクス（CPU / memory / disk / network）を公開。`tolerations: Exists` で全 nodegroup（system / kafka-broker / kafka-controller）に展開 |
+
+### ロギング
+
+| Pod | replicas | 役割 |
+|---|---|---|
+| **Fluent Bit** | DaemonSet | コンテナログを CloudWatch Logs に転送。全 Node に配置（`tolerations: Exists`）。kube-prometheus-stack とは独立した chart |
+
+### ネットワーク / ロードバランサ
+
+| Pod | replicas | 役割 |
+|---|---|---|
+| **AWS Load Balancer Controller** | 2 | Service / Ingress / TargetGroupBinding CR を AWS の NLB / ALB / TargetGroup に同期。本構成では `TargetGroupBinding` 経由で **Strimzi NodePort Service と固定 ARN の NLB TargetGroup を動的バインド**するために使う |
+
+### EKS マネージドアドオン
+
+EKS が cluster に最初から組み込む基盤コンポーネント。CDK は manifest を持たず、addon バージョン指定のみ管理。
+
+| アドオン | 役割 |
+|---|---|
+| **VPC CNI** | Pod に VPC ネイティブ IP を割り当てるネットワークプラグイン。AWS VPC の subnet / security group と直接統合 |
+| **CoreDNS** | cluster 内 DNS。`*.svc.cluster.local` の名前解決 |
+| **kube-proxy** | Service の ClusterIP / NodePort を iptables / IPVS で実現 |
+| **EBS CSI Driver** | StorageClass `gp3` の PVC を EBS Volume として provision / attach。Kafka broker / controller / Prometheus が利用 |
+| **eks-pod-identity-agent** | Pod Identity による IAM 権限注入（EKS が自動インストール、CDK 管理外） |
+
 ## Pod 配置設計
 
 「**Kafka 用ノードを taint で守り、system 側は taint を打たない**」という非対称な戦略。toleration 未指定の Pod は自然に system に乗り、broker/controller pod は明示的に `DedicatedKafka` taint を tolerate して専用ノードに乗る。
@@ -74,7 +129,7 @@ AWS CDK（Python）で EKS クラスター上に Kafka 基盤を構築するプ�
 | kube-prometheus-stack: kube-state-metrics | system | 同上 |
 | Kafka broker pod | kafka-broker | `DedicatedKafka` toleration + `role=kafka-broker` nodeAffinity |
 | Kafka controller pod | kafka-controller | `DedicatedKafka` toleration + `role=kafka-controller` nodeAffinity |
-| Cruise Control / Entity Operator / kafka-exporter | kafka-broker / kafka-controller | Strimzi が brokerOrController に乗せる |
+| Cruise Control / Entity Operator / kafka-exporter | system | toleration 無し → kafka taint で弾かれ system のみ。control plane 側の役割を broker と同居させない（broker のリソース競合と障害連鎖を回避） |
 | **node-exporter (DaemonSet)** | **全ノード** | `operator: Exists` で全 taint 許容（ノードメトリクス収集に必要） |
 | **fluent-bit (DaemonSet)** | **全ノード** | 同上（全コンテナログ収集に必要） |
 
@@ -83,6 +138,26 @@ AWS CDK（Python）で EKS クラスター上に Kafka 基盤を構築するプ�
 ユーザーワークロードを cluster に乗せない前提のため、`CriticalAddonsOnly` taint で system を守る必要がない。代わりに「system 側 Pod に toleration を一切書かない」だけで、Kafka 用 nodegroup の `DedicatedKafka` taint が排他制御を担う。Helm values から冗長な toleration を排除でき、設定の見通しが良くなる。
 
 将来ユーザーワークロードを cluster に追加する場合は `system-nodegroup` に `CriticalAddonsOnly` taint を再導入し、各 Helm values に matching toleration を加える必要がある。
+
+### Kafka レプリケーション・耐障害性パラメータ
+
+データ冗長性と書き込み整合性は以下のパラメータで決まる。表の値はすべて本構成のデフォルト。
+
+| パラメータ | 値 | 定義場所 | 何を決めるか |
+|---|---|---|---|
+| `broker_count` | 3 | [ekscdk/config.py](ekscdk/config.py) | Kafka broker Pod 数 + NLB listener 数 + `kafka-broker-nodegroup` の desired_size。**スループットと水平スケール**に効く（冗長性は別パラメータが決める） |
+| `default.replication.factor` | 3 | [manifests/kafka/kafka-cluster.yaml](manifests/kafka/kafka-cluster.yaml) | 新規 topic のデフォルト RF。1 partition を何 broker に複製するか |
+| `offsets.topic.replication.factor` | 3 | 同上 | 内部 topic `__consumer_offsets`（Consumer offset 保存）の RF。**cluster 初期化時にのみ反映**、後から変更しづらいため起動時に正しい値を入れておく |
+| `transaction.state.log.replication.factor` | 3 | 同上 | 内部 topic `__transaction_state`（Producer transaction 状態）の RF。本構成は transaction 未使用だが定石として 3 |
+| `min.insync.replicas` | 2 | 同上 | `acks=all` の produce で受け付けに必要な最小 ISR 数。下回ると `NOT_ENOUGH_REPLICAS` で write 失敗 |
+| `rack: topology.kubernetes.io/zone` | 有効 | 同上 | 各 broker の `broker.rack` を AZ 名に設定。controller が replica を **AZ 跨ぎで配置する**ための前提 |
+
+**組み合わせの意味**:
+
+- **RF=3 + rack-aware**: 各 partition の 3 replica が **3 AZ に 1 つずつ**配置される（broker_count が増えても同じ。broker 数が増えると partition 数が分散して並列度が上がるだけ）
+- **min.insync.replicas=2 + RF=3 + acks=all**: 1 broker または 1 AZ 障害までは write 継続、2 障害で `NOT_ENOUGH_REPLICAS` → write 停止
+- **broker_count はスループット軸**: 値を増やしても冗長度は上がらない。冗長度を上げるには RF を増やすが、3 AZ 構成では RF > 3 にすると同 AZ に複数 replica が乗るため AZ 障害耐性は線形には伸びない
+- **3 つの内部 topic の RF を揃える理由**: ユーザー topic だけ RF=3 にしても、`__consumer_offsets` などが SPOF だと Consumer 全停止につながる。`default.replication.factor` と内部 topic 用の 2 つは独立パラメータなので個別に設定する必要がある
 
 ### 可用性と AZ 障害時の影響
 
