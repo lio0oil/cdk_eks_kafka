@@ -57,13 +57,6 @@ spec:
   kafkaExporter:
     topicRegex: ".*"
     groupRegex: ".*"
-    template:
-      pod:
-        tolerations:
-          - key: "DedicatedKafka"
-            operator: "Equal"
-            value: "true"
-            effect: "NoSchedule"
   cruiseControl:
     metricsConfig:
       type: jmxPrometheusExporter
@@ -75,13 +68,6 @@ spec:
       type: inline
       loggers:
         rootLogger.level: WARN
-    template:
-      pod:
-        tolerations:
-          - key: "DedicatedKafka"
-            operator: "Equal"
-            value: "true"
-            effect: "NoSchedule"
   entityOperator:
     topicOperator:
       logging:
@@ -93,10 +79,3 @@ spec:
         type: inline
         loggers:
           rootLogger.level: WARN
-    template:
-      pod:
-        tolerations:
-          - key: "DedicatedKafka"
-            operator: "Equal"
-            value: "true"
-            effect: "NoSchedule"
