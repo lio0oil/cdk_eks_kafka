@@ -4,6 +4,7 @@ from aws_cdk import Duration, Stack
 from aws_cdk import aws_eks_v2 as eks
 from aws_cdk import aws_iam as iam
 from aws_cdk import aws_logs as logs
+from aws_cdk import aws_sns as sns
 from constructs import Construct
 
 from ekscdk.config import ClusterConfig
@@ -19,15 +20,18 @@ class MonitoringConstruct(Construct):
 
     AWS リソース:
       - CloudWatch Log Group（コンテナログ）
+      - SNS Topic（Alertmanager 通知配送先。subscriber は手動 / 別 PR で追加）
 
     Kubernetes リソース（CDK 管理 Helm / manifest）:
-      - kube-prometheus-stack: Prometheus（in-cluster、1 replica、retention=15d、
-        gp3 PVC 20Gi）/ Prometheus Operator / Grafana / kube-state-metrics /
-        node-exporter（Alertmanager のみ無効化）
+      - kube-prometheus-stack: Prometheus（in-cluster、2 replica、retention=15d、
+        gp3 PVC 20Gi）/ Prometheus Operator / Grafana / Alertmanager（3 replica HA、
+        gp3 PVC 1Gi、SNS receiver）/ kube-state-metrics / node-exporter
       - Strimzi 系 PodMonitor 3 件（kafka-resources / cluster-operator / entity-operator）
+      - PrometheusRule: Strimzi 公式起点の Kafka 系ルール / Alertmanager 経路疎通用 smoke
       - Fluent Bit DaemonSet: ログ → CloudWatch Logs
 
     Grafana は chart デフォルトの in-cluster Prometheus datasource をそのまま使う。
+    Alertmanager は Pod Identity 経由で sns:Publish（Topic ARN 限定）を実行する。
     """
 
     def __init__(
@@ -86,14 +90,42 @@ class MonitoringConstruct(Construct):
         )
         grafana_sa.node.add_dependency(namespace)
 
+        # ── Alertmanager 通知配送先 (SNS Topic) ────────────────────────────────
+        # webhook URL / Secrets Manager / ESO を介さず、Pod Identity の sns:Publish
+        # で SNS に直接 publish する設計。subscriber（Email / AWS Chatbot 等）は通知先
+        # 運用が確定してから手動 or 別 PR で追加する（CDK 管理対象外）。
+        alertmanager_topic = sns.Topic(
+            self,
+            "AlertmanagerNotificationTopic",
+            topic_name=f"{config.cluster_name}-alertmanager",
+        )
+        alertmanager_topic.apply_removal_policy(config.log_removal_policy)
+
+        # ── Alertmanager Pod Identity ─────────────────────────────────────────
+        # sns:Publish を Topic ARN 限定で付与（webhook URL 平文管理を回避する根拠）。
+        alertmanager_sa = cluster.add_service_account(
+            "AlertmanagerSa",
+            name="alertmanager",
+            namespace="monitoring",
+            identity_type=eks.IdentityType.POD_IDENTITY,
+        )
+        alertmanager_sa.node.add_dependency(namespace)
+        cast(iam.Role, alertmanager_sa.role).add_to_policy(
+            iam.PolicyStatement(
+                actions=["sns:Publish"],
+                resources=[alertmanager_topic.topic_arn],
+            )
+        )
+
         # ── kube-prometheus-stack（Helm）──────────────────────────────────────
-        # in-cluster Prometheus + Operator + Grafana を chart 同梱で deploy。
-        # Alertmanager は無効化（values 参照）。Grafana datasource は chart デフォルトの
-        # in-cluster Prometheus（name: Prometheus, isDefault: true）をそのまま使う。
+        # in-cluster Prometheus + Operator + Grafana + Alertmanager を chart 同梱で
+        # deploy。Alertmanager は 3 replica HA、receiver は SNS（sigv4）。Grafana
+        # datasource は chart デフォルトの in-cluster Prometheus をそのまま使う。
         kps_values = load_with_subs(
             _DIR,
             "kube-prometheus-stack-values.yaml",
             REGION=region,
+            SNS_TOPIC_ARN=alertmanager_topic.topic_arn,
         )
         kps = cluster.add_helm_chart(
             "KubePrometheusStack",
@@ -106,6 +138,7 @@ class MonitoringConstruct(Construct):
         )
         kps.node.add_dependency(namespace)
         kps.node.add_dependency(grafana_sa)
+        kps.node.add_dependency(alertmanager_sa)
 
         # ── Kafka / Strimzi PodMonitor ─────────────────────────────────────────
         # broker / controller / cruise-control / kafka-exporter を 1 つの PodMonitor で
@@ -146,6 +179,18 @@ class MonitoringConstruct(Construct):
             )
             cm = cluster.add_manifest(cm_id, load(_DIR, f"dashboards/{fname}"))
             cm.node.add_dependency(kps)
+
+        # ── PrometheusRule（Kafka 本番候補 + Alertmanager 経路疎通用 smoke）─────
+        # Prometheus Operator が CRD（PrometheusRule）を提供するため kps 依存。
+        # smoke ルール（prometheus-rules-smoke.yaml）は動作確認専用で、検証完了後に
+        # ファイル / この loop の対応エントリ / テストパラメータを 1 PR で削除する。
+        for fname in (
+            "prometheus-rules-kafka.yaml",
+            "prometheus-rules-smoke.yaml",
+        ):
+            rule_id = "Rule" + fname.removeprefix("prometheus-rules-").removesuffix(".yaml").title().replace("-", "")
+            rule = cluster.add_manifest(rule_id, load(_DIR, fname))
+            rule.node.add_dependency(kps)
 
         # ── Fluent Bit DaemonSet（Helm）───────────────────────────────────────
         fluent_bit = cluster.add_helm_chart(

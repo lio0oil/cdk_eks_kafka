@@ -149,6 +149,7 @@ def test_eks_addon_present(template, addon_name):
         ("kube-system", "aws-load-balancer-controller"),
         ("monitoring", "fluent-bit"),
         ("monitoring", "grafana"),
+        ("monitoring", "alertmanager"),
     ],
 )
 def test_pod_identity_association_exists(template, namespace, service_account):
@@ -198,6 +199,96 @@ def test_kube_prometheus_stack_enables_prometheus_and_operator(template):
     assert '"retention":"15d"' in values_literals
     # AZ 跨ぎの topologySpread が外れると 2 replica が同 AZ に乗りうる
     assert "topology.kubernetes.io/zone" in values_literals
+
+
+def test_alertmanager_sns_topic_exists(template):
+    # 通知配送用 SNS Topic がちょうど 1 つ作られる。subscriber（Email / Chatbot 等）は
+    # 手動 / 別 PR で追加する設計のため、CDK 側は Topic だけを管理する。
+    template.resource_count_is("AWS::SNS::Topic", 1)
+
+
+def test_alertmanager_sa_iam_policy_grants_sns_publish(template):
+    """Alertmanager の Pod Identity SA に紐づく IAM Policy が sns:Publish のみで、
+    Resource が "*" でなく特定 Topic ARN への参照（intrinsic）に絞られていること。
+
+    chart に webhook URL を平文で書かない / Secrets Manager + ESO を介在させない
+    設計の根拠が「IAM 最小権限で sns:Publish だけを Topic ARN に絞る」点に依存する。
+    広い Resource や追加 Action がリグレッションすると設計前提が崩れる。
+    """
+    policies = template.find_resources("AWS::IAM::Policy")
+    matching: list[dict] = []
+    for p in policies.values():
+        for stmt in p["Properties"]["PolicyDocument"]["Statement"]:
+            action = stmt.get("Action")
+            actions = action if isinstance(action, list) else [action]
+            if "sns:Publish" in actions:
+                matching.append(stmt)
+    assert len(matching) == 1, "sns:Publish を持つ Statement がちょうど 1 個ではない"
+    stmt = matching[0]
+    # 単独アクション、または sns:Publish のみのリスト
+    action = stmt.get("Action")
+    assert action in ("sns:Publish", ["sns:Publish"])
+    # Resource は Topic ARN への intrinsic 参照（Ref / Fn::GetAtt 等の dict）であり "*" でない
+    resource = stmt.get("Resource")
+    assert resource != "*"
+    assert isinstance(resource, (dict, list))
+
+
+def test_kube_prometheus_stack_enables_alertmanager(template):
+    """alertmanager が 3 replica HA / AZ 分散 / PDB maxUnavailable: 1 で有効化される。
+
+    enabled: false 時代に書いていた `"alertmanager":{"enabled":false}` リテラルが
+    無いことを assert することで「無効化に戻す」リグレッションも同時に検知する。
+    """
+    charts = template.find_resources("Custom::AWSCDK-EKS-HelmChart")
+    kps = [res for res in charts.values() if res["Properties"].get("Chart") == "kube-prometheus-stack"]
+    assert len(kps) == 1
+    literals = _manifest_literals(kps[0]["Properties"]["Values"])
+    assert '"alertmanager":{"enabled":false' not in literals
+    assert '"alertmanager":{"enabled":true' in literals
+    # 3 replica gossip cluster（標準サイズ）
+    assert '"replicas":3' in literals
+    # AZ 跨ぎの topologySpread が外れると 3 replica が同 AZ に乗りうる
+    assert "topology.kubernetes.io/zone" in literals
+    # PDB は Prometheus と Alertmanager の両方で enabled（chart デフォルト minAvailable: 1）。
+    # 同一リテラルが 2 箇所以上出現することで両方有効を invariant 化する。片方が消えた
+    # リグレッションをここで検知する。
+    assert literals.count('"podDisruptionBudget":{"enabled":true}') >= 2
+
+
+def test_kube_prometheus_stack_alertmanager_uses_sns_receiver(template):
+    """alertmanager.config.receivers[] が sns_configs を使い、sigv4 署名で SNS Publish を行う。
+
+    Topic ARN は intrinsic (Token) として埋まるため文字列リテラルでは現れない。
+    receiver の設定キー名（sns_configs / sigv4）の存在で間接検証する。webhook_configs や
+    slack_configs に差し替わったリグレッションをここで検知する。
+    """
+    charts = template.find_resources("Custom::AWSCDK-EKS-HelmChart")
+    kps = [res for res in charts.values() if res["Properties"].get("Chart") == "kube-prometheus-stack"]
+    assert len(kps) == 1
+    literals = _manifest_literals(kps[0]["Properties"]["Values"])
+    assert "sns_configs" in literals
+    assert "sigv4" in literals
+
+
+@pytest.mark.parametrize(
+    "rule_group_name",
+    ["strimzi-kafka-rules", "alertmanager-smoke-rules"],
+)
+def test_prometheus_rule_manifest_applied(template, rule_group_name):
+    """PrometheusRule CR が apply される（Kafka 系本番候補 + 動作確認用 smoke の 2 系統）。
+
+    smoke ルール（alertmanager-smoke-rules）は動作確認後に削除予定。削除時はこの
+    パラメータと対応 manifest を一緒に消す。
+    """
+    all_k8s = template.find_resources("Custom::AWSCDK-EKS-KubernetesResource")
+    matched = [
+        res
+        for res in all_k8s.values()
+        if '"kind":"PrometheusRule"' in _manifest_literals(res["Properties"]["Manifest"])
+        and f'"name":"{rule_group_name}"' in _manifest_literals(res["Properties"]["Manifest"])
+    ]
+    assert len(matched) == 1, f"PrometheusRule {rule_group_name} が apply されていない"
 
 
 def test_kube_prometheus_stack_enables_prometheus_pdb(template):

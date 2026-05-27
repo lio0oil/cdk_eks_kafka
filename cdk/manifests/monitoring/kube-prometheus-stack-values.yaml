@@ -1,7 +1,7 @@
 # in-cluster Prometheus（StatefulSet）を chart 同梱で動かす構成。
 # scrape は Prometheus Operator + PodMonitor / ServiceMonitor 経由（chart 同梱）。
 # Grafana は同 chart 同梱の in-cluster Prometheus を datasource として直接 query する。
-# Alertmanager は通知要件が出るまで無効化。
+# Alertmanager は 3 replica HA で有効化、通知先は AWS SNS（Pod Identity で sns:Publish）。
 prometheus:
   enabled: true
   # CDK 側で Pod Identity 付き SA を作らない（in-cluster Prometheus は AWS API を
@@ -63,7 +63,93 @@ prometheusOperator:
   enabled: true
 
 alertmanager:
-  enabled: false
+  enabled: true
+  # CDK 側で Pod Identity 紐付き SA を作成するため Helm からは作らない。
+  # sns:Publish を Topic ARN 限定で付与し、SigV4 で SNS に投稿する。
+  serviceAccount:
+    create: false
+    name: alertmanager
+  alertmanagerSpec:
+    # 3 replica gossip cluster（標準サイズ）。AZ 単一障害でも 2 peer 残る。
+    # active-active gossip による通知の de-dup で重複配信を抑える（Prometheus の
+    # active-active 2 replica と組み合わせて経路全体が単一障害耐性を持つ）。
+    replicas: 3
+    # 3 replica を 3 AZ に分散させる。AZ 不整合で Pod が Pending にならないよう
+    # ScheduleAnyway（Prometheus と同じ best-effort 方針）。
+    topologySpreadConstraints:
+      - maxSkew: 1
+        topologyKey: topology.kubernetes.io/zone
+        whenUnsatisfiable: ScheduleAnyway
+        labelSelector:
+          matchLabels:
+            app.kubernetes.io/name: alertmanager
+    # Alertmanager は処理量が小さいため Prometheus 比でかなり軽量。
+    resources:
+      requests:
+        memory: 64Mi
+        cpu: 50m
+      limits:
+        memory: 128Mi
+        cpu: 100m
+    # notification log（同一通知の二重送信防止）と silence 設定の永続化。
+    # Pod 再起動でこれらが消えると、再起動直後に既送通知が再送されたり
+    # 設定済み silence が失効したりして運用ノイズが増えるため、永続ボリュームを必須にする。
+    storage:
+      volumeClaimTemplate:
+        spec:
+          storageClassName: gp3
+          accessModes: [ReadWriteOnce]
+          resources:
+            requests:
+              storage: 1Gi
+  # chart デフォルトは enabled: false で、3 replica あっても PDB が生成されずノードドレインで
+  # 同時 evict されうる。enabled: true だけ渡せば chart デフォルトの minAvailable: 1 に乗る
+  # （Prometheus の PDB と同じ流儀）。templates が omit "enabled" で残りを spec にダンプする
+  # 実装のため maxUnavailable と minAvailable を同時に渡すと K8s API validation で拒否される。
+  podDisruptionBudget:
+    enabled: true
+  # 通知設定（alertmanager.yaml としてレンダリングされ Secret に入る）。
+  # SNS_TOPIC_ARN / REGION は CDK の load_with_subs で synth 時に置換される。
+  config:
+    global:
+      resolve_timeout: 5m
+    route:
+      group_by: ['alertname', 'cluster', 'severity']
+      group_wait: 30s
+      group_interval: 5m
+      repeat_interval: 4h
+      receiver: default-sns
+    receivers:
+      - name: default-sns
+        sns_configs:
+          # sigv4 ブロックで region を指定すると Alertmanager は AWS SDK の
+          # デフォルト認証チェーンを通る。EKS Pod Identity Agent が env var に
+          # 注入する一時クレデンシャル経由で sns:Publish を実行する。
+          - topic_arn: <SNS_TOPIC_ARN>
+            sigv4:
+              region: <REGION>
+      # 将来 Microsoft Teams 通知を Alertmanager から直接呼ぶ場合の雛形（現状未使用）。
+      # 新規導入は Power Automate Workflows ベースの URL を
+      # msteamsv2_configs（Adaptive Card 形式、Alertmanager 0.28+）で使う。
+      # 復活させる前に決める前提:
+      #   (1) Teams 内 Workflows アプリで "Post to a channel when a webhook request is
+      #       received" テンプレートから Workflow URL を発行する
+      #   (2) URL を Secrets Manager に保管し External Secrets Operator で Alertmanager
+      #       Pod に Secret として注入する（この YAML に平文で URL を書かない）
+      #   (3) alertmanagerSpec.secrets で Secret を mount → webhook_url_file で参照
+      #   (4) route 側で severity 別に default-sns と teams を振り分け、接続失敗時の
+      #       retry が他通知をブロックしないよう独立 receiver にする
+      # - name: teams
+      #   msteamsv2_configs:
+      #     - webhook_url_file: /etc/alertmanager/secrets/teams-workflow/url
+      #       send_resolved: true
+    # critical が発火している間、同一対象の warning は抑止する（多重通知の抑制）。
+    inhibit_rules:
+      - source_matchers:
+          - severity = "critical"
+        target_matchers:
+          - severity = "warning"
+        equal: ['alertname', 'cluster']
 
 grafana:
   enabled: true

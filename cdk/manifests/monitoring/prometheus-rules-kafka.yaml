@@ -1,0 +1,60 @@
+# Strimzi 公式 examples/metrics/prometheus-rules.yaml を起点とした Kafka 系アラート。
+# 閾値は dev 観測値から段階的に調整する前提（現状はベース値）。
+apiVersion: monitoring.coreos.com/v1
+kind: PrometheusRule
+metadata:
+  name: strimzi-kafka-rules
+  namespace: monitoring
+  labels:
+    role: alert-rules
+spec:
+  groups:
+    - name: kafka
+      rules:
+        - alert: KafkaBrokerDown
+          expr: kafka_server_kafkaserver_brokerstate != 3
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Kafka broker is not in running state"
+            description: "Broker {{ $labels.kafka_broker_id }} brokerstate={{ $value }} (expected 3) for 5m."
+
+        - alert: KafkaUnderReplicatedPartitions
+          expr: kafka_server_replicamanager_underreplicatedpartitions > 0
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Under-replicated partitions detected"
+            description: "Broker {{ $labels.kafka_broker_id }} has {{ $value }} under-replicated partitions for 10m."
+
+        - alert: KafkaOfflinePartitions
+          expr: kafka_controller_kafkacontroller_offlinepartitionscount > 0
+          for: 10m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Offline partitions detected"
+            description: "{{ $value }} partitions are offline for 10m."
+
+        - alert: KafkaActiveControllerNotOne
+          # KRaft では各 controller が activecontrollercount を 0 または 1 で報告する。
+          # クラスタ全体の合計が常に 1 であるべき（== 1）。0 または 2 以上はクォーラム異常。
+          expr: sum(kafka_controller_kafkacontroller_activecontrollercount) != 1
+          for: 5m
+          labels:
+            severity: critical
+          annotations:
+            summary: "Active controller count is not 1"
+            description: "Kafka cluster has {{ $value }} active controllers across the cluster (expected 1)."
+
+        - alert: KafkaConsumerLagHigh
+          # 全 partition の lag 合計が 1000 を 10m 越え続けたら warning。閾値は要件に応じて再調整。
+          expr: sum by (consumergroup, topic) (kafka_consumergroup_lag) > 1000
+          for: 10m
+          labels:
+            severity: warning
+          annotations:
+            summary: "Consumer group lag is high"
+            description: "Consumer group {{ $labels.consumergroup }} on topic {{ $labels.topic }} has lag {{ $value }}."
