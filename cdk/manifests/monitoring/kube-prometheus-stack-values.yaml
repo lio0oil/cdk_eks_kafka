@@ -119,7 +119,28 @@ alertmanager:
       group_interval: 5m
       repeat_interval: 4h
       receiver: default-sns
+      # Watchdog（常時 firing の dead-man-switch）と InfoInhibitor は通知価値が薄いので
+      # null receiver で破棄する（chart デフォルトの routes が同じ構造を持つが、Helm の
+      # deep merge では map は merge / list は置換のため、receivers を置き換えると
+      # chart デフォルトの routes が孤立して "undefined receiver null" エラーになる。
+      # routes と receivers の両方を user values で明示することで整合させる）。
+      routes:
+        - receiver: 'null'
+          matchers:
+            - alertname =~ "InfoInhibitor|Watchdog"
+        # 経路疎通確認用の smoke は常時 firing 設計。subscribe 完了から初回受信までの
+        # 待ち時間を最短化するため、smoke 専用 route で group_wait と repeat_interval を
+        # 極短に設定する（group_wait: 0s で初回 publish 即時、repeat_interval: 1m で
+        # subscribe 完了後最大 1 分以内に受信できる）。smoke 削除 PR を出すまでに通知が
+        # 数通積もるが、検証用途では許容範囲。smoke ルール削除と同時にこの route も削除。
+        - receiver: default-sns
+          matchers:
+            - alertname = "AlertmanagerSmokeTest"
+          group_wait: 0s
+          repeat_interval: 1m
     receivers:
+      # chart デフォルトの routes が参照する破棄用 receiver。
+      - name: 'null'
       - name: default-sns
         sns_configs:
           # sigv4 ブロックで region を指定すると Alertmanager は AWS SDK の
@@ -128,6 +149,12 @@ alertmanager:
           - topic_arn: <SNS_TOPIC_ARN>
             sigv4:
               region: <REGION>
+            # SNS Subject は 100 文字 + ASCII のみの制約があり、Alertmanager デフォルト
+            # template は CommonLabels を含んで制限を超えやすい（"invalid parameter
+            # Subject" で送信失敗）。chart の tpl 評価と Alertmanager の Go template の
+            # 干渉でテンプレートが壊れる事例もあるため、subject は固定文字列にして
+            # 識別は message body の Alertmanager デフォルト template に任せる。
+            subject: 'Alertmanager Notification'
       # 将来 Microsoft Teams 通知を Alertmanager から直接呼ぶ場合の雛形（現状未使用）。
       # 新規導入は Power Automate Workflows ベースの URL を
       # msteamsv2_configs（Adaptive Card 形式、Alertmanager 0.28+）で使う。
