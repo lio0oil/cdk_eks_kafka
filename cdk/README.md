@@ -81,6 +81,19 @@ cluster 上で常時稼働する Pod を機能ドメイン別に整理する。�
 | **kube-state-metrics** | 1 | Kubernetes API オブジェクト（Pod / Node / Deployment 等）の状態を Prometheus 形式メトリクスとして公開 |
 | **node-exporter** | DaemonSet | Node の OS レベルメトリクス（CPU / memory / disk / network）を公開。`tolerations: Exists` で全 nodegroup（system / kafka-broker / kafka-controller）に展開 |
 
+### アラートルール（PrometheusRule）の出典
+
+評価されるアラートルールは出所が分かれる。chart 同梱ルールは**このリポジトリにファイルが無く**、`helm install` 時に chart からレンダリングされる（バージョンは [`kube-prometheus-stack`](#技術スタック) 84.5.0 に pin）。
+
+| ルール | 管理 | 出典 |
+|---|---|---|
+| chart `defaultRules`（`KubeletTooManyPods` 等の Kubernetes / Node / Prometheus 系） | chart 同梱（リポジトリに無い） | [kube-prometheus-stack `templates/prometheus/rules-1.14/`](https://github.com/prometheus-community/helm-charts/tree/main/charts/kube-prometheus-stack/templates/prometheus/rules-1.14)（`KubeletTooManyPods` は `kubernetes-system-kubelet.yaml`）。上流は [kube-prometheus](https://github.com/prometheus-operator/kube-prometheus) → [kubernetes-mixin](https://github.com/kubernetes-monitoring/kubernetes-mixin)。runbook は https://runbooks.prometheus-operator.dev/ |
+| [`prometheus-rules-kafka.yaml`](manifests/monitoring/prometheus-rules-kafka.yaml) | このリポジトリ（CDK が apply） | [Strimzi 公式 `examples/metrics/prometheus-install/prometheus-rules/`](https://github.com/strimzi/strimzi-kafka-operator/tree/main/examples/metrics/prometheus-install/prometheus-rules)（Kafka 系は `prometheus-kafka-rules.yaml`）を起点に閾値を調整 |
+| [`prometheus-rules-node.yaml`](manifests/monitoring/prometheus-rules-node.yaml) | このリポジトリ（CDK が apply） | chart 84.5.0 の `KubeletTooManyPods` を写し severity を info→warning に変更。chart 側は [`kube-prometheus-stack-values.yaml`](manifests/monitoring/kube-prometheus-stack-values.yaml) の `defaultRules.disabled` で無効化 |
+| [`prometheus-rules-smoke.yaml`](manifests/monitoring/prometheus-rules-smoke.yaml) | このリポジトリ（CDK が apply） | 独自（Prometheus → Alertmanager → SNS の経路疎通確認用。検証後に削除予定） |
+
+chart 同梱ルールの実際の本文は `helm show chart` 系コマンド、またはデプロイ後に `kubectl get prometheusrules -n monitoring -o yaml` で確認できる。
+
 ### ロギング
 
 | Pod | replicas | 役割 |
