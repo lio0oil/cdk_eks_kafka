@@ -3,8 +3,10 @@ from typing import cast
 from aws_cdk import Duration, Stack
 from aws_cdk import aws_eks_v2 as eks
 from aws_cdk import aws_iam as iam
+from aws_cdk import aws_lambda as lambda_
 from aws_cdk import aws_logs as logs
 from aws_cdk import aws_sns as sns
+from aws_cdk import aws_sns_subscriptions as sns_subs
 from constructs import Construct
 
 from ekscdk.config import ClusterConfig
@@ -100,6 +102,35 @@ class MonitoringConstruct(Construct):
             topic_name=f"{config.cluster_name}-alertmanager",
         )
         alertmanager_topic.apply_removal_policy(config.log_removal_policy)
+
+        # ── SNS → Lambda → CloudWatch Logs（テスト環境用の通知本文確認経路）─────
+        # dev では Email/Teams subscriber を用意せず、publish された Alertmanager 通知の
+        # 本文を Lambda が stdout に書き出し、Lambda の Log Group（/aws/lambda/<name>）で
+        # 確認する。stg/prd は実通知先に配送するため作らない（config フラグで分岐）。
+        if config.enable_alertmanager_sns_log_forwarder:
+            forwarder_logs = logs.LogGroup(
+                self,
+                "AlertmanagerSnsLogForwarderLogs",
+                retention=config.log_retention,
+                removal_policy=config.log_removal_policy,
+            )
+            log_forwarder = lambda_.Function(
+                self,
+                "AlertmanagerSnsLogForwarder",
+                runtime=lambda_.Runtime.PYTHON_3_13,
+                handler="index.handler",
+                code=lambda_.Code.from_inline(
+                    "import json\n"
+                    "def handler(event, context):\n"
+                    "    for record in event['Records']:\n"
+                    "        print(json.dumps(record['Sns'], ensure_ascii=False))\n"
+                ),
+                timeout=Duration.seconds(30),
+                log_group=forwarder_logs,
+            )
+            # jsii バインディングでは具象 Function を IFunction パラメータへ渡すと pyright が
+            # 構造的非互換と誤検知するため cast で明示する（fluent_bit_sa.role と同じ流儀）。
+            alertmanager_topic.add_subscription(sns_subs.LambdaSubscription(cast(lambda_.IFunction, log_forwarder)))
 
         # ── Alertmanager Pod Identity ─────────────────────────────────────────
         # sns:Publish を Topic ARN 限定で付与（webhook URL 平文管理を回避する根拠）。

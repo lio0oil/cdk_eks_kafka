@@ -58,6 +58,23 @@ def iam_template(_app_stacks):
     return _app_stacks["iam"]
 
 
+@pytest.fixture(scope="module")
+def dev_template():
+    # env 別の挙動差（SNS log forwarder 等）を検証するため dev config の template を別途合成する。
+    app = core.App()
+    env = core.Environment(account="123456789012", region="ap-northeast-1")
+    _config = ClusterConfig.for_dev()
+    iam_stack = IamStack(
+        app,
+        "IamStackDev",
+        admin_principal=iam.AccountRootPrincipal(),
+        role_name=_config.admin_role_name,
+        env=env,
+    )
+    infra_stack = EksCdkStack(app, "ekscdkDev", admin_role=iam_stack.eks_admin_role, config=_config, env=env)
+    return assertions.Template.from_stack(infra_stack)
+
+
 def test_stack_synthesizes(template):
     assert template is not None
 
@@ -254,6 +271,19 @@ def test_kube_prometheus_stack_enables_alertmanager(template):
     # 同一リテラルが 2 箇所以上出現することで両方有効を invariant 化する。片方が消えた
     # リグレッションをここで検知する。
     assert literals.count('"podDisruptionBudget":{"enabled":true}') >= 2
+
+
+def test_alertmanager_sns_log_forwarder_present_in_dev(dev_template):
+    # dev は Email/Teams を用意せず通知本文を CloudWatch Logs で確認するため、SNS Topic に
+    # Lambda subscriber を付ける（config.enable_alertmanager_sns_log_forwarder=True）。
+    dev_template.has_resource_properties("AWS::SNS::Subscription", {"Protocol": "lambda"})
+
+
+def test_alertmanager_sns_log_forwarder_absent_in_prd(template):
+    # prd は実通知先（Email/Teams 等）に配送するため検証用 Lambda subscriber を作らない。
+    subscriptions = template.find_resources("AWS::SNS::Subscription")
+    lambda_subs = [s for s in subscriptions.values() if s["Properties"].get("Protocol") == "lambda"]
+    assert lambda_subs == []
 
 
 def test_kube_prometheus_stack_alertmanager_uses_sns_receiver(template):

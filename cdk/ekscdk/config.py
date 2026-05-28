@@ -85,6 +85,10 @@ class ClusterConfig:
     # dev は False（コスト削減、監査要件なし）、stg/prd は True（インシデント調査・監査用）
     # 3 種類の粒度を分ける運用価値が薄いためまとめて on/off する
     enable_control_plane_logs: bool
+    # Alertmanager の SNS Topic に Lambda subscriber を付け、通知本文を CloudWatch Logs に
+    # 出力するか。dev=True（Email/Teams を用意せず CloudWatch Logs で通知内容を検証する
+    # ためのテスト用経路）、stg/prd=False（実通知先に配送するため検証用 Lambda は不要）。
+    enable_alertmanager_sns_log_forwarder: bool
     # S3 Tables の table-bucket 名 (アカウント内ユニーク・3-63 文字 lowercase/numbers/hyphens)。
     # consumer (kafka/consumer) の Iceberg 書き込み先。
     s3_table_bucket_name: str
@@ -140,6 +144,7 @@ class ClusterConfig:
             deletion_protection=False,
             enable_vpc_flow_logs=False,
             enable_control_plane_logs=False,
+            enable_alertmanager_sns_log_forwarder=True,
             s3_table_bucket_name="kafka-events-dev",
             s3_table_bucket_removal_policy=RemovalPolicy.DESTROY,
             s3_consumer_checkpoint_suffix="dev",
@@ -178,6 +183,7 @@ class ClusterConfig:
             deletion_protection=True,
             enable_vpc_flow_logs=True,
             enable_control_plane_logs=True,
+            enable_alertmanager_sns_log_forwarder=False,
             s3_table_bucket_name="kafka-events-stg",
             s3_table_bucket_removal_policy=RemovalPolicy.RETAIN,
             s3_consumer_checkpoint_suffix="stg",
@@ -216,6 +222,7 @@ class ClusterConfig:
             deletion_protection=True,
             enable_vpc_flow_logs=True,
             enable_control_plane_logs=True,
+            enable_alertmanager_sns_log_forwarder=False,
             s3_table_bucket_name="kafka-events",
             s3_table_bucket_removal_policy=RemovalPolicy.RETAIN,
             s3_consumer_checkpoint_suffix="prd",
