@@ -2,6 +2,16 @@
 # scrape は Prometheus Operator + PodMonitor / ServiceMonitor 経由（chart 同梱）。
 # Grafana は同 chart 同梱の in-cluster Prometheus を datasource として直接 query する。
 # Alertmanager は 3 replica HA で有効化、通知先は AWS SNS（Pod Identity で sns:Publish）。
+
+# chart 同梱の KubeletTooManyPods は severity: info 固定で、chart には個別ルールの severity を
+# 上書きする値が無い（defaultRules.disabled で無効化のみ可能）。Cluster Autoscaler / Karpenter を
+# 持たず nodegroup が固定サイズの本環境では Pod capacity 到達がスケールアウトで自動解消されず
+# 新規 Pod が Pending に固定されるため、ここで無効化して prometheus-rules-node.yaml 側で
+# severity: warning として再定義する。
+defaultRules:
+  disabled:
+    KubeletTooManyPods: true
+
 prometheus:
   enabled: true
   # CDK 側で Pod Identity 付き SA を作らない（in-cluster Prometheus は AWS API を

@@ -217,6 +217,7 @@ class MonitoringConstruct(Construct):
         # ファイル / この loop の対応エントリ / テストパラメータを 1 PR で削除する。
         for fname in (
             "prometheus-rules-kafka.yaml",
+            "prometheus-rules-node.yaml",
             "prometheus-rules-smoke.yaml",
         ):
             rule_id = "Rule" + fname.removeprefix("prometheus-rules-").removesuffix(".yaml").title().replace("-", "")

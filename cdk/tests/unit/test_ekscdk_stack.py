@@ -284,6 +284,31 @@ def test_dev_system_nodegroup_uses_larger_instance(dev_template):
     )
 
 
+def test_kube_prometheus_stack_disables_default_kubelet_too_many_pods(template):
+    # chart 同梱の KubeletTooManyPods は severity: info 固定で個別上書き手段が無いため、
+    # defaultRules.disabled で無効化して prometheus-rules-node.yaml 側で warning 再定義する。
+    charts = template.find_resources("Custom::AWSCDK-EKS-HelmChart")
+    kps = [res for res in charts.values() if res["Properties"].get("Chart") == "kube-prometheus-stack"]
+    assert len(kps) == 1
+    literals = _manifest_literals(kps[0]["Properties"]["Values"])
+    assert '"disabled":{"KubeletTooManyPods":true}' in literals
+
+
+def test_node_capacity_rule_overrides_kubelet_too_many_pods_as_warning(template):
+    # 無効化した chart default を写し、severity を info -> warning に上げたルールが apply される。
+    # autoscaler が無い本環境では Pod capacity 到達が即 Pending 固定に直結するため info では弱い。
+    all_k8s = template.find_resources("Custom::AWSCDK-EKS-KubernetesResource")
+    matched = [
+        res
+        for res in all_k8s.values()
+        if '"name":"node-capacity-rules"' in _manifest_literals(res["Properties"]["Manifest"])
+    ]
+    assert len(matched) == 1
+    literals = _manifest_literals(matched[0]["Properties"]["Manifest"])
+    assert '"alert":"KubeletTooManyPods"' in literals
+    assert '"severity":"warning"' in literals
+
+
 def test_alertmanager_sns_log_forwarder_present_in_dev(dev_template):
     # dev は Email/Teams を用意せず通知本文を CloudWatch Logs で確認するため、SNS Topic に
     # Lambda subscriber を付ける（config.enable_alertmanager_sns_log_forwarder=True）。
@@ -314,7 +339,7 @@ def test_kube_prometheus_stack_alertmanager_uses_sns_receiver(template):
 
 @pytest.mark.parametrize(
     "rule_group_name",
-    ["strimzi-kafka-rules", "alertmanager-smoke-rules"],
+    ["strimzi-kafka-rules", "alertmanager-smoke-rules", "node-capacity-rules"],
 )
 def test_prometheus_rule_manifest_applied(template, rule_group_name):
     """PrometheusRule CR が apply される（Kafka 系本番候補 + 動作確認用 smoke の 2 系統）。
