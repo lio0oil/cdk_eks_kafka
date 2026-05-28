@@ -113,10 +113,14 @@ class ClusterConfig:
             cluster_name=cluster_name,
             admin_role_name=f"eks-cluster-admin-{cluster_name}",
             nat_gateways=1,
-            # dev はテスト用途のためコスト最適化（Graviton2 burstable t4g）
-            # system は監視 / Operator / アドオンのみで実使用 ~1.5GB/ノード のため
-            # t4g.medium (2vCPU/4GB) で十分（allocatable 3.2GB に対し約 50% 余裕）
-            system_instance_type="t4g.medium",
+            # dev はテスト用途のためコスト最適化（Graviton2 burstable t4g）。
+            # ボトルネックは memory ではなく pod 数: system には監視 HA（prometheus×2 /
+            # alertmanager×3 / grafana / kube-state-metrics / operator）+ Strimzi operator 群
+            # + 全ノード共通 DaemonSet が乗り steady ~12-13 pod/node。Cluster Autoscaler /
+            # Karpenter が無く nodegroup が固定サイズのため、3 ノード中 1 台喪失で pod が残り
+            # 2 ノードに寄ると max-pods 17 の t4g.medium では収まらず Pending が発生する。
+            # max-pods 35 の t4g.large にして 1 ノード喪失時の集中に耐える headroom を確保する。
+            system_instance_type="t4g.large",
             system_min_size=2,
             system_max_size=4,
             system_desired_size=3,

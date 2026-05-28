@@ -273,6 +273,17 @@ def test_kube_prometheus_stack_enables_alertmanager(template):
     assert literals.count('"podDisruptionBudget":{"enabled":true}') >= 2
 
 
+def test_dev_system_nodegroup_uses_larger_instance(dev_template):
+    # system は監視 HA（prometheus×2 / alertmanager×3 / grafana / ...）+ Strimzi operator 群
+    # + 全ノード共通 DaemonSet で steady ~12-13 pod/node。Cluster Autoscaler / Karpenter が
+    # 無く managed nodegroup が固定サイズのため、3 ノード中 1 台喪失で pod が残り 2 ノードに
+    # 寄ると max-pods 17 の t4g.medium では収まらない。max-pods 35 の t4g.large で耐える。
+    dev_template.has_resource_properties(
+        "AWS::EKS::Nodegroup",
+        {"NodegroupName": "system-nodegroup", "InstanceTypes": ["t4g.large"]},
+    )
+
+
 def test_alertmanager_sns_log_forwarder_present_in_dev(dev_template):
     # dev は Email/Teams を用意せず通知本文を CloudWatch Logs で確認するため、SNS Topic に
     # Lambda subscriber を付ける（config.enable_alertmanager_sns_log_forwarder=True）。
