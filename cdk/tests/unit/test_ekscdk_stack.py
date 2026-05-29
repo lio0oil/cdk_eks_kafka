@@ -294,6 +294,19 @@ def test_kube_prometheus_stack_disables_default_kubelet_too_many_pods(template):
     assert '"disabled":{"KubeletTooManyPods":true}' in literals
 
 
+def test_kube_prometheus_stack_disables_managed_control_plane_components(template):
+    # EKS のコントロールプレーン（kube-controller-manager / kube-scheduler）は AWS マネージドで
+    # 外部 scrape 不可。chart デフォルトの enabled: true のままだと到達不能な ServiceMonitor が残り、
+    # それに gate された KubeControllerManagerDown / KubeSchedulerDown が常時 firing する。
+    # component ごと無効化することで ServiceMonitor とデフォルトアラートルールの両方を消す。
+    charts = template.find_resources("Custom::AWSCDK-EKS-HelmChart")
+    kps = [res for res in charts.values() if res["Properties"].get("Chart") == "kube-prometheus-stack"]
+    assert len(kps) == 1
+    literals = _manifest_literals(kps[0]["Properties"]["Values"])
+    assert '"kubeControllerManager":{"enabled":false}' in literals
+    assert '"kubeScheduler":{"enabled":false}' in literals
+
+
 def test_node_capacity_rule_overrides_kubelet_too_many_pods_as_warning(template):
     # 無効化した chart default を写し、severity を info -> warning に上げたルールが apply される。
     # autoscaler が無い本環境では Pod capacity 到達が即 Pending 固定に直結するため info では弱い。

@@ -12,6 +12,18 @@ defaultRules:
   disabled:
     KubeletTooManyPods: true
 
+# EKS のコントロールプレーンは AWS マネージドで kube-controller-manager / kube-scheduler を
+# 外部から scrape できない。chart デフォルトの enabled: true のままだと到達不能な ServiceMonitor が
+# 作られ、それに gate された KubeControllerManagerDown / KubeSchedulerDown が常時 firing する
+# （up{job=...} == 1 が出ないため absent() 型ルールが発火）。component ごと無効化すると
+# ServiceMonitor とデフォルトアラートルールの両方が消える。kube-proxy は EKS でも scrape 可能なため
+# 残す。etcd は同じく scrape 不可だが etcd 系ルールは値依存型で発火しておらず、消す効果は
+# Targets 画面の dead ターゲット掃除のみのため現状は据え置く。
+kubeControllerManager:
+  enabled: false
+kubeScheduler:
+  enabled: false
+
 prometheus:
   enabled: true
   # CDK 側で Pod Identity 付き SA を作らない（in-cluster Prometheus は AWS API を
