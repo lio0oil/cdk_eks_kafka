@@ -99,12 +99,12 @@ class ClusterConfig:
     # 実名は `kafka-consumer-checkpoint-{account}-{suffix}` (アカウント+環境でグローバル衝突を回避)。
     s3_consumer_checkpoint_suffix: str
     # external-snapshotter のリリースタグ。
-    # manifests/snapshotter/{crds.yaml, controller.yaml} は以下で再生成する:
+    # snapshot-controller / VolumeSnapshotClass は未導入（EBS CSI の csi-snapshotter が
+    # 要求する CRD だけを apply する。実バックアップは AWS Backup の Backup Plan）。
+    # CRD のみ以下で再生成する:
     #   VER=v8.5.0
     #   BASE=https://github.com/kubernetes-csi/external-snapshotter
     #   kubectl kustomize "$BASE/client/config/crd?ref=$VER" > manifests/snapshotter/crds.yaml
-    #   kubectl kustomize "$BASE/deploy/kubernetes/snapshot-controller?ref=$VER" \
-    #     > manifests/snapshotter/controller.yaml
     external_snapshotter_version: str
 
     @classmethod
