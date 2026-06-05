@@ -9,32 +9,38 @@ from ekscdk.config import ClusterConfig
 class S3TablesStack(Stack):
     """consumer (EMR Spark Structured Streaming) が使う AWS リソース群。
 
-    Envelope 構造の採用により、Kafka に流れる proto は常に Envelope 1 種類。
-    Envelope は Event を共通フィールドとして持ち、`oneof extra { OrderEvent; UserEvent; ... }`
-    で追加情報を 1 つだけ含む。consumer はこれを 1 テーブルに集約する:
+    1 つの topic に構造の異なる複数の ProtoBuf 定義が相乗りで流れる:
+      - Envelope (event.proto): Event を共通フィールドとして持ち、
+        `oneof extra { OrderEvent; UserEvent; ... }` で追加情報を 1 つだけ含む
+      - Metric (metric.proto): Envelope とは別構造のフラットな型
+    consumer は Kafka header の proto-schema で型を識別し、各型の固有フィールドを
+    event_id / event_datetime / extra_type の共通カラムへ写像して 1 テーブルに集約する。
+    全 proto 定義がこの 3 カラムに収まる限り、定義を増やしても本スタックの変更は不要:
 
       - sample_events_event       (event_id, event_datetime, extra_type, rawdata)
       - sample_events_dlq         (failed_at, schema_name, rawdata, reason) ※全 schema 共通
 
     sample_events_event 列の意図:
-      - event_id / event_datetime: Envelope.event.id / Envelope.event.datetime を flatten
+      - event_id / event_datetime: 各 proto 定義の id / datetime 相当フィールドを flatten
         (頻出フィルタ条件かつ Iceberg partition の source)
-      - extra_type: Envelope.extra の oneof case 名 (order_event / user_event / ...)
-        を入れる。partition prune と分析時の振り分けに使う
-      - rawdata: Envelope の bytes をそのまま保存。後段の分析や再処理は events.desc を
-        使って再 deserialize する (=「raw envelope を保管する」設計)
+      - extra_type: 行の種別を入れる。Envelope は extra の oneof case 名
+        (order_event / user_event / ...)、Metric は kind フィールド (cpu / memory / ...)。
+        partition prune と分析時の振り分けに使う
+      - rawdata: 元メッセージの bytes をそのまま保存。後段の分析や再処理は events.desc を
+        使って再 deserialize する (=「raw を保管する」設計)
 
     DLQ 列の意図:
-      - schema_name: Kafka header の proto-schema をそのまま流す。Envelope 採用後は
-        success 行では常に "Envelope" だが、missing_schema 行は NULL、schema_mismatch 行は
-        "Envelope" 以外の値が入るため、required=False のままにする
+      - schema_name: Kafka header の proto-schema をそのまま流す。success 行では
+        "Envelope" / "Metric" 等、missing_schema 行は NULL、schema_mismatch 行は
+        既知 schema 以外の値が入るため、required=False のままにする
       - reason: missing_schema / missing_version / schema_mismatch / unsupported_version /
         deserialize_error / unknown_extra のいずれか
 
-    新しい extra 型を追加する場合:
-      1. kafka/proto/event.proto の Envelope.extra に新 oneof case を追加し、events.desc /
-         event_pb2.py を再生成
-      2. consumer / producer / 本ファイルの変更は不要 (extra_type 列に新 case 名が増えるだけ)
+    新しい proto 定義を増やす場合:
+      1. kafka/proto/ の .proto を編集／追加し、events.desc / *_pb2.py を再生成
+      2. producer / consumer (constants.py の TopicConfig.variants) に定義を足す
+      3. id / datetime / 種別が event_id / event_datetime / extra_type に収まる限り
+         本ファイル (CDK) の変更は不要
 
     Glue Data Catalog 統合 (`s3tablescatalog`) はアカウント・リージョン単位で 1 つの
     リソースのため本スタックでは作成しない。EMR Spark から S3TablesCatalog 経由で書き込む

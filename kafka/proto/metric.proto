@@ -1,0 +1,26 @@
+// Kafka topic "sample-events-event" に Envelope (event.proto) と相乗りで流れる、
+// 構造の異なる 2 つ目の ProtoBuf 定義。
+//
+// Envelope のような「Event ネスト + oneof extra」は持たず、1 メッセージがフラットに
+// id / 発生時刻 / 種別 と任意の計測値を持つ。consumer は Kafka header の proto-schema
+// ("Metric") でこの型を識別し、metric_id / observed_at / kind を Envelope と同じ
+// event_id / event_datetime / extra_type カラムへ写像して同一テーブル sample_events_event
+// に書く。元の bytes は rawdata 列にそのまま保存し、host / value など flatten しない
+// フィールドは後段で events.desc を使って再 deserialize すれば取り出せる
+// (= "raw を保管する" 設計、Envelope と同じ)。
+//
+// この型を扱うために consumer は proto-schema header で from_protobuf を出し分ける。
+// event.proto と同じ package に置くため、events.desc は両ファイルを 1 つに束ねて再生成する
+// (kafka/proto/README.md 参照)。
+
+syntax = "proto3";
+
+package ekscdk.kafka;
+
+message Metric {
+  int64 metric_id = 1;     // -> event_id
+  string observed_at = 2;  // ISO8601 形式の UTC 文字列 -> event_datetime
+  string kind = 3;         // -> extra_type。低カーディナリティの種別文字列 (partition source)
+  string host = 4;         // flatten せず rawdata に保存
+  double value = 5;        // flatten せず rawdata に保存
+}

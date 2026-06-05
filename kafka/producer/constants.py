@@ -4,8 +4,9 @@ from collections.abc import Callable
 from dataclasses import dataclass
 from datetime import UTC, datetime
 
-# kafka/producer/event_pb2.py は kafka/proto/event.proto から生成した Python クラス。
+# kafka/producer/event_pb2.py / metric_pb2.py は kafka/proto/*.proto から生成した Python クラス。
 from event_pb2 import Envelope, OrderEvent, UserEvent  # noqa: E402  # pyright: ignore[reportAttributeAccessIssue]
+from metric_pb2 import Metric  # noqa: E402  # pyright: ignore[reportAttributeAccessIssue]
 
 # Kafka bootstrap 接続先。実環境では NLB / VPC Endpoint Service の DNS に置き換える。
 # 例: "kafka-bootstrap.example.internal:9094"
@@ -54,14 +55,39 @@ def _make_envelope_payload(index: int) -> bytes:
     return envelope.SerializeToString()
 
 
-# 送信対象トピックのリスト。Envelope 採用後は 1 topic に集約される。
-# 新しい extra 型を追加する場合は event.proto の Envelope.extra に oneof case を増やし、
-# _make_envelope_payload の振り分けロジックを拡張する (PRODUCERS は触らない)。
+def _make_metric_payload(index: int) -> bytes:
+    """Metric を 1 つ作って serialize する。
+
+    Metric は Envelope (event.proto) とは別構造のフラットな proto (metric.proto)。
+    同じ topic に Envelope と相乗りで流す。consumer は Kafka header の proto-schema
+    ("Metric") でこの型を識別し、metric_id / observed_at / kind を Envelope と同じ
+    event_id / event_datetime / extra_type カラムへ写像する。kind は extra_type に
+    入る低カーディナリティの種別文字列。
+    """
+    return Metric(
+        metric_id=index,
+        observed_at=datetime.now(UTC).isoformat(),
+        kind="cpu" if index % 2 == 0 else "memory",
+        host=f"host-{index % 3}",
+        value=float(index),
+    ).SerializeToString()
+
+
+# 送信対象のリスト。1 つの topic "sample-events-event" に構造の異なる 2 つの ProtoBuf
+# 定義 (Envelope / Metric) を相乗りで流すサンプル。各 iteration で両方を produce し、
+# Kafka header の proto-schema で型を伝える。consumer は header を見て from_protobuf を
+# 出し分け、同一テーブル sample_events_event に書く。
 PRODUCERS: list[ProducerConfig] = [
     ProducerConfig(
         topic="sample-events-event",
         make_payload=_make_envelope_payload,
         schema_name="Envelope",
+        schema_version=1,
+    ),
+    ProducerConfig(
+        topic="sample-events-event",
+        make_payload=_make_metric_payload,
+        schema_name="Metric",
         schema_version=1,
     ),
 ]
