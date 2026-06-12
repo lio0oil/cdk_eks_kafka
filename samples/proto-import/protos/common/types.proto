@@ -1,0 +1,18 @@
+// import される側。共通の型をまとめたファイル。
+syntax = "proto3";
+
+package sample.common;
+
+import "google/protobuf/timestamp.proto";  // protoc 同梱の well-known type
+
+enum Severity {
+  SEVERITY_UNSPECIFIED = 0;
+  INFO = 1;
+  WARN = 2;
+  ERROR = 3;
+}
+
+message Metadata {
+  string source = 1;
+  google.protobuf.Timestamp created_at = 2;
+}

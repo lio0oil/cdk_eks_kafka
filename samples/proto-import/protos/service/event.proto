@@ -1,0 +1,13 @@
+// import する側。パスは -I で指定するルート (protos/) からの相対パスで書く。
+syntax = "proto3";
+
+package sample.service;
+
+import "common/types.proto";
+
+message SampleEvent {
+  int64 id = 1;
+  string name = 2;
+  sample.common.Metadata metadata = 3;  // 参照は「パッケージ名.型名」
+  sample.common.Severity severity = 4;
+}
