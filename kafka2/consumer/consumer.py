@@ -33,7 +33,9 @@ from constants import (
     DESCRIPTOR_FILE,
     DLQ_OUTPUT_PATH,
     DLQ_REASON_DESERIALIZE_ERROR,
+    DLQ_REASON_ZLIB_ERROR,
     MIN_PARTITIONS,
+    OUTPUT_BUCKET,
     OUTPUT_PATH,
     PROTOBUF_FULL_NAME,
     TOPIC,
@@ -41,12 +43,19 @@ from constants import (
 
 logger = logging.getLogger("consumer")
 
+# _write_valid / _write_dlq が "Failed to update S3. ..." で書き込み失敗を既にログ済みか
+# どうかを main() が判定するためのフラグ。同じ失敗を query.exception() 経由で二重に
+# ログしないようにするためだけに使う (S3 書き込み以外の失敗ではこのフラグは立たないため
+# main() 側で通常通り query.exception() の内容を出力する)。
+_s3_write_failed = False
+
 
 def _zlib_decompress(data: bytes | None) -> bytes | None:
     """producer が zlib 圧縮した value を展開する。
 
-    壊れたデータ (zlib 展開できない) は None を返し、from_protobuf(None, ...) が
-    payload=null を返す既存の PERMISSIVE 経路に乗せて deserialize_error 行きにする。
+    壊れたデータ (zlib 展開できない) は None を返す。呼び出し側 (_write_batch) が
+    decompressed IS NULL で判定し、zlib_decompress_error として DLQ 行きにする
+    (from_protobuf のデコード失敗である deserialize_error とは別の reason に分ける)。
     """
     if data is None:
         return None
@@ -81,15 +90,15 @@ def start_query(spark: SparkSession, starting_offsets: str) -> StreamingQuery:
     )
 
     # producer が zlib 圧縮しているため、from_protobuf に渡す前に展開する。
+    # decompressed 列を残しておき、zlib 展開失敗 (decompressed IS NULL) と
+    # protobuf デコード失敗 (payload IS NULL) を _write_batch で区別できるようにする。
     # PERMISSIVE モードでデシリアライズ失敗時は payload が null になる (DLQ 行き)。
     parsed = raw.select(
         F.col("value").alias("rawdata"),
-        from_protobuf(
-            zlib_decompress(F.col("value")),
-            PROTOBUF_FULL_NAME,
-            DESCRIPTOR_FILE,
-            {"mode": "PERMISSIVE"},
-        ).alias("payload"),
+        zlib_decompress(F.col("value")).alias("decompressed"),
+    ).withColumn(
+        "payload",
+        from_protobuf(F.col("decompressed"), PROTOBUF_FULL_NAME, DESCRIPTOR_FILE, {"mode": "PERMISSIVE"}),
     )
 
     return (
@@ -119,6 +128,11 @@ def _write_valid(valid: DataFrame) -> None:
     だけファイルを書いてしまう (タスク数 × classification 種類数で最悪ケースが増大する)。
     classification で repartition すれば、同じ classification の行が同じタスクに集約され、
     書き込みファイル数は classification の種類数 (現状 60〜100 程度) 前後に収まる。
+
+    classification 毎に個別の write() として呼ぶ (1 回の write にまとめない)。driver 側で
+    ループするため、どの classification の書き込みで失敗したかを確実にログへ残せる
+    (executor 側で実行される mapPartitions 等に頼ると、ログ設定が引き継がれず出力されない
+    上に、DataFrame の再評価で書き込みが重複するリスクがあるため採用しない)。
     """
     exploded = valid.select(
         F.current_timestamp().alias("processed_at"),
@@ -136,33 +150,76 @@ def _write_valid(valid: DataFrame) -> None:
         F.date_format("processed_at", "MM").alias("month"),
         F.date_format("processed_at", "dd").alias("day"),
     ).repartition("classification")
-    partitioned.write.mode("append").option("compression", "zstd").partitionBy(
-        "classification", "year", "month", "day"
-    ).parquet(OUTPUT_PATH)
+
+    partitioned.cache()
+    try:
+        classifications = [row["classification"] for row in partitioned.select("classification").distinct().collect()]
+        failures: list[Exception] = []
+        for classification in classifications:
+            subset = partitioned.where(F.col("classification") == classification)
+            try:
+                subset.write.mode("append").option("compression", "zstd").partitionBy(
+                    "classification", "year", "month", "day"
+                ).parquet(OUTPUT_PATH)
+            except Exception as e:
+                logger.error("Failed to update S3. %s,%s,%s", OUTPUT_BUCKET, classification, e)
+                failures.append(e)
+        # 1 件でも失敗した classification があればバッチ全体を失敗させる (checkpoint を
+        # 進めず次回再処理させるため)。ただし他の classification は失敗の有無に関わらず
+        # 全件試行してから raise する (1 件目の失敗で残りが未試行のまま終わらないように)。
+        if failures:
+            global _s3_write_failed
+            _s3_write_failed = True
+            raise failures[0]
+    finally:
+        partitioned.unpersist()
 
 
 def _write_dlq(invalid: DataFrame) -> None:
-    """DLQ 行を reason / year / month / day (failed_at 由来) で partition して書く。"""
+    """DLQ 行を reason / year / month / day (failed_at 由来) で partition して書く。
+
+    _write_valid と同様、reason 毎に個別の write() として driver 側でループし、
+    どの reason の書き込みで失敗したかを確実にログへ残す。
+    """
     partitioned = (
         invalid.withColumn("year", F.date_format("failed_at", "yyyy"))
         .withColumn("month", F.date_format("failed_at", "MM"))
         .withColumn("day", F.date_format("failed_at", "dd"))
     )
-    partitioned.write.mode("append").option("compression", "zstd").partitionBy(
-        "reason", "year", "month", "day"
-    ).parquet(DLQ_OUTPUT_PATH)
+    partitioned.cache()
+    try:
+        reasons = [row["reason"] for row in partitioned.select("reason").distinct().collect()]
+        failures: list[Exception] = []
+        for reason in reasons:
+            subset = partitioned.where(F.col("reason") == reason)
+            try:
+                subset.write.mode("append").option("compression", "zstd").partitionBy(
+                    "reason", "year", "month", "day"
+                ).parquet(DLQ_OUTPUT_PATH)
+            except Exception as e:
+                logger.error("Failed to update S3. %s,%s,%s", OUTPUT_BUCKET, reason, e)
+                failures.append(e)
+        if failures:
+            global _s3_write_failed
+            _s3_write_failed = True
+            raise failures[0]
+    finally:
+        partitioned.unpersist()
 
 
 def _write_batch(batch_df: DataFrame, batch_id: int) -> None:
     """foreachBatch コールバック。
 
     行の振り分けは次の優先順 (相互排他):
-      1. payload IS NULL → DLQ (deserialize_error)
-      2. 上記以外        → OUTPUT_PATH へ classification 毎に append
+      1. decompressed IS NULL → DLQ (zlib_decompress_error)
+      2. payload IS NULL      → DLQ (deserialize_error)
+      3. 上記以外             → OUTPUT_PATH へ classification 毎に append
     """
     routed = batch_df.withColumn(
         "route",
-        F.when(F.col("payload").isNull(), F.lit(DLQ_REASON_DESERIALIZE_ERROR)).otherwise(F.lit("ok")),
+        F.when(F.col("decompressed").isNull(), F.lit(DLQ_REASON_ZLIB_ERROR))
+        .when(F.col("payload").isNull(), F.lit(DLQ_REASON_DESERIALIZE_ERROR))
+        .otherwise(F.lit("ok")),
     )
     routed.cache()
     try:
@@ -218,7 +275,12 @@ def main() -> None:
     # AvailableNow なので query は処理完了時に自然終了する。
     query.awaitTermination()
     if query.exception() is not None:
-        logger.error("query=%s failed: %s", query.name, query.exception())
+        # S3 書き込み失敗 (_s3_write_failed) は _write_valid / _write_dlq が既に
+        # "Failed to update S3. ..." でログ済みなので二重に出力しない。
+        # それ以外の失敗 (S3 書き込みに至る前の段階でのエラー等) はここでしかログされない
+        # ため、query.exception() の内容をそのまま出力する。
+        if not _s3_write_failed:
+            logger.error("query=%s failed: %s", query.name, query.exception())
     else:
         progress = query.lastProgress
         if progress is not None:

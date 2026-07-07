@@ -30,7 +30,8 @@ TOPIC = "sample-events-event"
 PROTOBUF_FULL_NAME = "ekscdk.kafka2.Envelope"
 
 # DLQ の reason 列に入れる分類値。集計・アラート設定で参照する。
-DLQ_REASON_DESERIALIZE_ERROR = "deserialize_error"  # from_protobuf がデコードできなかった
+DLQ_REASON_ZLIB_ERROR = "zlib_decompress_error"  # producer が付与した zlib 圧縮を展開できなかった
+DLQ_REASON_DESERIALIZE_ERROR = "deserialize_error"  # (zlib 展開後の bytes を) from_protobuf がデコードできなかった
 
 # checkpointLocation / 出力 parquet 用 S3 バケット名。バケット名にアカウント ID と env 名が
 # 含まれるためリポジトリには持たず .env 経由で受ける (launch.json の envFile で読み込む)。
