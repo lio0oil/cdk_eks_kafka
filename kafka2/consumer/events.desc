@@ -1,0 +1,20 @@
+
+†
+event.protoekscdk.kafka2"4
+Common
+id (Rid
+datetime (	Rdatetime":
+User
+userid (Ruserid
+username (	Rusername"O
+ContentD
+historyrecords (2.ekscdk.kafka2.HistoryRecordRhistoryrecords"…
+HistoryRecord
+	historyid (R	historyid
+datetime (	Rdatetime
+memo (	Rmemo&
+classification (	Rclassification"”
+Envelope-
+common (2.ekscdk.kafka2.CommonRcommon'
+user (2.ekscdk.kafka2.UserRuser0
+content (2.ekscdk.kafka2.ContentRcontentbproto3

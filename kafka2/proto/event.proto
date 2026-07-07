@@ -1,0 +1,30 @@
+syntax = "proto3";
+
+package ekscdk.kafka2;
+
+message Common {
+  int64 id = 1;
+  string datetime = 2;  // ISO8601 形式の UTC 文字列
+}
+
+message User {
+  int64 userid = 1;
+  string username = 2;
+}
+
+message Content {
+  repeated HistoryRecord historyrecords = 1;
+}
+
+message HistoryRecord {
+  int64 historyid = 1;
+  string datetime = 2;  // ISO8601 形式の UTC 文字列
+  string memo = 3;
+  string classification = 4;
+}
+
+message Envelope {
+  Common common = 1;
+  User user = 2;
+  Content content = 3;
+}

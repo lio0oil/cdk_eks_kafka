@@ -1,0 +1,26 @@
+{
+  "version": "0.2.0",
+  "inputs": [
+    {
+      "id": "startingOffsets",
+      "type": "pickString",
+      "description": "初回起動時のフォールバック offset",
+      "options": ["latest", "earliest"],
+      "default": "latest"
+    }
+  ],
+  "configurations": [
+    {
+      "name": "consumer.py",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/consumer.py",
+      "cwd": "${workspaceFolder}",
+      "python": "${workspaceFolder}/.venv/bin/python3",
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "args": ["--starting-offsets", "${input:startingOffsets}"],
+      "envFile": "${workspaceFolder}/.env"
+    }
+  ]
+}

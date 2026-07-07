@@ -1,0 +1,46 @@
+{
+  "version": "0.2.0",
+  "inputs": [
+    {
+      "id": "count",
+      "type": "promptString",
+      "description": "iteration 数 (= 各 topic への送信件数)",
+      "default": "10"
+    },
+    {
+      "id": "interval",
+      "type": "promptString",
+      "description": "iteration 間隔秒",
+      "default": "1"
+    }
+  ],
+  "configurations": [
+    {
+      "name": "producer.py (count / interval を入力)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/producer.py",
+      "cwd": "${workspaceFolder}",
+      "python": "${workspaceFolder}/.venv/bin/python3",
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "args": [
+        "--count",
+        "${input:count}",
+        "--interval",
+        "${input:interval}"
+      ]
+    },
+    {
+      "name": "producer.py (--infinite)",
+      "type": "debugpy",
+      "request": "launch",
+      "program": "${workspaceFolder}/producer.py",
+      "cwd": "${workspaceFolder}",
+      "python": "${workspaceFolder}/.venv/bin/python3",
+      "console": "integratedTerminal",
+      "justMyCode": false,
+      "args": ["--infinite"]
+    }
+  ]
+}
