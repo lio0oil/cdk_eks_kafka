@@ -44,5 +44,6 @@ CHECKPOINT_LOCATION = f"s3a://{CHECKPOINT_BUCKET}/envelope/"
 # classification / year / month / day で partition した parquet の書き込み先ルート。
 OUTPUT_PATH = f"s3a://{OUTPUT_BUCKET}/sample-events-event/"
 
-# DLQ 行きデータの退避先。reason / year / month / day で partition する。
+# DLQ 行きデータの退避先。year / month / day で partition する
+# (reason は分析対象ではないため partition column に含めない)。
 DLQ_OUTPUT_PATH = f"s3a://{OUTPUT_BUCKET}/sample-events-dlq/"

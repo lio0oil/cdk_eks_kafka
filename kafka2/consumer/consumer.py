@@ -13,7 +13,7 @@ month / day (処理時刻由来) で partition した parquet として S3 に�
 に集約させるため。classification は重複が前提のため、同じ classification の行は同じ
 ディレクトリに複数ファイルとして蓄積される。
 
-EMR Serverless 7.13.0 / EMR on EKS 7.13.0 / ローカル PySpark 3.5.6 で動作する。
+EMR Serverless 7.13.0 / EMR on EKS 7.13.0 / EMR on EC2 7.13.0 / ローカル PySpark 3.5.6 で動作する。
 """
 
 import argparse
@@ -176,10 +176,11 @@ def _write_valid(valid: DataFrame) -> None:
 
 
 def _write_dlq(invalid: DataFrame) -> None:
-    """DLQ 行を reason / year / month / day (failed_at 由来) で partition して書く。
+    """DLQ 行を year / month / day (failed_at 由来) で partition して書く。
 
-    _write_valid と同様、reason 毎に個別の write() として driver 側でループし、
-    どの reason の書き込みで失敗したかを確実にログへ残す。
+    reason は分析対象ではないため partition column には含めない (reason 列自体は
+    データとして残す)。_write_valid と同様、reason 毎に個別の write() として
+    driver 側でループし、どの reason の書き込みで失敗したかを確実にログへ残す。
     """
     partitioned = (
         invalid.withColumn("year", F.date_format("failed_at", "yyyy"))
@@ -193,9 +194,9 @@ def _write_dlq(invalid: DataFrame) -> None:
         for reason in reasons:
             subset = partitioned.where(F.col("reason") == reason)
             try:
-                subset.write.mode("append").option("compression", "zstd").partitionBy(
-                    "reason", "year", "month", "day"
-                ).parquet(DLQ_OUTPUT_PATH)
+                subset.write.mode("append").option("compression", "zstd").partitionBy("year", "month", "day").parquet(
+                    DLQ_OUTPUT_PATH
+                )
             except Exception as e:
                 logger.error("Failed to update S3. %s,%s,%s", OUTPUT_BUCKET, reason, e)
                 failures.append(e)

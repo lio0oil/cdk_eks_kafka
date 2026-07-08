@@ -10,7 +10,7 @@ dependencies = []
 [dependency-groups]
 # PySpark は EMR / EMR Serverless 上で事前同梱されているため本番では不要。
 # ローカル動作確認用に dev グループとして分離する。EMR 7.13.0 同梱版に pin。
-dev = ["pyspark==3.5.6"]
+dev = ["pyspark==3.5.6", "pytest>=8.0.0", "pytest-mock>=3.14.0"]
 
 [tool.ruff]
 line-length = 120
@@ -25,5 +25,11 @@ known-first-party = ["constants"]
 venvPath = "."
 venv = ".venv"
 typeCheckingMode = "standard"
-include = ["consumer.py", "constants.py"]
+include = ["consumer.py", "constants.py", "tests"]
 exclude = ["**/__pycache__", "**/.*", ".venv", "**/node_modules"]
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = ["-ra", "-q", "--strict-markers", "--strict-config"]
