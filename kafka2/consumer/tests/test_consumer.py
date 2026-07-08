@@ -132,7 +132,7 @@ class TestWriteBatch:
     )
 
     def test_routes_rows_by_decompressed_and_payload_nullness(
-        self, spark: SparkSession, tmp_path: Path, mocker: MockerFixture
+        self, spark: SparkSession, tmp_path: Path, mocker: MockerFixture, caplog: pytest.LogCaptureFixture
     ) -> None:
         """decompressed IS NULL は zlib_decompress_error、payload IS NULL は
         deserialize_error として DLQ へ、それ以外は OUTPUT_PATH へ書かれることを検証する。
@@ -152,10 +152,15 @@ class TestWriteBatch:
             schema=self._BATCH_SCHEMA,
         )
 
-        consumer._write_batch(batch_df, batch_id=1)
+        with caplog.at_level(logging.WARNING, logger="consumer"):
+            consumer._write_batch(batch_df, batch_id=1)
 
         dlq_reasons = {row["reason"] for row in spark.read.parquet(dlq_output_path).select("reason").collect()}
         assert dlq_reasons == {consumer.DLQ_REASON_ZLIB_ERROR, consumer.DLQ_REASON_DESERIALIZE_ERROR}
+
+        dlq_records = [r for r in caplog.records if r.message.startswith("DLQ:")]
+        assert len(dlq_records) == 1
+        assert dlq_records[0].levelname == "ERROR"
 
         assert spark.read.parquet(output_path).count() == 1
 

@@ -211,7 +211,7 @@ def _write_batch(batch_df: DataFrame, batch_id: int) -> None:
         )
         invalid_count = invalid.count()
         if invalid_count > 0:
-            logger.warning(
+            logger.error(
                 "DLQ: batch_id=%s, %s record(s) → %s",
                 batch_id,
                 invalid_count,
