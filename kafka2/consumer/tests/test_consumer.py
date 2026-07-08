@@ -1,3 +1,4 @@
+import logging
 import zlib
 from pathlib import Path
 
@@ -176,3 +177,16 @@ class TestWriteBatch:
 
         assert spark.read.parquet(output_path).count() == 1
         assert not Path(dlq_output_path).exists()
+
+
+class TestMain:
+    def test_logs_error_when_spark_session_initialization_fails(
+        self, mocker: MockerFixture, caplog: pytest.LogCaptureFixture
+    ) -> None:
+        mocker.patch.object(consumer, "parse_args", return_value=mocker.Mock(starting_offsets="earliest"))
+        mocker.patch.object(consumer, "build_spark", side_effect=RuntimeError("boom"))
+
+        with caplog.at_level(logging.ERROR, logger="consumer"), pytest.raises(RuntimeError, match="boom"):
+            consumer.main()
+
+        assert "Failed to initialize SparkSession" in caplog.text

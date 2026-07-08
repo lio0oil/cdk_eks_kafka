@@ -244,7 +244,11 @@ def main() -> None:
     )
     args = parse_args()
 
-    spark = build_spark()
+    try:
+        spark = build_spark()
+    except Exception as e:
+        logger.error("Failed to initialize SparkSession: %s", e)
+        raise
 
     logger.info("starting query: topic=%s output=%s", TOPIC, OUTPUT_PATH)
     query = start_query(spark, args.starting_offsets)
