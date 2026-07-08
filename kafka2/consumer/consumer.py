@@ -129,14 +129,9 @@ def _write_valid(valid: DataFrame) -> None:
     classification で repartition すれば、同じ classification の行が同じタスクに集約され、
     書き込みファイル数は classification の種類数 (現状 60〜100 程度) 前後に収まる。
 
-    classification 毎に個別の write() として呼ぶ (1 回の write にまとめない)。driver 側で
-    ループするため、どの classification の書き込みで失敗したかを確実にログへ残せる
-    (executor 側で実行される mapPartitions 等に頼ると、ログ設定が引き継がれず出力されない
-    上に、DataFrame の再評価で書き込みが重複するリスクがあるため採用しない)。
-
-    失敗した classification が出た時点で残りは試行せず即座に raise する。checkpoint が
-    進まずどのみちバッチ全体がリトライされる (= 全 classification が再処理される) ため、
-    ここで書き込みを続けても S3 上に重複行が増えるだけで得られるものがない。
+    書き込みは 1 回の write() にまとめる。classification 単位で分けても、失敗時は
+    checkpoint が進まずどのみちバッチ全体がリトライされる (= 全 classification が
+    再処理される) ため、classification 単位の完走保証やログ上の切り分けに実益がない。
     """
     exploded = valid.select(
         F.current_timestamp().alias("processed_at"),
@@ -155,54 +150,38 @@ def _write_valid(valid: DataFrame) -> None:
         F.date_format("processed_at", "dd").alias("day"),
     ).repartition("classification")
 
-    partitioned.cache()
     try:
-        classifications = [row["classification"] for row in partitioned.select("classification").distinct().collect()]
-        for classification in classifications:
-            subset = partitioned.where(F.col("classification") == classification)
-            try:
-                subset.write.mode("append").option("compression", "zstd").partitionBy(
-                    "classification", "year", "month", "day"
-                ).parquet(OUTPUT_PATH)
-            except Exception as e:
-                logger.error("Failed to update S3. %s,%s,%s", OUTPUT_BUCKET, classification, e)
-                global _s3_write_failed
-                _s3_write_failed = True
-                raise
-    finally:
-        partitioned.unpersist()
+        partitioned.write.mode("append").option("compression", "zstd").partitionBy(
+            "classification", "year", "month", "day"
+        ).parquet(OUTPUT_PATH)
+    except Exception as e:
+        logger.error("Failed to update S3. %s,%s", OUTPUT_BUCKET, e)
+        global _s3_write_failed
+        _s3_write_failed = True
+        raise
 
 
 def _write_dlq(invalid: DataFrame) -> None:
     """DLQ 行を year / month / day (failed_at 由来) で partition して書く。
 
     reason は分析対象ではないため partition column には含めない (reason 列自体は
-    データとして残す)。_write_valid と同様、reason 毎に個別の write() として
-    driver 側でループし、どの reason の書き込みで失敗したかを確実にログへ残す。
-
-    _write_valid と同様、失敗した reason が出た時点で残りは試行せず即座に raise する。
+    データとして残す)。_write_valid と同様、書き込みは 1 回の write() にまとめる
+    (reason 単位の完走保証やログ上の切り分けに実益がないため)。
     """
     partitioned = (
         invalid.withColumn("year", F.date_format("failed_at", "yyyy"))
         .withColumn("month", F.date_format("failed_at", "MM"))
         .withColumn("day", F.date_format("failed_at", "dd"))
     )
-    partitioned.cache()
     try:
-        reasons = [row["reason"] for row in partitioned.select("reason").distinct().collect()]
-        for reason in reasons:
-            subset = partitioned.where(F.col("reason") == reason)
-            try:
-                subset.write.mode("append").option("compression", "zstd").partitionBy("year", "month", "day").parquet(
-                    DLQ_OUTPUT_PATH
-                )
-            except Exception as e:
-                logger.error("Failed to update S3. %s,%s,%s", OUTPUT_BUCKET, reason, e)
-                global _s3_write_failed
-                _s3_write_failed = True
-                raise
-    finally:
-        partitioned.unpersist()
+        partitioned.write.mode("append").option("compression", "zstd").partitionBy("year", "month", "day").parquet(
+            DLQ_OUTPUT_PATH
+        )
+    except Exception as e:
+        logger.error("Failed to update S3. %s,%s", OUTPUT_BUCKET, e)
+        global _s3_write_failed
+        _s3_write_failed = True
+        raise
 
 
 def _write_batch(batch_df: DataFrame, batch_id: int) -> None:
