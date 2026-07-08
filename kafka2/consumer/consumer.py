@@ -133,6 +133,10 @@ def _write_valid(valid: DataFrame) -> None:
     ループするため、どの classification の書き込みで失敗したかを確実にログへ残せる
     (executor 側で実行される mapPartitions 等に頼ると、ログ設定が引き継がれず出力されない
     上に、DataFrame の再評価で書き込みが重複するリスクがあるため採用しない)。
+
+    失敗した classification が出た時点で残りは試行せず即座に raise する。checkpoint が
+    進まずどのみちバッチ全体がリトライされる (= 全 classification が再処理される) ため、
+    ここで書き込みを続けても S3 上に重複行が増えるだけで得られるものがない。
     """
     exploded = valid.select(
         F.current_timestamp().alias("processed_at"),
@@ -154,7 +158,6 @@ def _write_valid(valid: DataFrame) -> None:
     partitioned.cache()
     try:
         classifications = [row["classification"] for row in partitioned.select("classification").distinct().collect()]
-        failures: list[Exception] = []
         for classification in classifications:
             subset = partitioned.where(F.col("classification") == classification)
             try:
@@ -163,14 +166,9 @@ def _write_valid(valid: DataFrame) -> None:
                 ).parquet(OUTPUT_PATH)
             except Exception as e:
                 logger.error("Failed to update S3. %s,%s,%s", OUTPUT_BUCKET, classification, e)
-                failures.append(e)
-        # 1 件でも失敗した classification があればバッチ全体を失敗させる (checkpoint を
-        # 進めず次回再処理させるため)。ただし他の classification は失敗の有無に関わらず
-        # 全件試行してから raise する (1 件目の失敗で残りが未試行のまま終わらないように)。
-        if failures:
-            global _s3_write_failed
-            _s3_write_failed = True
-            raise failures[0]
+                global _s3_write_failed
+                _s3_write_failed = True
+                raise
     finally:
         partitioned.unpersist()
 
@@ -181,6 +179,8 @@ def _write_dlq(invalid: DataFrame) -> None:
     reason は分析対象ではないため partition column には含めない (reason 列自体は
     データとして残す)。_write_valid と同様、reason 毎に個別の write() として
     driver 側でループし、どの reason の書き込みで失敗したかを確実にログへ残す。
+
+    _write_valid と同様、失敗した reason が出た時点で残りは試行せず即座に raise する。
     """
     partitioned = (
         invalid.withColumn("year", F.date_format("failed_at", "yyyy"))
@@ -190,7 +190,6 @@ def _write_dlq(invalid: DataFrame) -> None:
     partitioned.cache()
     try:
         reasons = [row["reason"] for row in partitioned.select("reason").distinct().collect()]
-        failures: list[Exception] = []
         for reason in reasons:
             subset = partitioned.where(F.col("reason") == reason)
             try:
@@ -199,11 +198,9 @@ def _write_dlq(invalid: DataFrame) -> None:
                 )
             except Exception as e:
                 logger.error("Failed to update S3. %s,%s,%s", OUTPUT_BUCKET, reason, e)
-                failures.append(e)
-        if failures:
-            global _s3_write_failed
-            _s3_write_failed = True
-            raise failures[0]
+                global _s3_write_failed
+                _s3_write_failed = True
+                raise
     finally:
         partitioned.unpersist()
 
