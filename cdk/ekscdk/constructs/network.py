@@ -192,6 +192,9 @@ class NetworkConstruct(Construct):
             vpc_endpoint_service_load_balancers=[self._kafka_nlb],
             acceptance_required=False,
         )
+        # VpcEndpointService は CFN に名前プロパティを持たないため、コンソール識別用に
+        # Name タグを付ける（ServiceName 自体は自動生成のまま変わらない）。
+        Tags.of(self.endpoint_service).add("Name", "kafka-endpoint-service")
 
     @property
     def vpc(self) -> ec2.IVpc:

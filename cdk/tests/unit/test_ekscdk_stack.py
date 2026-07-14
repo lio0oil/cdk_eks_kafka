@@ -108,6 +108,15 @@ def test_vpc_endpoint_service_exists(template):
     template.resource_count_is("AWS::EC2::VPCEndpointService", 1)
 
 
+def test_vpc_endpoint_service_has_name_tag(template):
+    # VPCEndpointService は CFN に名前プロパティを持たないため、コンソールでの識別用に
+    # Name タグを付与する（ServiceName 自体は変わらず自動生成のまま）。
+    template.has_resource_properties(
+        "AWS::EC2::VPCEndpointService",
+        {"Tags": assertions.Match.array_with([{"Key": "Name", "Value": "kafka-endpoint-service"}])},
+    )
+
+
 def test_kafka_private_hosted_zone_associated_with_vpc(template):
     # kafka.local は提供側 VPC と消費側 VPC の双方に Private Hosted Zone を作ることで、
     # 同一ホスト名が PrivateLink 消費側でも解決できるようにする設計（消費側は別リポジトリ管理）。
