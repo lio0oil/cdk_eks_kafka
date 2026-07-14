@@ -15,6 +15,56 @@ def template():
     return assertions.Template.from_stack(stack)
 
 
+def test_table_bucket_uses_sse_kms_encryption(template):
+    # consumer (EMR) が書き込む table_bucket / checkpoint_bucket は同じ書き込み元
+    # (EMR 実行ロール) を信頼境界とするため、KMS キーを共有する設計。
+    template.has_resource_properties(
+        "AWS::S3Tables::TableBucket",
+        {
+            "EncryptionConfiguration": {
+                "SSEAlgorithm": "aws:kms",
+                "KMSKeyArn": assertions.Match.any_value(),
+            }
+        },
+    )
+
+
+def test_checkpoint_bucket_uses_sse_kms_encryption(template):
+    template.has_resource_properties(
+        "AWS::S3::Bucket",
+        {
+            "BucketEncryption": {
+                "ServerSideEncryptionConfiguration": assertions.Match.array_with(
+                    [
+                        assertions.Match.object_like(
+                            {
+                                "ServerSideEncryptionByDefault": {
+                                    "SSEAlgorithm": "aws:kms",
+                                    "KMSMasterKeyID": assertions.Match.any_value(),
+                                }
+                            }
+                        )
+                    ]
+                )
+            }
+        },
+    )
+
+
+def test_table_bucket_and_checkpoint_bucket_share_one_kms_key(template):
+    # 両方とも EMR consumer ロールが書き込む同一信頼境界のため、鍵を分けずコストと運用を
+    # シンプルにする（VPC Flow Log 等の別信頼境界のバケットとは共有しない）。
+    template.resource_count_is("AWS::KMS::Key", 1)
+
+
+def test_kms_key_has_alias(template):
+    # コンソール/CLI での識別用に alias を付ける（KeyId だけでは判別しづらいため）。
+    template.has_resource_properties(
+        "AWS::KMS::Alias",
+        {"AliasName": "alias/kafka-consumer-s3tables"},
+    )
+
+
 def test_dlq_table_has_reason_column(template):
     """DLQ には failed_at / rawdata に加えて reason 列がある。
 

@@ -1,4 +1,5 @@
 from aws_cdk import CfnOutput, RemovalPolicy, Stack
+from aws_cdk import aws_kms as kms
 from aws_cdk import aws_s3 as s3
 from aws_cdk import aws_s3tables as s3tables
 from constructs import Construct
@@ -50,10 +51,25 @@ class S3TablesStack(Stack):
     ) -> None:
         super().__init__(scope, construct_id, **kwargs)
 
+        # table_bucket / checkpoint_bucket はどちらも EMR consumer ロール（本スタック外で
+        # 管理）だけが書き込む同一信頼境界のため、鍵を分けずコストと運用をシンプルにする。
+        # VPC Flow Log 等、書き込み元が異なるバケットとはこの鍵を共有しない。
+        encryption_key = kms.Key(
+            self,
+            "S3TablesEncryptionKey",
+            alias="kafka-consumer-s3tables",
+            enable_key_rotation=True,
+            removal_policy=config.s3_table_bucket_removal_policy,
+        )
+
         table_bucket = s3tables.CfnTableBucket(
             self,
             "TableBucket",
             table_bucket_name=config.s3_table_bucket_name,
+            encryption_configuration=s3tables.CfnTableBucket.EncryptionConfigurationProperty(
+                sse_algorithm="aws:kms",
+                kms_key_arn=encryption_key.key_arn,
+            ),
         )
         table_bucket.apply_removal_policy(config.s3_table_bucket_removal_policy)
 
@@ -171,7 +187,8 @@ class S3TablesStack(Stack):
             "ConsumerCheckpointBucket",
             bucket_name=f"kafka-consumer-checkpoint-{self.account}-{config.s3_consumer_checkpoint_suffix}",
             block_public_access=s3.BlockPublicAccess.BLOCK_ALL,
-            encryption=s3.BucketEncryption.S3_MANAGED,
+            encryption=s3.BucketEncryption.KMS,
+            encryption_key=encryption_key,  # type: ignore[arg-type]
             enforce_ssl=True,
             versioned=False,
             removal_policy=config.s3_table_bucket_removal_policy,
