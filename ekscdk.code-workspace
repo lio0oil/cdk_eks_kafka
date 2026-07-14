@@ -1,15 +1,37 @@
 {
   "folders": [
-    { "name": "root", "path": "." },
-    { "name": "cdk", "path": "cdk" },
-    { "name": "kafka/producer", "path": "kafka/producer" },
-    { "name": "kafka/consumer", "path": "kafka/consumer" }
+    {
+      "name": "root",
+      "path": "."
+    },
+    {
+      "name": "cdk",
+      "path": "cdk"
+    },
+    {
+      "name": "kafka/producer",
+      "path": "kafka/producer"
+    },
+    {
+      "name": "kafka/consumer",
+      "path": "kafka/consumer"
+    },
+    {
+      "name": "kafka2/producer",
+      "path": "kafka2/producer"
+    },
+    {
+      "name": "kafka2/consumer",
+      "path": "kafka2/consumer"
+    }
   ],
   "settings": {
     "files.eol": "\n",
     "files.insertFinalNewline": true,
     "files.trimTrailingWhitespace": true,
-    "editor.rulers": [120],
+    "editor.rulers": [
+      120
+    ],
     "editor.formatOnSave": true,
     "editor.codeActionsOnSave": {
       "source.fixAll.ruff": "explicit",
