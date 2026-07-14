@@ -72,13 +72,18 @@ class NetworkConstruct(Construct):
             "S3Endpoint",
             service=ec2.GatewayVpcEndpointAwsService.S3,
         )
-        # Interface 型 VPC Endpoint（時間課金 + データ処理課金）。
-        # NAT Gateway のデータ処理コストを削減し、通信を AWS 網内に閉じる。
-        # dev は固定費が転送量コストを上回るため無効化する。
-        # - ECR: コンテナイメージ pull
-        # - CloudWatch Logs: Fluent Bit のログ送信
-        # - STS: Pod Identity の AssumeRole
-        # - aps-workspaces: Prometheus -> AMP の remote_write（メトリクス送信）
+        # Interface 型 VPC Endpoint（PrivateLink）。機微データ / クレデンシャルを運ぶ通信を
+        # VPC 外（NAT -> IGW -> インターネット）に出さないための private 経路。NAT は残すが、
+        # 機微データを運ぶ通信だけ PrivateLink に固定する（defense in depth）。制御メタデータしか
+        # 流れない API（elb / ec2 / sns 等）は機微データを運ばないため NAT 経由のままにし、
+        # 固定費を払ってまで private 化しない。dev は監査要件が薄く固定費が見合わないため無効化する。
+        # 対象（いずれも機微データ or クレデンシャルを運ぶ）:
+        # - ECR (api/dkr): イメージ内容と pull 認証トークン
+        #   （レイヤー実体は S3 Gateway Endpoint 経由なので既に private）
+        # - CloudWatch Logs: Fluent Bit が送るコンテナログ本文（アプリログは機微が混入しうる）
+        # - eks-auth: EKS Pod Identity Agent が受け取る一時 AWS クレデンシャル。Pod Identity は
+        #   IRSA と異なり STS ではなく EKS Auth API で credential を発行する。NAT 経由でも到達は
+        #   できるが、資格情報をインターネット経路に出さないため private に固定する。
         if config.enable_interface_endpoints:
             private_subnets = ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS)
             for endpoint_id, service in [
@@ -88,11 +93,7 @@ class NetworkConstruct(Construct):
                     "CloudWatchLogsEndpoint",
                     ec2.InterfaceVpcEndpointAwsService.CLOUDWATCH_LOGS,
                 ),
-                ("StsEndpoint", ec2.InterfaceVpcEndpointAwsService.STS),
-                (
-                    "ApsWorkspacesEndpoint",
-                    ec2.InterfaceVpcEndpointAwsService("aps-workspaces"),
-                ),
+                ("EksAuthEndpoint", ec2.InterfaceVpcEndpointAwsService("eks-auth")),
             ]:
                 self._vpc.add_interface_endpoint(endpoint_id, service=service, subnets=private_subnets)
 

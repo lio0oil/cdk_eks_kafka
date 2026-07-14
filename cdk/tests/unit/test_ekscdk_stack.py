@@ -145,6 +145,38 @@ def test_kafka_advertised_host_uses_private_dns_name(template):
     assert '"advertisedHost":"kafka.local"' in literals
 
 
+def _interface_endpoint_service_literals(template) -> list[str]:
+    # Interface 型 VPC Endpoint の ServiceName をリテラル文字列化して返す。
+    # ServiceName は com.amazonaws.<region>.<service> を Fn::Join で組み、region は
+    # Ref AWS::Region なので _manifest_literals が空に畳む。suffix(".<service>") で判定する。
+    eps = template.find_resources("AWS::EC2::VPCEndpoint")
+    return [
+        _manifest_literals(res["Properties"]["ServiceName"])
+        for res in eps.values()
+        if res["Properties"].get("VpcEndpointType") == "Interface"
+    ]
+
+
+def test_interface_endpoints_keep_sensitive_data_private(template):
+    # 方針: 機微データ / クレデンシャルを運ぶ通信だけ PrivateLink に固定する（NAT は残す）。
+    # ECR(イメージ) / CloudWatch Logs(ログ本文) / eks-auth(一時クレデンシャル) は private。
+    # 制御メタデータのみの elb/ec2/sns は機微データを運ばないため NAT 経由のままにし Interface に含めない。
+    names = _interface_endpoint_service_literals(template)
+
+    def has(suffix: str) -> bool:
+        return any(name.endswith(suffix) for name in names)
+
+    # 機微データ / クレデンシャル経路（private 必須）
+    assert has(".eks-auth"), "Pod Identity が受け取る一時クレデンシャルは private 経路に固定する"
+    assert has(".ecr.api")
+    assert has(".ecr.dkr")
+    assert has(".logs")  # Fluent Bit が送るコンテナログ本文
+
+    # 持たないべき
+    assert not has(".aps-workspaces"), "AMP 廃止で送信先が無く orphaned"
+    assert not has(".sts"), "Pod Identity では未使用（IRSA 前提の誤記の名残）"
+
+
 def test_kafka_nlb_sg_ingress_restricted_to_vpc(template):
     # NLB SG のインバウンドルールが VPC CIDR 参照に限定され、bootstrap ポートが含まれることを確認
     # CidrIp は Fn::GetAtt で VPC CidrBlock を参照するため Match.any_value() で検証
