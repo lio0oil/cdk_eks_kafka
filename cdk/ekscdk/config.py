@@ -69,6 +69,10 @@ class ClusterConfig:
     # KRaft Controller の replica 数（KRaft は奇数推奨、通常 3）
     # node-pool-controller.yaml の replicas と kafka nodegroup サイズの両方に反映
     kafka_controller_count: int
+    # Kafka broker/controller ノードグループを VPC の 1 AZ 目だけに固定するか。
+    # dev は True（AZ 跨ぎのデータ転送料を避けてコスト最適化）、
+    # stg/prd は False（AZ 障害時も broker/controller が全滅しないよう multi-AZ を維持）。
+    kafka_single_az: bool
     # Kafka Broker の replica 数。NLB target group / nodegroup capacity /
     # KafkaNodePool replicas / kafka-cluster.yaml の brokers[] すべての単一の真実の源。
     # 既存ブローカーの advertisedPort/nodePort は変えない（クライアント接続が壊れる）ため、
@@ -144,6 +148,7 @@ class ClusterConfig:
             enable_interface_endpoints=False,
             delete_claim=True,
             kafka_controller_count=3,
+            kafka_single_az=True,
             broker_count=3,
             deletion_protection=False,
             enable_vpc_flow_logs=False,
@@ -183,6 +188,7 @@ class ClusterConfig:
             enable_interface_endpoints=True,
             delete_claim=False,
             kafka_controller_count=3,
+            kafka_single_az=False,
             broker_count=3,
             deletion_protection=True,
             enable_vpc_flow_logs=True,
@@ -222,6 +228,7 @@ class ClusterConfig:
             enable_interface_endpoints=True,
             delete_claim=False,
             kafka_controller_count=3,
+            kafka_single_az=False,
             broker_count=3,
             deletion_protection=True,
             enable_vpc_flow_logs=True,

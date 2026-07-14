@@ -129,6 +129,14 @@ class EksClusterConstruct(Construct):
         # で物理的に配置を分離する。これにより 1 ノード障害で broker と controller を
         # 同時に失うリスクも回避できる。
         # 各 nodegroup は max=desired+1 でローリング時の新ノード起動余裕を確保する。
+        # kafka_single_az=True の場合は VPC の 1 AZ 目だけに固定する（dev のコスト最適化。
+        # AZ 跨ぎのデータ転送料と broker 間レプリケーションの AZ 間トラフィックを避ける）。
+        # EKS クラスター自体は control plane ENI 用に multi-AZ subnet が必須なため
+        # NetworkConstruct の VPC は変えず、Kafka nodegroup の配置先だけ絞る。
+        kafka_subnets = ec2.SubnetSelection(
+            subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS,
+            availability_zones=[vpc.availability_zones[0]] if config.kafka_single_az else None,
+        )
         self._cluster.add_nodegroup_capacity(
             "KafkaBrokerNodeGroup",
             nodegroup_name="kafka-broker-nodegroup",
@@ -138,7 +146,7 @@ class EksClusterConstruct(Construct):
             max_size=broker_count + 1,
             desired_size=broker_count,
             capacity_type=eks.CapacityType.ON_DEMAND,
-            subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS),
+            subnets=kafka_subnets,
             labels={"role": "kafka-broker"},
             taints=[
                 eks.TaintSpec(
@@ -164,7 +172,7 @@ class EksClusterConstruct(Construct):
             max_size=controller_count + 1,
             desired_size=controller_count,
             capacity_type=eks.CapacityType.ON_DEMAND,
-            subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS),
+            subnets=kafka_subnets,
             labels={"role": "kafka-controller"},
             taints=[
                 eks.TaintSpec(

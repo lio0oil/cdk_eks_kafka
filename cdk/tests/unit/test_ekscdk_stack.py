@@ -273,6 +273,25 @@ def test_kube_prometheus_stack_enables_alertmanager(template):
     assert literals.count('"podDisruptionBudget":{"enabled":true}') >= 2
 
 
+def test_dev_kafka_nodegroups_pinned_to_single_az(dev_template):
+    # dev はコスト最適化のため Kafka broker/controller ノードグループを 1AZ に固定する
+    # （config.kafka_single_az=True）。system-nodegroup は AZ 障害耐性のため multi-AZ を維持する。
+    nodegroups = dev_template.find_resources("AWS::EKS::Nodegroup")
+    by_name = {res["Properties"]["NodegroupName"]: res["Properties"]["Subnets"] for res in nodegroups.values()}
+    assert len(by_name["kafka-broker-nodegroup"]) == 1
+    assert len(by_name["kafka-controller-nodegroup"]) == 1
+    assert len(by_name["system-nodegroup"]) == 3
+
+
+def test_prd_kafka_nodegroups_span_multiple_az(template):
+    # stg/prd は HA 優先のため Kafka broker/controller ノードグループも multi-AZ を維持する
+    # （config.kafka_single_az=False）。
+    nodegroups = template.find_resources("AWS::EKS::Nodegroup")
+    by_name = {res["Properties"]["NodegroupName"]: res["Properties"]["Subnets"] for res in nodegroups.values()}
+    assert len(by_name["kafka-broker-nodegroup"]) == 3
+    assert len(by_name["kafka-controller-nodegroup"]) == 3
+
+
 def test_dev_system_nodegroup_uses_larger_instance(dev_template):
     # system は監視 HA（prometheus×2 / alertmanager×3 / grafana / ...）+ Strimzi operator 群
     # + 全ノード共通 DaemonSet で steady ~12-13 pod/node。Cluster Autoscaler / Karpenter が
