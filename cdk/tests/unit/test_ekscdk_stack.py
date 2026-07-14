@@ -292,6 +292,30 @@ def test_prd_kafka_nodegroups_span_multiple_az(template):
     assert len(by_name["kafka-controller-nodegroup"]) == 3
 
 
+def test_dev_kafka_nlb_pinned_to_single_az_matching_nodegroups(dev_template):
+    # dev は Kafka broker/controller ノードグループと同じ 1AZ に NLB を固定し、
+    # cross-zone load balancing を無効化する（同一 AZ 内で完結するため不要、データ転送料も削減）。
+    lbs = dev_template.find_resources("AWS::ElasticLoadBalancingV2::LoadBalancer")
+    nlb = next(iter(lbs.values()))
+    assert len(nlb["Properties"]["Subnets"]) == 1
+
+    nodegroups = dev_template.find_resources("AWS::EKS::Nodegroup")
+    by_name = {res["Properties"]["NodegroupName"]: res["Properties"]["Subnets"] for res in nodegroups.values()}
+    assert nlb["Properties"]["Subnets"] == by_name["kafka-broker-nodegroup"]
+
+    attrs = {a["Key"]: a["Value"] for a in nlb["Properties"]["LoadBalancerAttributes"]}
+    assert attrs["load_balancing.cross_zone.enabled"] == "false"
+
+
+def test_prd_kafka_nlb_spans_multiple_az_with_cross_zone_enabled(template):
+    # stg/prd は broker が multi-AZ に分散するため cross-zone load balancing を維持する。
+    lbs = template.find_resources("AWS::ElasticLoadBalancingV2::LoadBalancer")
+    nlb = next(iter(lbs.values()))
+    assert len(nlb["Properties"]["Subnets"]) == 3
+    attrs = {a["Key"]: a["Value"] for a in nlb["Properties"]["LoadBalancerAttributes"]}
+    assert attrs["load_balancing.cross_zone.enabled"] == "true"
+
+
 def test_dev_system_nodegroup_uses_larger_instance(dev_template):
     # system は監視 HA（prometheus×2 / alertmanager×3 / grafana / ...）+ Strimzi operator 群
     # + 全ノード共通 DaemonSet で steady ~12-13 pod/node。Cluster Autoscaler / Karpenter が

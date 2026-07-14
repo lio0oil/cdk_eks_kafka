@@ -103,14 +103,28 @@ class NetworkConstruct(Construct):
                 ec2.Port.tcp(listener_port),
             )
 
+        # kafka_single_az=True の場合、NLB を Kafka nodegroup と同じ 1 AZ 目に固定する
+        # （EksClusterConstruct の kafka_subnets と同じ vpc.availability_zones[0] を使う）。
+        # NLB が multi-AZ のまま targets だけ 1AZ に寄ると、他 AZ の NLB ノードから
+        # ターゲットへ到達するのに cross-zone load balancing が必須になってしまうため、
+        # NLB 自体も 1AZ に揃えることで cross-zone を無効化でき、AZ 跨ぎのデータ転送料を避けられる。
+        kafka_nlb_subnets = (
+            ec2.SubnetSelection(
+                subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS,
+                availability_zones=[self._vpc.availability_zones[0]],
+            )
+            if config.kafka_single_az
+            else None
+        )
         self._kafka_nlb = elbv2.NetworkLoadBalancer(
             self,
             "KafkaSharedNlb",
             vpc=self._vpc,
             internet_facing=False,
-            cross_zone_enabled=True,
+            cross_zone_enabled=not config.kafka_single_az,
             load_balancer_name="kafka-shared-nlb",
             security_groups=[self._kafka_nlb_sg],
+            vpc_subnets=kafka_nlb_subnets,
         )
 
         # ── NLB TargetGroup + Listener ────────────────────────────────────────
