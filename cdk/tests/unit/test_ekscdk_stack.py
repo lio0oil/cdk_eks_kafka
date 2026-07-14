@@ -108,6 +108,43 @@ def test_vpc_endpoint_service_exists(template):
     template.resource_count_is("AWS::EC2::VPCEndpointService", 1)
 
 
+def test_kafka_private_hosted_zone_associated_with_vpc(template):
+    # kafka.local は提供側 VPC と消費側 VPC の双方に Private Hosted Zone を作ることで、
+    # 同一ホスト名が PrivateLink 消費側でも解決できるようにする設計（消費側は別リポジトリ管理）。
+    zones = template.find_resources("AWS::Route53::HostedZone")
+    matched = [z for z in zones.values() if z["Properties"].get("Name") == "kafka.local."]
+    assert len(matched) == 1
+    vpcs = matched[0]["Properties"].get("VPCs")
+    assert vpcs is not None
+    assert len(vpcs) == 1
+
+
+def test_kafka_nlb_alias_record_in_private_hosted_zone(template):
+    records = template.find_resources("AWS::Route53::RecordSet")
+    matched = [
+        r
+        for r in records.values()
+        if r["Properties"].get("Name") == "kafka.local." and r["Properties"].get("Type") == "A"
+    ]
+    assert len(matched) == 1
+    assert "AliasTarget" in matched[0]["Properties"]
+
+
+def test_kafka_advertised_host_uses_private_dns_name(template):
+    # PrivateLink 消費側が自分の VPC に同名の Private Hosted Zone を作れば advertisedHost の
+    # 再接続先も解決できるようにするため、NLB の生 DNS 名ではなくこのドメインを advertisedHost にする。
+    all_k8s = template.find_resources("Custom::AWSCDK-EKS-KubernetesResource")
+    kafka_crs = [
+        res
+        for res in all_k8s.values()
+        if '"kind":"Kafka"' in _manifest_literals(res["Properties"]["Manifest"])
+        and '"kind":"KafkaNodePool"' not in _manifest_literals(res["Properties"]["Manifest"])
+    ]
+    assert len(kafka_crs) == 1
+    literals = _manifest_literals(kafka_crs[0]["Properties"]["Manifest"])
+    assert '"advertisedHost":"kafka.local"' in literals
+
+
 def test_kafka_nlb_sg_ingress_restricted_to_vpc(template):
     # NLB SG のインバウンドルールが VPC CIDR 参照に限定され、bootstrap ポートが含まれることを確認
     # CidrIp は Fn::GetAtt で VPC CidrBlock を参照するため Match.any_value() で検証

@@ -1,10 +1,18 @@
 from aws_cdk import Duration, Tags
 from aws_cdk import aws_ec2 as ec2
 from aws_cdk import aws_elasticloadbalancingv2 as elbv2
+from aws_cdk import aws_route53 as route53
+from aws_cdk import aws_route53_targets as route53_targets
 from aws_cdk import aws_s3 as s3
 from constructs import Construct
 
 from ekscdk.config import ClusterConfig
+
+# PrivateLink 消費側が自分の VPC に同名の Private Hosted Zone を作れば、advertisedHost の
+# 再接続先も同じ文字列で解決できる（提供側 VPC 内では NLB へ、消費側 VPC 内では消費側の
+# VPC Endpoint へ、と文脈依存で解決先が変わる）。ドメイン所有権検証が要る VPC Endpoint
+# Service の Private DNS 名機能は使わず、検証不要な Private Hosted Zone で完結させる。
+KAFKA_PRIVATE_DNS_NAME = "kafka.local"
 
 
 class NetworkConstruct(Construct):
@@ -127,6 +135,22 @@ class NetworkConstruct(Construct):
             vpc_subnets=kafka_nlb_subnets,
         )
 
+        # ── Kafka Private Hosted Zone（PrivateLink 消費側との advertisedHost 共有用）─────
+        self._kafka_hosted_zone = route53.PrivateHostedZone(
+            self,
+            "KafkaPrivateHostedZone",
+            vpc=self._vpc,
+            zone_name=KAFKA_PRIVATE_DNS_NAME,
+        )
+        route53.ARecord(
+            self,
+            "KafkaNlbAliasRecord",
+            zone=self._kafka_hosted_zone,
+            target=route53.RecordTarget.from_alias(
+                route53_targets.LoadBalancerTarget(self._kafka_nlb)  # type: ignore[arg-type]
+            ),
+        )
+
         # ── NLB TargetGroup + Listener ────────────────────────────────────────
         # リスナーとターゲットグループは nlb_ports（kafka-cluster.yaml 由来）で決定する。
         # TargetType.INSTANCE で作成し、ターゲット登録は AWS Load Balancer Controller の
@@ -175,6 +199,15 @@ class NetworkConstruct(Construct):
     @property
     def kafka_nlb(self) -> elbv2.INetworkLoadBalancer:
         return self._kafka_nlb
+
+    @property
+    def kafka_private_dns_name(self) -> str:
+        """Kafka advertisedHost に使うドメイン名。
+
+        PrivateLink 消費側が自分の VPC に同名の Private Hosted Zone を作れば、
+        NLB の生 DNS 名を使うより広い経路（提供側 VPC 内 / PrivateLink 消費側）で解決できる。
+        """
+        return KAFKA_PRIVATE_DNS_NAME
 
     @property
     def kafka_target_groups(self) -> dict[str, elbv2.NetworkTargetGroup]:

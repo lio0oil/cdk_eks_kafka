@@ -51,7 +51,7 @@ class EksCdkStack(Stack):
             "Kafka",
             cluster=eks_construct.cluster,
             broker_count=broker_count,
-            nlb_dns_name=network.kafka_nlb.load_balancer_dns_name,
+            nlb_dns_name=network.kafka_private_dns_name,
             kafka_target_groups=network.kafka_target_groups,
             nlb_ports=nlb_ports,
             nlb_sg_id=network.kafka_nlb_sg.security_group_id,
