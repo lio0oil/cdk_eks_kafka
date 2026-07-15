@@ -91,15 +91,6 @@ class EksClusterConstruct(Construct):
                 access_policies=_cluster_admin_policy,
             )
 
-        # IMDSv2 ホップ制限を 2 に設定して Pod から EC2 メタデータにアクセス可能にする
-        # デフォルト値 1 だと awscontainerinsightreceiver が EC2 インスタンス情報を取得できない
-        imds_lt = ec2.LaunchTemplate(
-            self,
-            "ImdsLaunchTemplate",
-            http_put_response_hop_limit=2,
-            http_tokens=ec2.LaunchTemplateHttpTokens.REQUIRED,
-        )
-
         # システムノードグループ: 監視 / Operator / アドオン用
         # taint は打たない（kafka 用ノードを DedicatedKafka taint で隔離する設計のため、
         # system 側を taint で守る必要がない。toleration 未指定の Pod は自然に system に
@@ -115,10 +106,6 @@ class EksClusterConstruct(Construct):
             capacity_type=eks.CapacityType.ON_DEMAND,
             subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS),
             labels={"role": "system"},
-            launch_template_spec=eks.LaunchTemplateSpec(
-                id=imds_lt.launch_template_id,  # type: ignore[arg-type]
-                version=imds_lt.version_number,
-            ),
             enable_node_auto_repair=True,
         )
 
@@ -155,10 +142,6 @@ class EksClusterConstruct(Construct):
                     effect=eks.TaintEffect.NO_SCHEDULE,
                 )
             ],
-            launch_template_spec=eks.LaunchTemplateSpec(
-                id=imds_lt.launch_template_id,  # type: ignore[arg-type]
-                version=imds_lt.version_number,
-            ),
             enable_node_auto_repair=True,
         )
 
@@ -181,10 +164,6 @@ class EksClusterConstruct(Construct):
                     effect=eks.TaintEffect.NO_SCHEDULE,
                 )
             ],
-            launch_template_spec=eks.LaunchTemplateSpec(
-                id=imds_lt.launch_template_id,  # type: ignore[arg-type]
-                version=imds_lt.version_number,
-            ),
             enable_node_auto_repair=True,
         )
 

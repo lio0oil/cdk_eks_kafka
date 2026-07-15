@@ -97,6 +97,16 @@ def test_amp_resources_removed(template):
     assert template.find_resources("AWS::APS::RuleGroupsNamespace") == {}
 
 
+def test_no_custom_imds_launch_template(template):
+    # IMDS hop_limit=2 は ADOT（awscontainerinsightreceiver）が Pod から EC2
+    # メタデータを取得するために追加された設定だったが、ADOT は kube-prometheus-stack
+    # に移行済みで撤去されている。Pod Identity で動く現行コンポーネント
+    # （EBS CSI Driver / AWS LBC / Fluent Bit 等）は IMDS に依存しないため、
+    # ノードの IAM instance profile への Pod アクセスを遮断するデフォルトの
+    # hop_limit=1 に戻し、custom LaunchTemplate は使わないことを invariant として固定する。
+    assert template.find_resources("AWS::EC2::LaunchTemplate") == {}
+
+
 def test_kafka_nlb_is_internal(template):
     template.has_resource_properties(
         "AWS::ElasticLoadBalancingV2::LoadBalancer",
