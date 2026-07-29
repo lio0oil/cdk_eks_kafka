@@ -12,7 +12,7 @@ from aws_cdk import aws_logs as logs
 # eks-pod-identity-agent は aws_eks_v2.Cluster が `IdentityType.POD_IDENTITY` の SA を
 # 作る際に内部で自動追加する Addon で、同様に EKS のデフォルトバージョンに追従させる。
 # 更新コマンド:
-#   for addon in aws-ebs-csi-driver metrics-server eks-node-monitoring-agent; do
+#   for addon in aws-ebs-csi-driver metrics-server eks-node-monitoring-agent snapshot-controller; do
 #     echo -n "$addon: "
 #     aws eks describe-addon-versions --addon-name "$addon" \
 #       --kubernetes-version 1.35 \
@@ -22,6 +22,7 @@ _ADDON_VERSIONS_K8S_135: dict[str, str] = {
     "aws-ebs-csi-driver": "v1.59.0-eksbuild.1",
     "metrics-server": "v0.8.1-eksbuild.6",
     "eks-node-monitoring-agent": "v1.6.4-eksbuild.1",
+    "snapshot-controller": "v8.5.0-eksbuild.3",
 }
 
 
@@ -96,14 +97,6 @@ class ClusterConfig:
     # consumer (Spark Structured Streaming) の checkpointLocation 用 S3 バケット名 suffix。
     # 実名は `kafka-consumer-checkpoint-{account}-{suffix}` (アカウント+環境でグローバル衝突を回避)。
     s3_consumer_checkpoint_suffix: str
-    # external-snapshotter のリリースタグ。
-    # snapshot-controller / VolumeSnapshotClass は未導入（EBS CSI の csi-snapshotter が
-    # 要求する CRD だけを apply する。実バックアップは AWS Backup の Backup Plan）。
-    # CRD のみ以下で再生成する:
-    #   VER=v8.5.0
-    #   BASE=https://github.com/kubernetes-csi/external-snapshotter
-    #   kubectl kustomize "$BASE/client/config/crd?ref=$VER" > manifests/snapshotter/crds.yaml
-    external_snapshotter_version: str
 
     @classmethod
     def for_dev(cls, cluster_name: str = "eks-cluster-dev") -> ClusterConfig:
@@ -151,7 +144,6 @@ class ClusterConfig:
             s3_table_bucket_name="kafka-events-dev",
             s3_table_bucket_removal_policy=RemovalPolicy.DESTROY,
             s3_consumer_checkpoint_suffix="dev",
-            external_snapshotter_version="v8.5.0",
         )
 
     @classmethod
@@ -191,7 +183,6 @@ class ClusterConfig:
             s3_table_bucket_name="kafka-events-stg",
             s3_table_bucket_removal_policy=RemovalPolicy.RETAIN,
             s3_consumer_checkpoint_suffix="stg",
-            external_snapshotter_version="v8.5.0",
         )
 
     @classmethod
@@ -231,5 +222,4 @@ class ClusterConfig:
             s3_table_bucket_name="kafka-events",
             s3_table_bucket_removal_policy=RemovalPolicy.RETAIN,
             s3_consumer_checkpoint_suffix="prd",
-            external_snapshotter_version="v8.5.0",
         )

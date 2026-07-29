@@ -9,10 +9,9 @@ from aws_cdk import aws_iam as iam
 from constructs import Construct
 
 from ekscdk.config import ClusterConfig
-from ekscdk.constructs._manifest import load, load_all, manifest_dir
+from ekscdk.constructs._manifest import load, manifest_dir
 
 _DIR = manifest_dir("addons")
-_DIR_SNAPSHOTTER = manifest_dir("snapshotter")
 
 
 class AddonsConstruct(Construct):
@@ -29,7 +28,6 @@ class AddonsConstruct(Construct):
         self._config = config
 
         self._add_eks_addons()
-        self._add_external_snapshotter()
         self._strimzi_chart = self._add_strimzi()
         self._aws_lbc_chart = self._add_aws_lbc()
 
@@ -99,22 +97,16 @@ class AddonsConstruct(Construct):
             },
         )
 
-    def _add_external_snapshotter(self) -> None:
-        """external-snapshotter の CRD だけを apply する。
-
-        EBS CSI Driver の csi-snapshotter サイドカーは起動時に VolumeSnapshotClass CRD を
-        watch するため、CRD が無いと "the server could not find the requested resource"
-        エラーが永続的にログに出続ける。CRD さえあれば watch は成立してエラーは消える。
-
-        VolumeSnapshot ワークフローを動かす snapshot-controller と、参照される
-        VolumeSnapshotClass は実需が無いので導入しない。実バックアップ運用は
-        AWS Backup の Backup Plan で broker / controller の EBS を並列スナップショット
-        する想定で、Kubernetes 側で VolumeSnapshot リソースを作る予定が無いため。
-        必要になった時点で snapshot-controller を足す。
-        """
-        self._cluster.add_manifest(
-            "ExtSnapshotterCrds",
-            *load_all(_DIR_SNAPSHOTTER, "crds.yaml"),
+        # snapshot-controller は aws-ebs-csi-driver とは別の EKS Managed Addon。
+        # VolumeSnapshot 系 CRD + controller 本体をまとめて管理してくれるため、
+        # CRD だけを self-managed で apply する運用は行わない。
+        # SA を事前作成しないため衝突要因が無く、ResolveConflicts のエスケープハッチも不要。
+        eks.Addon(
+            self,
+            "SnapshotController",
+            cluster=self._cluster,
+            addon_name="snapshot-controller",
+            addon_version=self._config.addon_versions["snapshot-controller"],
         )
 
     def _add_strimzi(self) -> eks.HelmChart:

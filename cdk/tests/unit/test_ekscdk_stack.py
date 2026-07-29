@@ -238,6 +238,7 @@ def test_application_log_group_retention_matches_config(template):
         "aws-ebs-csi-driver",
         "metrics-server",
         "eks-node-monitoring-agent",
+        "snapshot-controller",
     ],
 )
 def test_eks_addon_present(template, addon_name):
@@ -761,20 +762,6 @@ def test_vpc_flow_log_disabled_in_dev():
     infra_stack = EksCdkStack(app, "EksCdkStack", admin_role=iam_stack.eks_admin_role, config=config, env=env)
     dev_template = assertions.Template.from_stack(infra_stack)
     dev_template.resource_count_is("AWS::EC2::FlowLog", 0)
-
-
-def test_external_snapshotter_crds_applied(template):
-    # external-snapshotter の CRD（VolumeSnapshot 系・VolumeGroupSnapshot 系）が
-    # KubernetesResource として apply される。snapshot-controller / csi-snapshotter が
-    # 起動時に watch する型定義なので、controller より先に apply される必要がある。
-    all_k8s = template.find_resources("Custom::AWSCDK-EKS-KubernetesResource")
-    matches = [
-        res
-        for res in all_k8s.values()
-        if '"kind":"CustomResourceDefinition"' in _manifest_literals(res["Properties"]["Manifest"])
-        and '"volumesnapshots.snapshot.storage.k8s.io"' in _manifest_literals(res["Properties"]["Manifest"])
-    ]
-    assert len(matches) >= 1
 
 
 def test_eks_admin_role_trust_policy(iam_template):
