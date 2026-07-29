@@ -34,62 +34,70 @@ class AddonsConstruct(Construct):
         self._aws_lbc_chart = self._add_aws_lbc()
 
     def _add_eks_addons(self) -> None:
-        # EBS CSI Driver 用 Pod Identity
-        ebs_csi_sa = self._cluster.add_service_account(
-            "EbsCsiSa",
-            name="ebs-csi-controller-sa",
-            namespace="kube-system",
-            identity_type=eks.IdentityType.POD_IDENTITY,
+        # aws-ebs-csi-driver addon は ebs-csi-controller-sa という ServiceAccount を
+        # 自身で作成するため、CDK 側では add_service_account で SA を作らない
+        # （事前に同名 SA を作ると addon 作成時に衝突するため）。
+        # ただし PodIdentityAssociations の RoleArn は EKS/addon 側が自動生成できない
+        # （どのポリシーを付けるかはワークロード固有の権限設計でユーザー側が決める事項のため）。
+        # そのため IAM Role の作成だけは CDK 側に残す必要がある。
+        ebs_csi_role = iam.Role(
+            self,
+            "EbsCsiPodIdentityRole",
+            assumed_by=iam.ServicePrincipal("pods.eks.amazonaws.com").with_session_tags(),  # type: ignore[arg-type]
         )
-        ebs_csi_sa.role.add_managed_policy(
+        ebs_csi_role.add_managed_policy(
             iam.ManagedPolicy.from_aws_managed_policy_name("service-role/AmazonEBSCSIDriverPolicy")
         )
 
-        for addon_name, construct_id in {
-            "vpc-cni": "VpcCni",
-            "coredns": "CoreDns",
-            "kube-proxy": "KubeProxy",
-            "aws-ebs-csi-driver": "EbsCsiDriver",
-            "metrics-server": "MetricsServer",
-            "eks-node-monitoring-agent": "NodeMonitoringAgent",
-        }.items():
-            addon = eks.Addon(
-                self,
-                construct_id,
-                cluster=self._cluster,
-                addon_name=addon_name,
-                addon_version=self._config.addon_versions[addon_name],
-            )
-            # aws_eks_v2.Addon は ResolveConflicts を公開していないためエスケープハッチで設定する。
-            # OVERWRITE にしないと既存 SA のラベルと衝突してデプロイが失敗する。
-            cfn_addon = cast(eks_l1.CfnAddon, addon.node.default_child)
-            cfn_addon.add_override("Properties.ResolveConflicts", "OVERWRITE")
-            if addon_name == "eks-node-monitoring-agent":
-                # NMA は --verbosity フラグを zap level に -1 倍して渡すため、
-                # WARN 以上 (zapcore.WarnLevel = 1) にするには --verbosity=-1。
-                # additionalArgs は完全置換なので chart デフォルトの --metrics-address も含める。
-                cfn_addon.add_property_override(
-                    "ConfigurationValues",
-                    json.dumps(
-                        {
-                            "nodeAgent": {
-                                "additionalArgs": [
-                                    "--metrics-address=:8003",
-                                    "--verbosity=-1",
-                                ],
-                            },
-                        }
-                    ),
-                )
+        # vpc-cni/coredns/kube-proxy は bootstrap_self_managed_addons のデフォルト（True）
+        # による self-managed 版をそのまま使うため、ここでは明示管理しない。
 
-        # aws_eks_v2.Cluster が自動追加する eks-pod-identity-agent Addon は
-        # CDK API から AddonVersion を渡せないため CFN プロパティ override で pin する。
-        pod_identity_addon = self._cluster.node.try_find_child("EksPodIdentityAgentAddon")
-        if pod_identity_addon is not None:
-            cfn_pod_identity = cast(eks_l1.CfnAddon, pod_identity_addon.node.default_child)
-            cfn_pod_identity.add_property_override(
-                "AddonVersion", self._config.addon_versions["eks-pod-identity-agent"]
-            )
+        # aws_eks_v2.Addon（L2）は PodIdentityAssociations を公開していないため、
+        # aws-ebs-csi-driver だけは L1 の CfnAddon を直接使う。
+        # SA を自身で作らない他の addon と違い競合する事前作成 SA も無いため、
+        # ResolveConflicts のエスケープハッチは不要。
+        eks_l1.CfnAddon(
+            self,
+            "EbsCsiDriver",
+            addon_name="aws-ebs-csi-driver",
+            cluster_name=self._cluster.cluster_name,
+            addon_version=self._config.addon_versions["aws-ebs-csi-driver"],
+            pod_identity_associations=[
+                eks_l1.CfnAddon.PodIdentityAssociationProperty(
+                    role_arn=ebs_csi_role.role_arn,
+                    service_account="ebs-csi-controller-sa",
+                )
+            ],
+        )
+
+        # metrics-server / eks-node-monitoring-agent は SA を事前作成しないため衝突要因が無く、
+        # ResolveConflicts のエスケープハッチも不要。L2 の Addon で十分。
+        eks.Addon(
+            self,
+            "MetricsServer",
+            cluster=self._cluster,
+            addon_name="metrics-server",
+            addon_version=self._config.addon_versions["metrics-server"],
+        )
+
+        eks.Addon(
+            self,
+            "NodeMonitoringAgent",
+            cluster=self._cluster,
+            addon_name="eks-node-monitoring-agent",
+            addon_version=self._config.addon_versions["eks-node-monitoring-agent"],
+            # NMA は --verbosity フラグを zap level に -1 倍して渡すため、
+            # WARN 以上 (zapcore.WarnLevel = 1) にするには --verbosity=-1。
+            # additionalArgs は完全置換なので chart デフォルトの --metrics-address も含める。
+            configuration_values={
+                "nodeAgent": {
+                    "additionalArgs": [
+                        "--metrics-address=:8003",
+                        "--verbosity=-1",
+                    ],
+                },
+            },
+        )
 
     def _add_external_snapshotter(self) -> None:
         """external-snapshotter の CRD だけを apply する。

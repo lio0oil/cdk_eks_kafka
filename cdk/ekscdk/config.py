@@ -7,27 +7,21 @@ from aws_cdk import aws_eks_v2 as eks
 from aws_cdk import aws_logs as logs
 
 # Kubernetes 1.35 向けアドオン最新バージョン（2026-05 時点）
+# vpc-cni/coredns/kube-proxy は bootstrap_self_managed_addons のデフォルト（True）による
+# self-managed 版をそのまま使うためここでは管理しない（EKS のデフォルトバージョンに追従する）。
+# eks-pod-identity-agent は aws_eks_v2.Cluster が `IdentityType.POD_IDENTITY` の SA を
+# 作る際に内部で自動追加する Addon で、同様に EKS のデフォルトバージョンに追従させる。
 # 更新コマンド:
-#   for addon in vpc-cni coredns kube-proxy aws-ebs-csi-driver \
-#                metrics-server eks-node-monitoring-agent eks-pod-identity-agent; do
+#   for addon in aws-ebs-csi-driver metrics-server eks-node-monitoring-agent; do
 #     echo -n "$addon: "
 #     aws eks describe-addon-versions --addon-name "$addon" \
 #       --kubernetes-version 1.35 \
 #       --query 'addons[0].addonVersions[0].addonVersion' --output text
 #   done
-#
-# `eks-pod-identity-agent` は aws_eks_v2.Cluster が `IdentityType.POD_IDENTITY` の
-# SA を作る際に内部で自動追加する Addon。デフォルトでは AddonVersion が未指定で
-# latest 追従になるため、他 addon と整合性を取って明示 pin し、CDK が作成済みの
-# Construct に CFN プロパティ override で AddonVersion を注入する。
 _ADDON_VERSIONS_K8S_135: dict[str, str] = {
-    "vpc-cni": "v1.21.1-eksbuild.8",
-    "coredns": "v1.14.2-eksbuild.4",
-    "kube-proxy": "v1.35.3-eksbuild.5",
     "aws-ebs-csi-driver": "v1.59.0-eksbuild.1",
     "metrics-server": "v0.8.1-eksbuild.6",
     "eks-node-monitoring-agent": "v1.6.4-eksbuild.1",
-    "eks-pod-identity-agent": "v1.3.10-eksbuild.3",
 }
 
 

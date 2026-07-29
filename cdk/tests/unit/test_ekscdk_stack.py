@@ -235,9 +235,6 @@ def test_application_log_group_retention_matches_config(template):
 @pytest.mark.parametrize(
     "addon_name",
     [
-        "vpc-cni",
-        "coredns",
-        "kube-proxy",
         "aws-ebs-csi-driver",
         "metrics-server",
         "eks-node-monitoring-agent",
@@ -247,10 +244,18 @@ def test_eks_addon_present(template, addon_name):
     template.has_resource_properties("AWS::EKS::Addon", {"AddonName": addon_name})
 
 
+@pytest.mark.parametrize("addon_name", ["vpc-cni", "coredns", "kube-proxy"])
+def test_self_managed_networking_addon_not_managed(template, addon_name):
+    # vpc-cni/coredns/kube-proxy は bootstrap_self_managed_addons のデフォルト（True）
+    # による self-managed 版をそのまま使うため、EKS Managed Addon としては作成しない。
+    addons = template.find_resources("AWS::EKS::Addon")
+    matched = [res for res in addons.values() if res["Properties"].get("AddonName") == addon_name]
+    assert matched == []
+
+
 @pytest.mark.parametrize(
     ("namespace", "service_account"),
     [
-        ("kube-system", "ebs-csi-controller-sa"),
         ("kube-system", "aws-load-balancer-controller"),
         ("monitoring", "fluent-bit"),
         ("monitoring", "grafana"),
@@ -261,6 +266,21 @@ def test_pod_identity_association_exists(template, namespace, service_account):
     template.has_resource_properties(
         "AWS::EKS::PodIdentityAssociation",
         {"Namespace": namespace, "ServiceAccount": service_account},
+    )
+
+
+def test_ebs_csi_driver_addon_manages_own_pod_identity(template):
+    # aws-ebs-csi-driver addon は ebs-csi-controller-sa という ServiceAccount を
+    # 自身で作成するため、CDK 側で add_service_account による事前作成はせず、
+    # addon の PodIdentityAssociations に IAM Role を渡して addon に管理させる。
+    template.has_resource_properties(
+        "AWS::EKS::Addon",
+        {
+            "AddonName": "aws-ebs-csi-driver",
+            "PodIdentityAssociations": assertions.Match.array_with(
+                [assertions.Match.object_like({"ServiceAccount": "ebs-csi-controller-sa"})]
+            ),
+        },
     )
 
 
@@ -626,16 +646,14 @@ def test_kafka_topic_test_topic_is_applied(template):
     assert '"replicas":3' in literals
 
 
-def test_eks_pod_identity_agent_addon_version_pinned(template):
-    # aws_eks_v2.Cluster が自動追加する eks-pod-identity-agent Addon にも
-    # 他 addon と同じく AddonVersion が明示されている（latest 追従を防ぐ）。
-    template.has_resource_properties(
-        "AWS::EKS::Addon",
-        {
-            "AddonName": "eks-pod-identity-agent",
-            "AddonVersion": ClusterConfig.for_prd().addon_versions["eks-pod-identity-agent"],
-        },
-    )
+def test_eks_pod_identity_agent_addon_version_not_pinned(template):
+    # aws_eks_v2.Cluster が自動追加する eks-pod-identity-agent Addon は、
+    # vpc-cni/coredns/kube-proxy と同様に EKS のデフォルトバージョンに追従させるため
+    # AddonVersion を明示しない。
+    addons = template.find_resources("AWS::EKS::Addon")
+    matched = [res for res in addons.values() if res["Properties"].get("AddonName") == "eks-pod-identity-agent"]
+    assert len(matched) == 1
+    assert "AddonVersion" not in matched[0]["Properties"]
 
 
 def test_cluster_control_plane_logging_enabled(template):
