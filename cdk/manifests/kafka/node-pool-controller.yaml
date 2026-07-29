@@ -17,7 +17,7 @@ spec:
       - id: 0
         type: persistent-claim
         size: 20Gi
-        class: gp3
+        class: gp3-kafka
         kraftMetadata: shared
         deleteClaim: <DELETE_CLAIM>
   resources:

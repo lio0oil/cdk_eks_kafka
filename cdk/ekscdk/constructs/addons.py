@@ -28,6 +28,7 @@ class AddonsConstruct(Construct):
         self._config = config
 
         self._add_eks_addons()
+        self._add_gp3_storage_class()
         self._strimzi_chart = self._add_strimzi()
         self._aws_lbc_chart = self._add_aws_lbc()
 
@@ -109,9 +110,12 @@ class AddonsConstruct(Construct):
             addon_version=self._config.addon_versions["snapshot-controller"],
         )
 
-    def _add_strimzi(self) -> eks.HelmChart:
+    def _add_gp3_storage_class(self) -> None:
+        # Kafka broker/controller と Prometheus/Alertmanager が共有するデフォルト StorageClass。
+        # Kafka 専用の StorageClass（gp3-kafka）は単一消費者のため KafkaConstruct 側で管理する。
         self._cluster.add_manifest("Gp3StorageClass", load(_DIR, "gp3-storageclass.yaml"))
 
+    def _add_strimzi(self) -> eks.HelmChart:
         return self._cluster.add_helm_chart(
             "StrimziOperator",
             chart="strimzi-kafka-operator",

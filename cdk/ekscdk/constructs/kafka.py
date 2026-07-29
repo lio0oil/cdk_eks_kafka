@@ -54,6 +54,13 @@ class KafkaConstruct(Construct):
         # delete_claim を YAML の boolean リテラル文字列に変換（True → "true"）
         delete_claim_str = "true" if delete_claim else "false"
 
+        # ── gp3-kafka StorageClass ───────────────────────────────────────────
+        # Kafka broker/controller の I/O 特性は Prometheus/Alertmanager と異なるため、
+        # AddonsConstruct が管理する default StorageClass（gp3）を共有せず、
+        # broker/controller 専用の StorageClass を用意する（IOPS/throughput を
+        # 監視系と切り離して個別チューニングできるようにするため）。
+        cluster.add_manifest("Gp3KafkaStorageClass", load(_DIR, "gp3-kafka-storageclass.yaml"))
+
         # ── KafkaNodePool: controller ─────────────────────────────────────────
         controller_pool = cluster.add_manifest(
             "KafkaControllerPool",

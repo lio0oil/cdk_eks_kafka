@@ -647,6 +647,43 @@ def test_kafka_topic_test_topic_is_applied(template):
     assert '"replicas":3' in literals
 
 
+def test_gp3_storage_classes_split_by_workload(template):
+    # Kafka broker/controller と Prometheus/Alertmanager は I/O 特性が異なるため、
+    # gp3 StorageClass を共有せず gp3（default, 監視系用）と gp3-kafka（Kafka 専用）に分離する。
+    # default StorageClass が 2 つ存在すると provisioning 先が曖昧になるため、
+    # default を名乗るのは gp3 のみであることも検証する。
+    all_k8s = template.find_resources("Custom::AWSCDK-EKS-KubernetesResource")
+    storage_classes = [
+        res for res in all_k8s.values() if '"kind":"StorageClass"' in _manifest_literals(res["Properties"]["Manifest"])
+    ]
+    assert len(storage_classes) == 2
+
+    literals_by_name = {}
+    for res in storage_classes:
+        literals = _manifest_literals(res["Properties"]["Manifest"])
+        for name in ("gp3", "gp3-kafka"):
+            if f'"name":"{name}"' in literals:
+                literals_by_name[name] = literals
+    assert set(literals_by_name) == {"gp3", "gp3-kafka"}
+
+    assert '"storageclass.kubernetes.io/is-default-class":"true"' in literals_by_name["gp3"]
+    assert '"storageclass.kubernetes.io/is-default-class":"true"' not in literals_by_name["gp3-kafka"]
+
+
+def test_kafka_node_pools_use_dedicated_storage_class(template):
+    # broker/controller の EBS 性能要件は監視系（gp3 default）と切り離して個別チューニング
+    # できるようにするため、gp3-kafka を参照していること（旧 default gp3 の参照が
+    # 残っていないこと）を確認する。
+    all_k8s = template.find_resources("Custom::AWSCDK-EKS-KubernetesResource")
+    node_pools = [
+        res for res in all_k8s.values() if '"kind":"KafkaNodePool"' in _manifest_literals(res["Properties"]["Manifest"])
+    ]
+    assert len(node_pools) == 2
+    for res in node_pools:
+        literals = _manifest_literals(res["Properties"]["Manifest"])
+        assert '"class":"gp3-kafka"' in literals
+
+
 def test_eks_pod_identity_agent_addon_version_not_pinned(template):
     # aws_eks_v2.Cluster が自動追加する eks-pod-identity-agent Addon は、
     # vpc-cni/coredns/kube-proxy と同様に EKS のデフォルトバージョンに追従させるため
