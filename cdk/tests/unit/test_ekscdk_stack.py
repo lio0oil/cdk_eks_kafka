@@ -734,6 +734,22 @@ def test_target_group_binding_count_matches_broker_count(template):
     assert len(bindings) == 1 + ClusterConfig.for_prd().broker_count
 
 
+def test_target_group_binding_service_name_uses_broker_pool_name(template):
+    # broker KafkaNodePool 名は `broker`（node-pool-broker.yaml の metadata.name）。
+    # Strimzi の Service 命名規則 <cluster>-<pool>-<id> に従うため、
+    # TargetGroupBinding の serviceRef.name は kafka-cluster-broker-* を参照する。
+    all_k8s = template.find_resources("Custom::AWSCDK-EKS-KubernetesResource")
+    bindings_literals = [
+        _manifest_literals(res["Properties"]["Manifest"])
+        for res in all_k8s.values()
+        if "TargetGroupBinding" in _manifest_literals(res["Properties"]["Manifest"])
+    ]
+    assert bindings_literals
+    for literals in bindings_literals:
+        assert '"name":"kafka-cluster-broker-' in literals
+        assert '"name":"kafka-cluster-kafka-' not in literals
+
+
 def test_kafka_cluster_manifest_includes_all_broker_node_ports(template):
     # external listener の bootstrap.nodePort および brokers[] が KafkaCluster manifest に
     # 正しく含まれていることを確認する。
@@ -821,7 +837,7 @@ def test_kafka_broker_pool_resources_come_from_config(template, config):
     broker_pool = next(
         res
         for res in node_pools
-        if '"metadata":{"name":"kafka","namespace"' in _manifest_literals(res["Properties"]["Manifest"])
+        if '"metadata":{"name":"broker","namespace"' in _manifest_literals(res["Properties"]["Manifest"])
     )
     literals = _manifest_literals(broker_pool["Properties"]["Manifest"])
     resources = config.kafka_broker_resources

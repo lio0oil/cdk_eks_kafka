@@ -37,8 +37,8 @@ chart デフォルトの datasource（`name: Prometheus`、`isDefault: true`、`
 ### Shared NLB の ARN 固定 + AWS LBC TargetGroupBinding
 NLB 本体・VPC Endpoint Service・**TargetGroup / Listener** は CDK（`NetworkConstruct`）で作成して ARN を固定する。NLB を再作成すると ARN が変わって PrivateLink が壊れるため、`NetworkConstruct` の変更は慎重に行う。Strimzi の per-broker NodePort Service とのバインドは AWS LBC の `TargetGroupBinding` CRD（`KafkaConstruct` が manifest として apply）が動的に行う。Pod 移動時にも追従。
 
-### broker KafkaNodePool 名は `kafka` 固定
-`node-pool-broker.yaml` の `metadata.name` は `kafka`。リファレンス（data-on-eks）は `broker` だが本プロジェクトでは変更している。理由は Strimzi が生成する per-broker Service の命名規則が `<cluster_name>-<pool_name>-<broker_id>`（本プロジェクトでは `kafka-cluster-kafka-<broker_id>`）であり、`KafkaConstruct` が TargetGroupBinding の `serviceRef.name` をこの形で組み立てているため。pool 名を変更すると Service 名解決が壊れて NLB から broker への経路が不通になる。pool 名を変えるなら `KafkaConstruct` 側の Service 名生成ロジックも同時に合わせる必要がある。controller pool は外部 NLB 経路を持たないため `controller` のままで良い。
+### broker KafkaNodePool 名は `broker`
+`node-pool-broker.yaml` の `metadata.name` は `broker`（リファレンス data-on-eks と同じ）。Strimzi が生成する per-broker Service の命名規則は `<cluster_name>-<pool_name>-<broker_id>`（本プロジェクトでは `kafka-cluster-broker-<broker_id>`）で、`KafkaConstruct` の TargetGroupBinding `serviceRef.name` 組み立て（`kafka.py` 内 `service_name` 変数）と `node-pool-broker.yaml` の `podAntiAffinity` / `topologySpreadConstraints` のラベルセレクタがこの pool 名に依存している。pool 名を変える場合はこれら参照箇所を同時に合わせる必要がある（過去に `kafka` 固定にしていたが、Service 名生成ロジックの追従修正込みで `broker` に変更した）。controller pool は外部 NLB 経路を持たないため `controller` のままで良い。
 
 ### Strimzi の apiVersion は `kafka.strimzi.io/v1`
 Strimzi 1.0.0 で `v1` が正式 API として昇格し、`v1beta2` / `v1beta1` / `v1alpha1` は廃止された。`kafka-cluster.yaml`・`node-pool-*.yaml`・`kafka-rebalance.yaml` はすべて `apiVersion: kafka.strimzi.io/v1` が正しい。`v1beta2` への変更は誤り。

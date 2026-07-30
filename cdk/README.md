@@ -617,7 +617,7 @@ kubectl delete configmap kafka-test-ca
 ```
 === TLS handshake ===
 Protocol version: TLSv1.3
-Peer certificate: O=io.strimzi, CN=kafka-cluster-kafka
+Peer certificate: O=io.strimzi, CN=kafka-cluster-broker
 Verification: OK
 
 === broker メタデータ取得 ===
@@ -648,22 +648,22 @@ strimzi.cruisecontrol.partitionmetricsamples
 
 ```bash
 # topic 作成
-kubectl exec -n kafka kafka-cluster-kafka-0 -c kafka -- bin/kafka-topics.sh \
+kubectl exec -n kafka kafka-cluster-broker-0 -c kafka -- bin/kafka-topics.sh \
   --bootstrap-server localhost:9092 \
   --create --topic test-topic --partitions 3 --replication-factor 3
 
 # 100 件 produce
-kubectl exec -n kafka kafka-cluster-kafka-0 -c kafka -- bash -c '
+kubectl exec -n kafka kafka-cluster-broker-0 -c kafka -- bash -c '
   for i in $(seq 1 100); do echo "msg-$i"; done \
     | bin/kafka-console-producer.sh --bootstrap-server localhost:9092 --topic test-topic'
 
 # 50 件だけ consume（lag を 50 残す）
-kubectl exec -n kafka kafka-cluster-kafka-0 -c kafka -- bin/kafka-console-consumer.sh \
+kubectl exec -n kafka kafka-cluster-broker-0 -c kafka -- bin/kafka-console-consumer.sh \
   --bootstrap-server localhost:9092 --topic test-topic \
   --group test-group --from-beginning --max-messages 50 --timeout-ms 10000
 
 # consumer group の状態を確認
-kubectl exec -n kafka kafka-cluster-kafka-0 -c kafka -- bin/kafka-consumer-groups.sh \
+kubectl exec -n kafka kafka-cluster-broker-0 -c kafka -- bin/kafka-consumer-groups.sh \
   --bootstrap-server localhost:9092 --describe --group test-group
 ```
 
@@ -672,9 +672,9 @@ kubectl exec -n kafka kafka-cluster-kafka-0 -c kafka -- bin/kafka-consumer-group
 クリーンアップ：
 
 ```bash
-kubectl exec -n kafka kafka-cluster-kafka-0 -c kafka -- bin/kafka-topics.sh \
+kubectl exec -n kafka kafka-cluster-broker-0 -c kafka -- bin/kafka-topics.sh \
   --bootstrap-server localhost:9092 --delete --topic test-topic
-kubectl exec -n kafka kafka-cluster-kafka-0 -c kafka -- bin/kafka-consumer-groups.sh \
+kubectl exec -n kafka kafka-cluster-broker-0 -c kafka -- bin/kafka-consumer-groups.sh \
   --bootstrap-server localhost:9092 --delete --group test-group
 ```
 
@@ -740,7 +740,7 @@ kubectl get kafkatopic,kafkauser -n kafka
 # sample-app   kafka-cluster   tls                              True
 
 # 3. Topic Operator が Kafka API に同期したか確認
-kubectl exec -n kafka kafka-cluster-kafka-0 -c kafka -- bin/kafka-topics.sh \
+kubectl exec -n kafka kafka-cluster-broker-0 -c kafka -- bin/kafka-topics.sh \
   --bootstrap-server localhost:9092 --describe --topic sample-events
 # Topic: sample-events PartitionCount: 6 ReplicationFactor: 3
 # Configs: cleanup.policy=delete,retention.ms=604800000
@@ -935,16 +935,16 @@ broker / controller の PV を EBS スナップショットとしてバックア
 ```bash
 # broker-0 PV の EBS Volume ID を取得
 PV_HANDLE=$(kubectl get pv -o jsonpath='{range .items[*]}{.spec.csi.volumeHandle},{.spec.claimRef.name}{"\n"}{end}' \
-  | grep "data-0-kafka-cluster-kafka-0" | cut -d, -f1)
+  | grep "data-0-kafka-cluster-broker-0" | cut -d, -f1)
 
 # Snapshot 取得
 aws ec2 create-snapshot --volume-id $PV_HANDLE \
   --description "kafka-broker-0 daily backup $(date -u +%Y-%m-%dT%H:%M:%SZ)" \
-  --tag-specifications 'ResourceType=snapshot,Tags=[{Key=Cluster,Value=kafka-cluster},{Key=Pod,Value=kafka-0}]'
+  --tag-specifications 'ResourceType=snapshot,Tags=[{Key=Cluster,Value=kafka-cluster},{Key=Pod,Value=broker-0}]'
 
 # 全 broker / controller を一括取得（運用ではこれを cron / Lambda で日次実行）
 for n in 0 1 2; do
-  for role in kafka controller; do
+  for role in broker controller; do
     pvc="data-0-kafka-cluster-${role}-${n}"
     [ "$role" = "controller" ] && pvc="data-0-kafka-cluster-controller-$((n+3))"
     vol=$(kubectl get pv -o jsonpath='{range .items[*]}{.spec.csi.volumeHandle},{.spec.claimRef.name}{"\n"}{end}' | grep ",$pvc$" | cut -d, -f1)
