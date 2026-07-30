@@ -46,7 +46,7 @@ class EksCdkStack(Stack):
         )
         addons = AddonsConstruct(self, "Addons", cluster=eks_construct.cluster, config=config)
         addons.node.add_dependency(eks_construct)
-        kafka = KafkaConstruct(
+        KafkaConstruct(
             self,
             "Kafka",
             cluster=eks_construct.cluster,
@@ -57,17 +57,18 @@ class EksCdkStack(Stack):
             nlb_sg_id=network.kafka_nlb_sg.security_group_id,
             external_listener_name=external_listener_name,
             aws_lbc_chart=addons.aws_lbc_chart,
+            strimzi_chart=addons.strimzi_chart,
+            kafka_namespace=addons.kafka_namespace,
             delete_claim=config.delete_claim,
             controller_count=config.kafka_controller_count,
         )
-        kafka.node.add_dependency(addons)
         MonitoringConstruct(
             self,
             "Monitoring",
             cluster=eks_construct.cluster,
             config=config,
             addons=addons,
-            kafka_namespace=kafka.kafka_namespace,
+            kafka_namespace=addons.kafka_namespace,
         )
 
         CfnOutput(self, "KafkaNlbDnsName", value=network.kafka_nlb.load_balancer_dns_name)

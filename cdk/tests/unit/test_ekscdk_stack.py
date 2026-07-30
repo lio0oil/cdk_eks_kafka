@@ -5,6 +5,9 @@ from aws_cdk import aws_iam as iam
 
 from ekscdk.config import ClusterConfig
 from ekscdk.constructs._manifest import build_kafka_nlb_ports, manifest_dir
+from ekscdk.constructs.addons import AddonsConstruct
+from ekscdk.constructs.eks_cluster import EksClusterConstruct
+from ekscdk.constructs.network import NetworkConstruct
 from ekscdk.ekscdk_stack import EksCdkStack
 from ekscdk.iam_stack import IamStack
 
@@ -59,6 +62,11 @@ def iam_template(_app_stacks):
 
 
 @pytest.fixture(scope="module")
+def config():
+    return ClusterConfig.for_prd()
+
+
+@pytest.fixture(scope="module")
 def dev_template():
     # env 別の挙動差（SNS log forwarder 等）を検証するため dev config の template を別途合成する。
     app = core.App()
@@ -73,6 +81,40 @@ def dev_template():
     )
     infra_stack = EksCdkStack(app, "ekscdkDev", admin_role=iam_stack.eks_admin_role, config=_config, env=env)
     return assertions.Template.from_stack(infra_stack)
+
+
+@pytest.fixture(scope="module")
+def addons_only_template():
+    # Network → EksCluster → Addons までの段階的デプロイを模した最小 stack。
+    # KafkaConstruct を意図的に含めず、Addons 単体でも synth 可能なことを検証する。
+    app = core.App()
+    env = core.Environment(account="123456789012", region="ap-northeast-1")
+    _config = ClusterConfig.for_prd()
+    iam_stack = IamStack(
+        app,
+        "IamStackAddonsOnly",
+        admin_principal=iam.AccountRootPrincipal(),
+        role_name=_config.admin_role_name,
+        env=env,
+    )
+
+    class _AddonsOnlyStack(core.Stack):
+        def __init__(self, scope: core.App, construct_id: str, **kwargs: object) -> None:
+            super().__init__(scope, construct_id, **kwargs)
+            nlb_ports = build_kafka_nlb_ports(manifest_dir("kafka"), broker_count=_config.broker_count)
+            network = NetworkConstruct(self, "Network", nlb_ports=nlb_ports, config=_config)
+            eks_construct = EksClusterConstruct(
+                self,
+                "EksCluster",
+                vpc=network.vpc,
+                admin_role=iam_stack.eks_admin_role,
+                broker_count=_config.broker_count,
+                config=_config,
+            )
+            AddonsConstruct(self, "Addons", cluster=eks_construct.cluster, config=_config)
+
+    stack = _AddonsOnlyStack(app, "ekscdkAddonsOnly", env=env)
+    return assertions.Template.from_stack(stack)
 
 
 def test_stack_synthesizes(template):
@@ -282,6 +324,13 @@ def test_ebs_csi_driver_addon_manages_own_pod_identity(template):
                 [assertions.Match.object_like({"ServiceAccount": "ebs-csi-controller-sa"})]
             ),
         },
+    )
+
+
+def test_aws_lbc_pod_identity_role_has_explicit_name(template, config):
+    template.has_resource_properties(
+        "AWS::IAM::Role",
+        {"RoleName": f"aws-lbc-pod-identity-{config.cluster_name}"},
     )
 
 
@@ -595,6 +644,68 @@ def test_strimzi_operator_helm_chart_enables_pdb(template):
     assert len(strimzi) == 1
     values_literals = _manifest_literals(strimzi[0]["Properties"]["Values"])
     assert '"podDisruptionBudget":{"enabled":true}' in values_literals
+
+
+def test_strimzi_operator_waits_for_kafka_namespace(template):
+    """Strimzi chart は `watchNamespaces: ["kafka"]` を渡しており、対象 NS が事前に
+    存在しないと RoleBinding 作成時に `namespaces "kafka" not found` で Helm install
+    が失敗する。kafka Namespace の作成完了を明示的な DependsOn で担保する。
+    """
+    manifests = template.find_resources("Custom::AWSCDK-EKS-KubernetesResource")
+    namespace_ids = [
+        name
+        for name, res in manifests.items()
+        if '"kind":"Namespace"' in _manifest_literals(res["Properties"]["Manifest"])
+        and '"name":"kafka"' in _manifest_literals(res["Properties"]["Manifest"])
+    ]
+    assert len(namespace_ids) == 1
+    namespace_id = namespace_ids[0]
+
+    charts = template.find_resources("Custom::AWSCDK-EKS-HelmChart")
+    strimzi = [res for res in charts.values() if res["Properties"].get("Chart") == "strimzi-kafka-operator"]
+    assert len(strimzi) == 1
+    assert namespace_id in strimzi[0].get("DependsOn", [])
+
+
+def test_kafka_node_pools_wait_for_strimzi_operator(template):
+    """KafkaNodePool CRD は Strimzi Operator chart が導入するため、chart 導入前に
+    apply すると CRD 未登録で失敗する。chart の DependsOn を担保する。
+    """
+    charts = template.find_resources("Custom::AWSCDK-EKS-HelmChart")
+    strimzi_ids = [name for name, res in charts.items() if res["Properties"].get("Chart") == "strimzi-kafka-operator"]
+    assert len(strimzi_ids) == 1
+    strimzi_id = strimzi_ids[0]
+
+    manifests = template.find_resources("Custom::AWSCDK-EKS-KubernetesResource")
+    node_pools = [
+        res
+        for res in manifests.values()
+        if '"kind":"KafkaNodePool"' in _manifest_literals(res["Properties"]["Manifest"])
+    ]
+    assert len(node_pools) == 2
+    for pool in node_pools:
+        assert strimzi_id in pool.get("DependsOn", [])
+
+
+def test_addons_alone_creates_kafka_namespace_for_strimzi(addons_only_template):
+    """段階的デプロイ（Network/EksCluster/Addons のみ、KafkaConstruct 無し）でも、
+    Strimzi chart が要求する kafka Namespace が Addons 側で用意されることを固定する。
+    KafkaConstruct 側に namespace 作成を残すと、Addons だけを先に導入する段階で
+    `namespaces "kafka" not found` により Strimzi の Helm install が失敗する。
+    """
+    manifests = addons_only_template.find_resources("Custom::AWSCDK-EKS-KubernetesResource")
+    namespace_ids = [
+        name
+        for name, res in manifests.items()
+        if '"kind":"Namespace"' in _manifest_literals(res["Properties"]["Manifest"])
+        and '"name":"kafka"' in _manifest_literals(res["Properties"]["Manifest"])
+    ]
+    assert len(namespace_ids) == 1
+
+    charts = addons_only_template.find_resources("Custom::AWSCDK-EKS-HelmChart")
+    strimzi = [res for res in charts.values() if res["Properties"].get("Chart") == "strimzi-kafka-operator"]
+    assert len(strimzi) == 1
+    assert namespace_ids[0] in strimzi[0].get("DependsOn", [])
 
 
 def test_target_group_binding_count_matches_broker_count(template):

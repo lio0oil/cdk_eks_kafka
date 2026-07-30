@@ -15,12 +15,13 @@ _DIR = manifest_dir("kafka")
 class KafkaConstruct(Construct):
     """Kafka 基盤 Construct（Kubernetes リソースのみ管理）
 
-    - kafka Namespace
     - JMX メトリクス ConfigMap
     - KafkaNodePool（controller x3 / broker x3）
     - Kafka CR（KRaft モード / 外部リスナー NodePort）
     - TargetGroupBinding（NLB TargetGroup と Strimzi NodePort Service の動的バインド）
 
+    kafka Namespace は Strimzi chart（AddonsConstruct）の watchNamespaces が事前存在を
+    要求するため AddonsConstruct 側で作成し、ここでは受け取って利用するだけ。
     NLB / SG / Listener / TargetGroup は NetworkConstruct が管理する。
     """
 
@@ -36,20 +37,16 @@ class KafkaConstruct(Construct):
         nlb_sg_id: str,
         external_listener_name: str,
         aws_lbc_chart: eks.HelmChart,
+        strimzi_chart: eks.HelmChart,
+        kafka_namespace: eks.KubernetesManifest,
         delete_claim: bool,
         controller_count: int,
     ) -> None:
         super().__init__(scope, construct_id)
 
-        # ── Namespace ─────────────────────────────────────────────────────────
-        namespace = cluster.add_manifest("KafkaNamespace", load(_DIR, "namespace.yaml"))
-        # PodMonitor が kafka NS に lookup できるよう、MonitoringConstruct から
-        # 依存を張れる参照として外に公開する。
-        self.kafka_namespace = namespace
-
         # ── JMX メトリクス ConfigMap ──────────────────────────────────────────
         cm = cluster.add_manifest("KafkaMetricsCm", load(_DIR, "cm.yaml"))
-        cm.node.add_dependency(namespace)
+        cm.node.add_dependency(kafka_namespace)
 
         # delete_claim を YAML の boolean リテラル文字列に変換（True → "true"）
         delete_claim_str = "true" if delete_claim else "false"
@@ -62,6 +59,8 @@ class KafkaConstruct(Construct):
         cluster.add_manifest("Gp3KafkaStorageClass", load(_DIR, "gp3-kafka-storageclass.yaml"))
 
         # ── KafkaNodePool: controller ─────────────────────────────────────────
+        # KafkaNodePool CRD は Strimzi Operator chart が導入するため、chart 未導入の
+        # クラスタに apply すると CRD 未登録で失敗する。
         controller_pool = cluster.add_manifest(
             "KafkaControllerPool",
             load_with_subs(
@@ -71,7 +70,8 @@ class KafkaConstruct(Construct):
                 CONTROLLER_REPLICAS=str(controller_count),
             ),
         )
-        controller_pool.node.add_dependency(namespace)
+        controller_pool.node.add_dependency(kafka_namespace)
+        controller_pool.node.add_dependency(strimzi_chart)
 
         # ── KafkaNodePool: broker ─────────────────────────────────────────────
         broker_pool = cluster.add_manifest(
@@ -83,7 +83,8 @@ class KafkaConstruct(Construct):
                 DELETE_CLAIM=delete_claim_str,
             ),
         )
-        broker_pool.node.add_dependency(namespace)
+        broker_pool.node.add_dependency(kafka_namespace)
+        broker_pool.node.add_dependency(strimzi_chart)
 
         # ── Kafka CR ──────────────────────────────────────────────────────────
         # kafka-cluster.yaml の external listener には brokers[] を含めず、

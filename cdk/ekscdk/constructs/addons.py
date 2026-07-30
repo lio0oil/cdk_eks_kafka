@@ -12,6 +12,7 @@ from ekscdk.config import ClusterConfig
 from ekscdk.constructs._manifest import load, manifest_dir
 
 _DIR = manifest_dir("addons")
+_DIR_KAFKA = manifest_dir("kafka")
 
 
 class AddonsConstruct(Construct):
@@ -29,8 +30,21 @@ class AddonsConstruct(Construct):
 
         self._add_eks_addons()
         self._add_gp3_storage_class()
-        self._strimzi_chart = self._add_strimzi()
+        self._kafka_namespace = self._add_kafka_namespace()
+        self._strimzi_chart = self._add_strimzi(self._kafka_namespace)
         self._aws_lbc_chart = self._add_aws_lbc()
+
+    def _add_kafka_namespace(self) -> eks.KubernetesManifest:
+        """kafka Namespace。
+
+        Strimzi chart（`_add_strimzi`）に `watchNamespaces: ["kafka"]` を渡しており、
+        対象 NS が事前に存在しないと RoleBinding 作成時に Helm install が失敗する
+        （`namespaces "kafka" not found`）。KafkaConstruct より前に Addons 側で
+        用意することで、KafkaConstruct を導入する前の段階的デプロイでも Addons 単体で
+        synth / deploy できるようにする。KafkaConstruct はこの Namespace を受け取って
+        NodePool 等の実体を apply する。
+        """
+        return self._cluster.add_manifest("KafkaNamespace", load(_DIR_KAFKA, "namespace.yaml"))
 
     def _add_eks_addons(self) -> None:
         # aws-ebs-csi-driver addon は ebs-csi-controller-sa という ServiceAccount を
@@ -42,6 +56,7 @@ class AddonsConstruct(Construct):
         ebs_csi_role = iam.Role(
             self,
             "EbsCsiPodIdentityRole",
+            role_name=f"ebs-csi-pod-identity-{self._config.cluster_name}",
             assumed_by=iam.ServicePrincipal("pods.eks.amazonaws.com").with_session_tags(),  # type: ignore[arg-type]
         )
         ebs_csi_role.add_managed_policy(
@@ -115,8 +130,8 @@ class AddonsConstruct(Construct):
         # Kafka 専用の StorageClass（gp3-kafka）は単一消費者のため KafkaConstruct 側で管理する。
         self._cluster.add_manifest("Gp3StorageClass", load(_DIR, "gp3-storageclass.yaml"))
 
-    def _add_strimzi(self) -> eks.HelmChart:
-        return self._cluster.add_helm_chart(
+    def _add_strimzi(self, kafka_namespace: eks.KubernetesManifest) -> eks.HelmChart:
+        chart = self._cluster.add_helm_chart(
             "StrimziOperator",
             chart="strimzi-kafka-operator",
             repository=self._config.strimzi_chart_repo,
@@ -149,6 +164,19 @@ class AddonsConstruct(Construct):
                 "podDisruptionBudget": {"enabled": True},
             },
         )
+        # watchNamespaces=["kafka"] が RoleBinding を作る対象 NS の存在を前提にするため、
+        # kafka Namespace の作成完了を待ってから導入する。
+        chart.node.add_dependency(kafka_namespace)
+        return chart
+
+    @property
+    def kafka_namespace(self) -> eks.KubernetesManifest:
+        """kafka Namespace リソース。
+
+        KafkaConstruct が NodePool / Kafka CR 等の実体を apply する際の依存先、
+        および MonitoringConstruct が PodMonitor を kafka NS に紐付ける際の依存先として使う。
+        """
+        return self._kafka_namespace
 
     @property
     def aws_lbc_chart(self) -> eks.HelmChart:
@@ -183,6 +211,9 @@ class AddonsConstruct(Construct):
             namespace="kube-system",
             identity_type=eks.IdentityType.POD_IDENTITY,
         )
+        # add_service_account（L2）は内部生成する IAM Role の role_name を公開していないため、
+        # L1 escape hatch で明示的に名前を付ける。
+        cast(iam.CfnRole, sa.role.node.default_child).role_name = f"aws-lbc-pod-identity-{self._config.cluster_name}"
         # AWS LBC 公式 IAM ポリシー
         with open(os.path.join(_DIR, "aws-lbc-iam-policy.json")) as f:
             policy_doc = json.load(f)
