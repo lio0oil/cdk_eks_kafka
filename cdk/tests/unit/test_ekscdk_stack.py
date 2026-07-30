@@ -206,6 +206,21 @@ def test_kafka_advertised_host_uses_private_dns_name(template):
     assert '"advertisedHost":"kafka.local"' in literals
 
 
+def test_kafka_cluster_disables_auto_topic_creation(template):
+    # 存在しない Topic への接続で自動作成させず UNKNOWN_TOPIC_OR_PARTITION エラーにするため、
+    # auto.create.topics.enable を明示的に false にする。
+    all_k8s = template.find_resources("Custom::AWSCDK-EKS-KubernetesResource")
+    kafka_crs = [
+        res
+        for res in all_k8s.values()
+        if '"kind":"Kafka"' in _manifest_literals(res["Properties"]["Manifest"])
+        and '"kind":"KafkaNodePool"' not in _manifest_literals(res["Properties"]["Manifest"])
+    ]
+    assert len(kafka_crs) == 1
+    literals = _manifest_literals(kafka_crs[0]["Properties"]["Manifest"])
+    assert '"auto.create.topics.enable":false' in literals
+
+
 def _interface_endpoint_service_literals(template) -> list[str]:
     # Interface 型 VPC Endpoint の ServiceName をリテラル文字列化して返す。
     # ServiceName は com.amazonaws.<region>.<service> を Fn::Join で組み、region は

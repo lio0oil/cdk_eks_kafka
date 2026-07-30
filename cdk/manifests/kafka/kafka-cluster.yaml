@@ -33,6 +33,8 @@ spec:
           # brokers[] は CDK 側で ClusterConfig.broker_count から動的に生成・注入する。
           # 採番ルールと注入処理は ekscdk.constructs._manifest.build_kafka_broker_configs を参照。
     config:
+      # 存在しない Topic に接続した際に自動作成させず、UNKNOWN_TOPIC_OR_PARTITION エラーにする。
+      auto.create.topics.enable: false
       offsets.topic.replication.factor: 3
       transaction.state.log.replication.factor: 3
       transaction.state.log.min.isr: 2
