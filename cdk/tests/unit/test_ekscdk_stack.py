@@ -795,6 +795,47 @@ def test_kafka_node_pools_use_dedicated_storage_class(template):
         assert '"class":"gp3-kafka"' in literals
 
 
+def test_kafka_broker_pool_resources_come_from_config(template, config):
+    # broker の resources/storage/jvmOptions は環境別に上書きできる必要がある
+    # (dev 固定値が stg/prd にそのまま流用されていた TODO 項目の解消)。
+    # config.kafka_broker_resources の値がそのまま manifest に反映されていることを検証する。
+    all_k8s = template.find_resources("Custom::AWSCDK-EKS-KubernetesResource")
+    node_pools = [
+        res for res in all_k8s.values() if '"kind":"KafkaNodePool"' in _manifest_literals(res["Properties"]["Manifest"])
+    ]
+    broker_pool = next(
+        res
+        for res in node_pools
+        if '"metadata":{"name":"kafka","namespace"' in _manifest_literals(res["Properties"]["Manifest"])
+    )
+    literals = _manifest_literals(broker_pool["Properties"]["Manifest"])
+    resources = config.kafka_broker_resources
+
+    assert f'"requests":{{"memory":"{resources.memory_request}","cpu":"{resources.cpu_request}"}}' in literals
+    assert f'"limits":{{"memory":"{resources.memory_limit}","cpu":"{resources.cpu_limit}"}}' in literals
+    assert f'"size":"{resources.storage_size}"' in literals
+    assert f'"-Xms":"{resources.jvm_xms}","-Xmx":"{resources.jvm_xmx}"' in literals
+
+
+def test_kafka_controller_pool_resources_come_from_config(template, config):
+    all_k8s = template.find_resources("Custom::AWSCDK-EKS-KubernetesResource")
+    node_pools = [
+        res for res in all_k8s.values() if '"kind":"KafkaNodePool"' in _manifest_literals(res["Properties"]["Manifest"])
+    ]
+    controller_pool = next(
+        res
+        for res in node_pools
+        if '"metadata":{"name":"controller","namespace"' in _manifest_literals(res["Properties"]["Manifest"])
+    )
+    literals = _manifest_literals(controller_pool["Properties"]["Manifest"])
+    resources = config.kafka_controller_resources
+
+    assert f'"requests":{{"memory":"{resources.memory_request}","cpu":"{resources.cpu_request}"}}' in literals
+    assert f'"limits":{{"memory":"{resources.memory_limit}","cpu":"{resources.cpu_limit}"}}' in literals
+    assert f'"size":"{resources.storage_size}"' in literals
+    assert f'"-Xms":"{resources.jvm_xms}","-Xmx":"{resources.jvm_xmx}"' in literals
+
+
 def test_eks_pod_identity_agent_addon_version_not_pinned(template):
     # aws_eks_v2.Cluster が自動追加する eks-pod-identity-agent Addon は、
     # vpc-cni/coredns/kube-proxy と同様に EKS のデフォルトバージョンに追従させるため

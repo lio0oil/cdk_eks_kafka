@@ -2,6 +2,7 @@ from aws_cdk import aws_eks_v2 as eks
 from aws_cdk import aws_elasticloadbalancingv2 as elbv2
 from constructs import Construct
 
+from ekscdk.config import ClusterConfig
 from ekscdk.constructs._manifest import (
     build_kafka_broker_configs,
     load,
@@ -39,8 +40,7 @@ class KafkaConstruct(Construct):
         aws_lbc_chart: eks.HelmChart,
         strimzi_chart: eks.HelmChart,
         kafka_namespace: eks.KubernetesManifest,
-        delete_claim: bool,
-        controller_count: int,
+        config: ClusterConfig,
     ) -> None:
         super().__init__(scope, construct_id)
 
@@ -48,8 +48,8 @@ class KafkaConstruct(Construct):
         cm = cluster.add_manifest("KafkaMetricsCm", load(_DIR, "cm.yaml"))
         cm.node.add_dependency(kafka_namespace)
 
-        # delete_claim を YAML の boolean リテラル文字列に変換（True → "true"）
-        delete_claim_str = "true" if delete_claim else "false"
+        # kafka_delete_claim を YAML の boolean リテラル文字列に変換（True → "true"）
+        delete_claim_str = "true" if config.kafka_delete_claim else "false"
 
         # ── gp3-kafka StorageClass ───────────────────────────────────────────
         # Kafka broker/controller の I/O 特性は Prometheus/Alertmanager と異なるため、
@@ -67,7 +67,14 @@ class KafkaConstruct(Construct):
                 _DIR,
                 "node-pool-controller.yaml",
                 DELETE_CLAIM=delete_claim_str,
-                CONTROLLER_REPLICAS=str(controller_count),
+                CONTROLLER_REPLICAS=str(config.kafka_controller_count),
+                CONTROLLER_MEMORY_REQUEST=config.kafka_controller_resources.memory_request,
+                CONTROLLER_MEMORY_LIMIT=config.kafka_controller_resources.memory_limit,
+                CONTROLLER_CPU_REQUEST=config.kafka_controller_resources.cpu_request,
+                CONTROLLER_CPU_LIMIT=config.kafka_controller_resources.cpu_limit,
+                CONTROLLER_STORAGE_SIZE=config.kafka_controller_resources.storage_size,
+                CONTROLLER_JVM_XMS=config.kafka_controller_resources.jvm_xms,
+                CONTROLLER_JVM_XMX=config.kafka_controller_resources.jvm_xmx,
             ),
         )
         controller_pool.node.add_dependency(kafka_namespace)
@@ -81,6 +88,13 @@ class KafkaConstruct(Construct):
                 "node-pool-broker.yaml",
                 BROKER_REPLICAS=str(broker_count),
                 DELETE_CLAIM=delete_claim_str,
+                BROKER_MEMORY_REQUEST=config.kafka_broker_resources.memory_request,
+                BROKER_MEMORY_LIMIT=config.kafka_broker_resources.memory_limit,
+                BROKER_CPU_REQUEST=config.kafka_broker_resources.cpu_request,
+                BROKER_CPU_LIMIT=config.kafka_broker_resources.cpu_limit,
+                BROKER_STORAGE_SIZE=config.kafka_broker_resources.storage_size,
+                BROKER_JVM_XMS=config.kafka_broker_resources.jvm_xms,
+                BROKER_JVM_XMX=config.kafka_broker_resources.jvm_xmx,
             ),
         )
         broker_pool.node.add_dependency(kafka_namespace)

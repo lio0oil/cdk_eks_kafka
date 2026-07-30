@@ -6,7 +6,7 @@ metadata:
   labels:
     strimzi.io/cluster: kafka-cluster
   annotations:
-    strimzi.io/next-node-ids: "[1000000-1999999]"
+    strimzi.io/next-node-ids: "[10000-19999]"
 spec:
   replicas: <CONTROLLER_REPLICAS>
   roles:
@@ -16,20 +16,20 @@ spec:
     volumes:
       - id: 0
         type: persistent-claim
-        size: 20Gi
+        size: <CONTROLLER_STORAGE_SIZE>
         class: gp3-kafka
         kraftMetadata: shared
         deleteClaim: <DELETE_CLAIM>
   resources:
     requests:
-      memory: 1Gi
-      cpu: "250m"
+      memory: <CONTROLLER_MEMORY_REQUEST>
+      cpu: "<CONTROLLER_CPU_REQUEST>"
     limits:
-      memory: 2Gi
-      cpu: "500m"
+      memory: <CONTROLLER_MEMORY_LIMIT>
+      cpu: "<CONTROLLER_CPU_LIMIT>"
   jvmOptions:
-    -Xms: "512m"
-    -Xmx: "1024m"
+    -Xms: "<CONTROLLER_JVM_XMS>"
+    -Xmx: "<CONTROLLER_JVM_XMX>"
   template:
     pod:
       tolerations:

@@ -6,18 +6,8 @@
 
 dev では暫定値で動くが、本番で同じ値を使ってはいけない設定。
 
-- **broker の `resources.requests/limits` を環境別に上書きできるようにする**
-  - 現状: [manifests/kafka/node-pool-broker.yaml](manifests/kafka/node-pool-broker.yaml) で memory 2-4Gi / CPU 250-500m 固定（dev 想定）。
-- **broker の `storage.size` を環境別に上書きできるようにする**
-  - 現状: 20Gi 固定（dev 想定）。
-- **broker の `jvmOptions`（`-Xms` / `-Xmx`）を環境別に上書きできるようにする**
-  - 現状: 1G / 2G 固定（dev 想定）。
-- **controller の `resources.requests/limits` を環境別に上書きできるようにする**
-  - 現状: [manifests/kafka/node-pool-controller.yaml](manifests/kafka/node-pool-controller.yaml) で memory 1-2Gi / CPU 250-500m 固定（dev 想定）。
-- **controller の `storage.size` を環境別に上書きできるようにする**
-  - 現状: 20Gi 固定（dev 想定）。
-- **controller の `jvmOptions`（`-Xms` / `-Xmx`）を環境別に上書きできるようにする**
-  - 現状: 512M / 1G 固定（dev 想定）。
+- **broker/controller の `resources.requests/limits`・`storage.size`・`jvmOptions` を stg/prd 向けにチューニングする**
+  - 現状: `ClusterConfig.kafka_broker_resources` / `kafka_controller_resources`（[config.py](../cdk/ekscdk/config.py)）で環境別に上書きできる仕組みは実装済みだが、dev/stg/prd とも同じ暫定値（broker memory 2-4Gi・CPU 250-500m・storage 20Gi・jvm 1G/2G、controller memory 1-2Gi・CPU 250-500m・storage 20Gi・jvm 512M/1G）のまま。特に stg/prd の `kafka_broker_instance_type` は `r8g.large`（16GiB, memory-optimized）だが Pod の memory limit は 4Gi 固定で、page cache 余裕という instance type 変更の狙いを Pod レベルで活かせていない可能性がある。
 - **Prometheus の `prometheusSpec.storageSpec` を環境別に上書きできるようにする**
   - 現状: [manifests/monitoring/kube-prometheus-stack-values.yaml](manifests/monitoring/kube-prometheus-stack-values.yaml) で未指定 → emptyDir、Pod 再起動で直近メトリクスが消える。
 - **Prometheus の `retention` を環境別に上書きできるようにする**

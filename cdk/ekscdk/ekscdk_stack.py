@@ -59,8 +59,7 @@ class EksCdkStack(Stack):
             aws_lbc_chart=addons.aws_lbc_chart,
             strimzi_chart=addons.strimzi_chart,
             kafka_namespace=addons.kafka_namespace,
-            delete_claim=config.delete_claim,
-            controller_count=config.kafka_controller_count,
+            config=config,
         )
         MonitoringConstruct(
             self,

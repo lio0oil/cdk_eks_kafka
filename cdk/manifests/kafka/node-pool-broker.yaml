@@ -16,20 +16,20 @@ spec:
     volumes:
       - id: 0
         type: persistent-claim
-        size: 20Gi
+        size: <BROKER_STORAGE_SIZE>
         class: gp3-kafka
         kraftMetadata: shared
         deleteClaim: <DELETE_CLAIM>
   resources:
     requests:
-      memory: 2Gi
-      cpu: "250m"
+      memory: <BROKER_MEMORY_REQUEST>
+      cpu: "<BROKER_CPU_REQUEST>"
     limits:
-      memory: 4Gi
-      cpu: "500m"
+      memory: <BROKER_MEMORY_LIMIT>
+      cpu: "<BROKER_CPU_LIMIT>"
   jvmOptions:
-    -Xms: "1024m"
-    -Xmx: "2048m"
+    -Xms: "<BROKER_JVM_XMS>"
+    -Xmx: "<BROKER_JVM_XMX>"
   template:
     pod:
       tolerations:

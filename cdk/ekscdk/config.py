@@ -27,6 +27,24 @@ _ADDON_VERSIONS_K8S_135: dict[str, str] = {
 
 
 @dataclass
+class KafkaPoolResourceConfig:
+    """KafkaNodePool（broker/controller）の resources / storage / jvmOptions。
+
+    node-pool-broker.yaml / node-pool-controller.yaml のプレースホルダーに
+    そのまま注入する値。stg/prd 運用前に見直しが必要な値（TODO.md 参照）で、
+    現状は暫定的に dev 想定値を全環境共通で設定している。
+    """
+
+    memory_request: str
+    memory_limit: str
+    cpu_request: str
+    cpu_limit: str
+    storage_size: str
+    jvm_xms: str
+    jvm_xmx: str
+
+
+@dataclass
 class ClusterConfig:
     """EKS クラスター構成値の一元管理クラス。
 
@@ -60,7 +78,7 @@ class ClusterConfig:
     enable_interface_endpoints: bool
     # KafkaNodePool 削除時に PVC を一緒に削除するか（Strimzi の deleteClaim フィールド）
     # dev は True（環境破棄時に PVC ごとクリーンアップ）、stg/prd は False（データ保護）
-    delete_claim: bool
+    kafka_delete_claim: bool
     # KRaft Controller の replica 数（KRaft は奇数推奨、通常 3）
     # node-pool-controller.yaml の replicas と kafka nodegroup サイズの両方に反映
     kafka_controller_count: int
@@ -68,6 +86,10 @@ class ClusterConfig:
     # dev は True（AZ 跨ぎのデータ転送料を避けてコスト最適化）、
     # stg/prd は False（AZ 障害時も broker/controller が全滅しないよう multi-AZ を維持）。
     kafka_single_az: bool
+    # KafkaNodePool（broker/controller）の resources/storage/jvmOptions。
+    # 現状は暫定的に dev 想定値を全環境共通で設定している（stg/prd 運用前に見直しが必要、TODO.md 参照）。
+    kafka_broker_resources: KafkaPoolResourceConfig
+    kafka_controller_resources: KafkaPoolResourceConfig
     # Kafka Broker の replica 数。NLB target group / nodegroup capacity /
     # KafkaNodePool replicas / kafka-cluster.yaml の brokers[] すべての単一の真実の源。
     # 既存ブローカーの advertisedPort/nodePort は変えない（クライアント接続が壊れる）ため、
@@ -133,9 +155,27 @@ class ClusterConfig:
             log_retention=logs.RetentionDays.ONE_WEEK,
             log_removal_policy=RemovalPolicy.DESTROY,
             enable_interface_endpoints=False,
-            delete_claim=True,
+            kafka_delete_claim=True,
             kafka_controller_count=3,
             kafka_single_az=True,
+            kafka_broker_resources=KafkaPoolResourceConfig(
+                memory_request="2Gi",
+                memory_limit="4Gi",
+                cpu_request="250m",
+                cpu_limit="500m",
+                storage_size="20Gi",
+                jvm_xms="1024m",
+                jvm_xmx="2048m",
+            ),
+            kafka_controller_resources=KafkaPoolResourceConfig(
+                memory_request="1Gi",
+                memory_limit="2Gi",
+                cpu_request="250m",
+                cpu_limit="500m",
+                storage_size="20Gi",
+                jvm_xms="512m",
+                jvm_xmx="1024m",
+            ),
             broker_count=3,
             deletion_protection=False,
             enable_vpc_flow_logs=False,
@@ -172,9 +212,27 @@ class ClusterConfig:
             log_retention=logs.RetentionDays.ONE_MONTH,
             log_removal_policy=RemovalPolicy.RETAIN,
             enable_interface_endpoints=True,
-            delete_claim=False,
+            kafka_delete_claim=False,
             kafka_controller_count=3,
             kafka_single_az=False,
+            kafka_broker_resources=KafkaPoolResourceConfig(
+                memory_request="2Gi",
+                memory_limit="4Gi",
+                cpu_request="250m",
+                cpu_limit="500m",
+                storage_size="20Gi",
+                jvm_xms="1024m",
+                jvm_xmx="2048m",
+            ),
+            kafka_controller_resources=KafkaPoolResourceConfig(
+                memory_request="1Gi",
+                memory_limit="2Gi",
+                cpu_request="250m",
+                cpu_limit="500m",
+                storage_size="20Gi",
+                jvm_xms="512m",
+                jvm_xmx="1024m",
+            ),
             broker_count=3,
             deletion_protection=True,
             enable_vpc_flow_logs=True,
@@ -211,9 +269,27 @@ class ClusterConfig:
             log_retention=logs.RetentionDays.ONE_MONTH,
             log_removal_policy=RemovalPolicy.RETAIN,
             enable_interface_endpoints=True,
-            delete_claim=False,
+            kafka_delete_claim=False,
             kafka_controller_count=3,
             kafka_single_az=False,
+            kafka_broker_resources=KafkaPoolResourceConfig(
+                memory_request="2Gi",
+                memory_limit="4Gi",
+                cpu_request="250m",
+                cpu_limit="500m",
+                storage_size="20Gi",
+                jvm_xms="1024m",
+                jvm_xmx="2048m",
+            ),
+            kafka_controller_resources=KafkaPoolResourceConfig(
+                memory_request="1Gi",
+                memory_limit="2Gi",
+                cpu_request="250m",
+                cpu_limit="500m",
+                storage_size="20Gi",
+                jvm_xms="512m",
+                jvm_xmx="1024m",
+            ),
             broker_count=3,
             deletion_protection=True,
             enable_vpc_flow_logs=True,
