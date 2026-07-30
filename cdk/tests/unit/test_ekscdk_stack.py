@@ -735,9 +735,11 @@ def test_target_group_binding_count_matches_broker_count(template):
 
 
 def test_target_group_binding_service_name_uses_broker_pool_name(template):
-    # broker KafkaNodePool 名は `broker`（node-pool-broker.yaml の metadata.name）。
-    # Strimzi の Service 命名規則 <cluster>-<pool>-<id> に従うため、
-    # TargetGroupBinding の serviceRef.name は kafka-cluster-broker-* を参照する。
+    # broker 個別の per-pod Service は KafkaNodePool 名（node-pool-broker.yaml の
+    # metadata.name = broker）に依存し、kafka-cluster-broker-<id> を参照する。
+    # 一方 bootstrap Service は Strimzi が pool 名と無関係に常に固定文字列 `kafka` で
+    # 生成する（実クラスタで kafka-cluster-kafka-external-bootstrap の存在を確認済み）ため、
+    # bootstrap 用 TargetGroupBinding だけは kafka-cluster-kafka-* を参照する。
     all_k8s = template.find_resources("Custom::AWSCDK-EKS-KubernetesResource")
     bindings_literals = [
         _manifest_literals(res["Properties"]["Manifest"])
@@ -745,9 +747,16 @@ def test_target_group_binding_service_name_uses_broker_pool_name(template):
         if "TargetGroupBinding" in _manifest_literals(res["Properties"]["Manifest"])
     ]
     assert bindings_literals
-    for literals in bindings_literals:
+
+    bootstrap_bindings = [lit for lit in bindings_literals if '-bootstrap"' in lit]
+    broker_bindings = [lit for lit in bindings_literals if '-bootstrap"' not in lit]
+    assert bootstrap_bindings
+    assert broker_bindings
+
+    for literals in bootstrap_bindings:
+        assert '"name":"kafka-cluster-kafka-' in literals
+    for literals in broker_bindings:
         assert '"name":"kafka-cluster-broker-' in literals
-        assert '"name":"kafka-cluster-kafka-' not in literals
 
 
 def test_kafka_cluster_manifest_includes_all_broker_node_ports(template):

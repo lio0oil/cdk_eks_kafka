@@ -40,6 +40,8 @@ NLB 本体・VPC Endpoint Service・**TargetGroup / Listener** は CDK（`Networ
 ### broker KafkaNodePool 名は `broker`
 `node-pool-broker.yaml` の `metadata.name` は `broker`（リファレンス data-on-eks と同じ）。Strimzi が生成する per-broker Service の命名規則は `<cluster_name>-<pool_name>-<broker_id>`（本プロジェクトでは `kafka-cluster-broker-<broker_id>`）で、`KafkaConstruct` の TargetGroupBinding `serviceRef.name` 組み立て（`kafka.py` 内 `service_name` 変数）と `node-pool-broker.yaml` の `podAntiAffinity` / `topologySpreadConstraints` のラベルセレクタがこの pool 名に依存している。pool 名を変える場合はこれら参照箇所を同時に合わせる必要がある（過去に `kafka` 固定にしていたが、Service 名生成ロジックの追従修正込みで `broker` に変更した）。controller pool は外部 NLB 経路を持たないため `controller` のままで良い。
 
+**bootstrap Service の命名規則は pool 名と無関係**（要注意）: 上記の `<cluster_name>-<pool_name>-<broker_id>` は per-broker Service のみに適用され、listener ごとの bootstrap Service（`kafka-cluster-kafka-<listener>-bootstrap` 等）は Strimzi が pool 名と無関係に固定文字列 `kafka` で生成する（実クラスタで `kafka-cluster-kafka-external-bootstrap` の存在を確認済み）。broker pool 名を `kafka` → `broker` に変更した際、この違いに気づかず bootstrap 用 `TargetGroupBinding` の `serviceRef.name` まで `kafka-cluster-broker-*` にしてしまい、bootstrap の NLB TargetGroup にターゲットが登録されない障害を起こした。`kafka.py` の TargetGroupBinding 生成ロジックでは、`tg_key == "Bootstrap"` の分岐だけ `kafka-cluster-kafka-` を使い、broker 個別分岐は `kafka-cluster-broker-` を使う、という非対称な実装になっている（意図的な非対称であり統一しない）。
+
 ### Strimzi の apiVersion は `kafka.strimzi.io/v1`
 Strimzi 1.0.0 で `v1` が正式 API として昇格し、`v1beta2` / `v1beta1` / `v1alpha1` は廃止された。`kafka-cluster.yaml`・`node-pool-*.yaml`・`kafka-rebalance.yaml` はすべて `apiVersion: kafka.strimzi.io/v1` が正しい。`v1beta2` への変更は誤り。
 

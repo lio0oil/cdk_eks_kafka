@@ -120,8 +120,12 @@ class KafkaConstruct(Construct):
 
         # ── TargetGroupBinding ─────────────────────────────────────────────────
         # AWS LBC が Service Endpoints と TargetGroup を同期する。
-        # Bootstrap: kafka-cluster-broker-<listener>-bootstrap (全 broker pod を選択)
+        # Bootstrap: kafka-cluster-kafka-<listener>-bootstrap (全 broker pod を選択)
+        #            bootstrap Service は Strimzi が pool 名と無関係に固定文字列
+        #            `kafka` で生成するため、broker pool 名（broker）ではなく
+        #            常に `kafka` を使う（実クラスタで確認済み）。
         # Broker N : kafka-cluster-broker-N             (broker ID N の pod を選択)
+        #            こちらは broker KafkaNodePool 名（broker）に依存する。
         # ローリング更新時の pod 移動にも追従するため、TargetType=instance でも
         # Endpoints があるノードのみが NLB ターゲットになる。
         # Service の port は number ではなく name `tcp-<listener>` で参照する
@@ -130,7 +134,7 @@ class KafkaConstruct(Construct):
         node_ports_by_name = {name: node_port for name, _, node_port in nlb_ports}
         for tg_key, tg in kafka_target_groups.items():
             if tg_key == "Bootstrap":
-                service_name = f"kafka-cluster-broker-{external_listener_name}-bootstrap"
+                service_name = f"kafka-cluster-kafka-{external_listener_name}-bootstrap"
                 binding_name = f"kafka-{external_listener_name}-bootstrap"
             else:
                 # "Broker0" -> 0
