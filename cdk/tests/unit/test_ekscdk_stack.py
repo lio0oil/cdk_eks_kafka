@@ -447,22 +447,25 @@ def test_kube_prometheus_stack_enables_alertmanager(template):
 
 
 def test_dev_kafka_nodegroups_pinned_to_single_az(dev_template):
-    # dev はコスト最適化のため Kafka broker/controller ノードグループを 1AZ に固定する
-    # （config.kafka_single_az=True）。system-nodegroup は AZ 障害耐性のため multi-AZ を維持する。
+    # dev はコスト最適化のため Kafka broker/controller/system 全ノードグループを 1AZ に固定する
+    # （config.kafka_single_az=True）。AZ 障害時の復旧手段を用意していないため、system だけ
+    # multi-AZ を維持しても「アラートだけ生き残る」以上の実効性が無く、AZ 間 scrape/転送料が
+    # 無駄になる。
     nodegroups = dev_template.find_resources("AWS::EKS::Nodegroup")
     by_name = {res["Properties"]["NodegroupName"]: res["Properties"]["Subnets"] for res in nodegroups.values()}
     assert len(by_name["kafka-broker-nodegroup"]) == 1
     assert len(by_name["kafka-controller-nodegroup"]) == 1
-    assert len(by_name["system-nodegroup"]) == 3
+    assert len(by_name["system-nodegroup"]) == 1
 
 
 def test_prd_kafka_nodegroups_span_multiple_az(template):
-    # stg/prd は HA 優先のため Kafka broker/controller ノードグループも multi-AZ を維持する
-    # （config.kafka_single_az=False）。
+    # stg/prd は HA 優先のため Kafka broker/controller/system 全ノードグループを multi-AZ に
+    # 維持する（config.kafka_single_az=False）。
     nodegroups = template.find_resources("AWS::EKS::Nodegroup")
     by_name = {res["Properties"]["NodegroupName"]: res["Properties"]["Subnets"] for res in nodegroups.values()}
     assert len(by_name["kafka-broker-nodegroup"]) == 3
     assert len(by_name["kafka-controller-nodegroup"]) == 3
+    assert len(by_name["system-nodegroup"]) == 3
 
 
 def test_dev_kafka_nlb_pinned_to_single_az_matching_nodegroups(dev_template):

@@ -113,7 +113,7 @@ class NetworkConstruct(Construct):
             )
 
         # kafka_single_az=True の場合、NLB を Kafka nodegroup と同じ 1 AZ 目に固定する
-        # （EksClusterConstruct の kafka_subnets と同じ vpc.availability_zones[0] を使う）。
+        # （EksClusterConstruct の nodegroup_subnets と同じ vpc.availability_zones[0] を使う）。
         # NLB が multi-AZ のまま targets だけ 1AZ に寄ると、他 AZ の NLB ノードから
         # ターゲットへ到達するのに cross-zone load balancing が必須になってしまうため、
         # NLB 自体も 1AZ に揃えることで cross-zone を無効化でき、AZ 跨ぎのデータ転送料を避けられる。

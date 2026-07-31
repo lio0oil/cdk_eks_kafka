@@ -91,6 +91,19 @@ class EksClusterConstruct(Construct):
                 access_policies=_cluster_admin_policy,
             )
 
+        # kafka_single_az=True の場合は VPC の 1 AZ 目だけに固定する（dev のコスト最適化。
+        # AZ 跨ぎのデータ転送料と broker 間レプリケーションの AZ 間トラフィックを避ける）。
+        # system-nodegroup（Prometheus 等の監視 scrape 対象含む）も同じ 1 AZ に揃える:
+        # AZ 障害時の自動フェイルオーバーを用意していないため、監視だけ multi-AZ に残しても
+        # 得られるのは「通知が届くタイミングが早まる」程度で対応不能な点は変わらず、
+        # AZ 間 scrape トラフィックのコストに見合わない。
+        # EKS クラスター自体は control plane ENI 用に multi-AZ subnet が必須なため
+        # NetworkConstruct の VPC は変えず、各 nodegroup の配置先だけ絞る。
+        nodegroup_subnets = ec2.SubnetSelection(
+            subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS,
+            availability_zones=[vpc.availability_zones[0]] if config.kafka_single_az else None,
+        )
+
         # システムノードグループ: 監視 / Operator / アドオン用
         # taint は打たない（kafka 用ノードを DedicatedKafka taint で隔離する設計のため、
         # system 側を taint で守る必要がない。toleration 未指定の Pod は自然に system に
@@ -104,7 +117,7 @@ class EksClusterConstruct(Construct):
             max_size=config.system_max_size,
             desired_size=config.system_desired_size,
             capacity_type=eks.CapacityType.ON_DEMAND,
-            subnets=ec2.SubnetSelection(subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS),
+            subnets=nodegroup_subnets,
             labels={"role": "system"},
             enable_node_auto_repair=True,
         )
@@ -116,14 +129,6 @@ class EksClusterConstruct(Construct):
         # で物理的に配置を分離する。これにより 1 ノード障害で broker と controller を
         # 同時に失うリスクも回避できる。
         # 各 nodegroup は max=desired+1 でローリング時の新ノード起動余裕を確保する。
-        # kafka_single_az=True の場合は VPC の 1 AZ 目だけに固定する（dev のコスト最適化。
-        # AZ 跨ぎのデータ転送料と broker 間レプリケーションの AZ 間トラフィックを避ける）。
-        # EKS クラスター自体は control plane ENI 用に multi-AZ subnet が必須なため
-        # NetworkConstruct の VPC は変えず、Kafka nodegroup の配置先だけ絞る。
-        kafka_subnets = ec2.SubnetSelection(
-            subnet_type=ec2.SubnetType.PRIVATE_WITH_EGRESS,
-            availability_zones=[vpc.availability_zones[0]] if config.kafka_single_az else None,
-        )
         self._cluster.add_nodegroup_capacity(
             "KafkaBrokerNodeGroup",
             nodegroup_name="kafka-broker-nodegroup",
@@ -133,7 +138,7 @@ class EksClusterConstruct(Construct):
             max_size=broker_count + 1,
             desired_size=broker_count,
             capacity_type=eks.CapacityType.ON_DEMAND,
-            subnets=kafka_subnets,
+            subnets=nodegroup_subnets,
             labels={"role": "kafka-broker"},
             taints=[
                 eks.TaintSpec(
@@ -155,7 +160,7 @@ class EksClusterConstruct(Construct):
             max_size=controller_count + 1,
             desired_size=controller_count,
             capacity_type=eks.CapacityType.ON_DEMAND,
-            subnets=kafka_subnets,
+            subnets=nodegroup_subnets,
             labels={"role": "kafka-controller"},
             taints=[
                 eks.TaintSpec(
