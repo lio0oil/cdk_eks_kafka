@@ -8,20 +8,17 @@ spec:
     name: <SERVICE_NAME>
     port: <SERVICE_PORT>
   targetGroupARN: <TARGET_GROUP_ARN>
-  targetType: instance
-  # nodeSelector を指定しないと AWS LBC はクラスタ内の全ノード（system-nodegroup /
-  # kafka-controller-nodegroup 含む）を EC2 instance target として登録してしまう
-  # （externalTrafficPolicy: Local はその Pod のいないノードを Unhealthy にするだけで、
-  # target 登録自体は防げない）。broker nodegroup のノードラベル（role: kafka-broker）で
-  # 絞り込み、broker 以外のノードグループが target group に現れないようにする。
-  # nodeSelector は標準の LabelSelector 型（matchLabels/matchExpressions）で、
-  # map[string]string 直書きは CRD スキーマ上 unknown field になる。
-  nodeSelector:
-    matchLabels:
-      role: kafka-broker
-  # AWS LBC がノード SG に NLB SG からの NodePort 受け入れルールを自動追加する。
-  # 明示することで何の通信を許可するかが透明になり、AWS LBC の auto-detect 動作に
-  # 依存せずに済む。
+  # targetType=instance + nodeSelector（Node label での絞り込み）では、broker nodegroup
+  # 内に該当 Pod のいない他ノードまで target 登録されてしまう（nodeSelector は Node 単位
+  # までしか絞れず、特定 Pod が乗っているノードだけに絞ることはできない）。ip なら
+  # AWS LBC が Service の EndpointSlice から Pod IP を直接 target 登録するため、
+  # per-broker Service が選択する 1 Pod だけが正確に 1 target になる。
+  targetType: ip
+  # AWS LBC が Pod の ENI に紐づく SG（デフォルト EKS ネットワーキングでは Node の SG と
+  # 同一）に NLB SG からの受け入れルールを自動追加する。明示することで何の通信を許可する
+  # かが透明になり、AWS LBC の auto-detect 動作に依存せずに済む。
+  # port は broker ごとの NodePort ではなく、Pod が実際に bind する container port
+  # （kafka-cluster.yaml の external listener の port、全 broker 共通の固定値）を渡す。
   networking:
     ingress:
       - from:
@@ -29,4 +26,4 @@ spec:
               groupID: <NLB_SG_ID>
         ports:
           - protocol: TCP
-            port: <NODE_PORT>
+            port: <TARGET_PORT>

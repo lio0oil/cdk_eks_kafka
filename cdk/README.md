@@ -536,7 +536,7 @@ kubectl port-forward -n monitoring svc/<release>-kube-prometheus-stack-prometheu
 
 ### 7. NLB 経由の Kafka 接続確認
 
-NLB は internal なため、検証は **VPC 内（クラスタ Pod）から**行う。検証 Pod は `system` ノードにのみ schedule する（`kafka` 系ノードは `DedicatedKafka` taint で弾かれるので toleration を付けない）。**toleration を付けて broker と同居させると、NLB の `preserve_client_ip` ON × Service の `externalTrafficPolicy: Local` の組み合わせで TCP の戻り経路が壊れ、その broker への接続だけ timeout する**。
+NLB は internal なため、検証は **VPC 内（クラスタ Pod）から**行う。検証 Pod は `system` ノードにのみ schedule する（`kafka` 系ノードは `DedicatedKafka` taint で弾かれるので toleration を付けない）。**toleration を付けて broker と同居させると、NLB の `preserve_client_ip` ON と、クライアント Pod が接続先 broker と同一ノードに同居するケースが重なり、TCP の戻り経路が壊れてその broker への接続だけ timeout する**。
 
 ```bash
 # NLB DNS と CA cert を取得
@@ -631,7 +631,7 @@ strimzi.cruisecontrol.modeltrainingsamples
 strimzi.cruisecontrol.partitionmetricsamples
 ```
 
-`broker` の advertised host/port が NLB DNS:9095/9096/9097 になっている点が確認できれば、**NLB → NodePort → broker pod** の経路が正しく機能している。
+`broker` の advertised host/port が NLB DNS:9095/9096/9097 になっている点が確認できれば、**NLB → broker pod（IP 直接）** の経路が正しく機能している。
 
 ### 8. Consumer Group ダッシュボードの動作確認（オプション）
 
@@ -992,7 +992,6 @@ aws ec2 describe-volumes \
 | ノードが `NotReady` | VPC エンドポイント / セキュリティグループの設定ミス |
 | Pod が `Pending` | ノードグループのキャパシティ不足 / Taint 未設定 |
 | Kafka が `READY: False` | Strimzi Operator が起動していない / PVC 未バインド |
-| NLB ターゲットが大半 `unhealthy` | `externalTrafficPolicy: Local` のため broker pod 不在ノードは正常に unhealthy（broker pod のあるノードのみ healthy 表示）|
 | TLS handshake で `verify error` | `kafka-cluster-cluster-ca-cert` Secret から CA を再取得（cluster CA はローテーションされる）|
 
 ## スタック削除手順（クリーンアップ）

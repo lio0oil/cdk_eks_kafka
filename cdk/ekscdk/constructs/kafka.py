@@ -34,7 +34,7 @@ class KafkaConstruct(Construct):
         broker_count: int,
         nlb_dns_name: str,
         kafka_target_groups: dict[str, elbv2.NetworkTargetGroup],
-        nlb_ports: list[tuple[str, int, int]],
+        kafka_target_port: int,
         nlb_sg_id: str,
         external_listener_name: str,
         aws_lbc_chart: eks.HelmChart,
@@ -126,14 +126,12 @@ class KafkaConstruct(Construct):
         #            常に `kafka` を使う（実クラスタで確認済み）。
         # Broker N : kafka-cluster-broker-N             (broker ID N の pod を選択)
         #            こちらは broker KafkaNodePool 名（broker）に依存する。
-        # TargetType=instance は nodeSelector（target-group-binding.yaml）で broker
-        # nodegroup に絞らないと非 broker ノードグループまで target 登録されてしまう。
-        # ローリング更新時の pod 移動には externalTrafficPolicy: Local（kafka-cluster.yaml）
-        # が Pod のいないノードを Unhealthy にすることで追従する。
+        # TargetType=ip（network.py）のため AWS LBC は Service の EndpointSlice から
+        # Pod IP を直接 target 登録する。ローリング更新時の pod 移動にも、Pod IP の
+        # 変化にそのまま追従する形で対応できる。
         # Service の port は number ではなく name `tcp-<listener>` で参照する
         # （Kubernetes Service の慣習：port は name 参照が推奨）。
         port_name = f"tcp-{external_listener_name}"
-        node_ports_by_name = {name: node_port for name, _, node_port in nlb_ports}
         for tg_key, tg in kafka_target_groups.items():
             if tg_key == "Bootstrap":
                 service_name = f"kafka-cluster-kafka-{external_listener_name}-bootstrap"
@@ -154,7 +152,7 @@ class KafkaConstruct(Construct):
                     SERVICE_PORT=port_name,
                     TARGET_GROUP_ARN=tg.target_group_arn,
                     NLB_SG_ID=nlb_sg_id,
-                    NODE_PORT=str(node_ports_by_name[tg_key]),
+                    TARGET_PORT=str(kafka_target_port),
                 ),
             )
             binding.node.add_dependency(kafka_cr)

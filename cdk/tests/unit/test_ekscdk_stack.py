@@ -4,7 +4,7 @@ from aws_cdk import assertions
 from aws_cdk import aws_iam as iam
 
 from ekscdk.config import ClusterConfig
-from ekscdk.constructs._manifest import build_kafka_nlb_ports, manifest_dir
+from ekscdk.constructs._manifest import build_kafka_nlb_ports, manifest_dir, parse_kafka_external_listener
 from ekscdk.constructs.addons import AddonsConstruct
 from ekscdk.constructs.eks_cluster import EksClusterConstruct
 from ekscdk.constructs.network import NetworkConstruct
@@ -102,7 +102,14 @@ def addons_only_template():
         def __init__(self, scope: core.App, construct_id: str, **kwargs: object) -> None:
             super().__init__(scope, construct_id, **kwargs)
             nlb_ports = build_kafka_nlb_ports(manifest_dir("kafka"), broker_count=_config.broker_count)
-            network = NetworkConstruct(self, "Network", nlb_ports=nlb_ports, config=_config)
+            _, kafka_target_port = parse_kafka_external_listener(manifest_dir("kafka"))
+            network = NetworkConstruct(
+                self,
+                "Network",
+                nlb_ports=nlb_ports,
+                kafka_target_port=kafka_target_port,
+                config=_config,
+            )
             eks_construct = EksClusterConstruct(
                 self,
                 "EksCluster",
@@ -762,13 +769,34 @@ def test_target_group_binding_service_name_uses_broker_pool_name(template):
         assert '"name":"kafka-cluster-broker-' in literals
 
 
-def test_target_group_binding_node_selector_scopes_to_broker_nodegroup(template):
-    # targetType=instance の TargetGroupBinding は spec.nodeSelector を指定しないと
-    # AWS LBC がクラスタ内の全ノード（system-nodegroup / kafka-controller-nodegroup 含む）を
-    # target として登録してしまう。externalTrafficPolicy: Local は該当 Pod のいないノードを
-    # Unhealthy にするだけで登録自体は防げないため、nodeSelector で broker nodegroup
-    # （role: kafka-broker）に絞り込む必要がある（実クラスタで非 broker ノードの登録と
-    # Unhealthy 化を確認済み）。
+def test_kafka_target_groups_use_ip_target_type_with_client_ip_preserved(template):
+    # targetType=instance + nodeSelector（role: kafka-broker）で broker nodegroup に絞っても、
+    # 個別 broker 用 target group には該当 Pod のいない broker ノードまで一緒に登録されて
+    # しまう（nodeSelector は Node label までしか絞れず、特定 Pod が乗っているノード単位の
+    # 絞り込みはできないため）。ip target type にすると AWS LBC が EndpointSlice から
+    # Pod IP を直接 target 登録するため、per-broker Service が選択する 1 Pod だけが
+    # 正確に 1 target として登録される。
+    # port は broker ごとに割り振った NodePort ではなく、external listener の内部 port
+    # （kafka-cluster.yaml の spec.kafka.listeners[].port、全 broker 共通で固定値）を使う。
+    # TCP プロトコルの ip target type はデフォルトで client IP preservation が無効になる
+    # ため、externalTrafficPolicy: Local が担っていたクライアント送信元 IP 保持を維持する
+    # には target group 側で明示的に有効化する必要がある。
+    _, external_listener_port = parse_kafka_external_listener(manifest_dir("kafka"))
+    target_groups = template.find_resources("AWS::ElasticLoadBalancingV2::TargetGroup")
+    assert target_groups
+    for res in target_groups.values():
+        props = res["Properties"]
+        assert props["TargetType"] == "ip"
+        assert props["Port"] == external_listener_port
+        attrs = {a["Key"]: a["Value"] for a in props.get("TargetGroupAttributes", [])}
+        assert attrs.get("preserve_client_ip.enabled") == "true"
+
+
+def test_target_group_binding_uses_ip_target_type_without_node_selector(template):
+    # ip target type では nodeSelector（Node 単位の絞り込み）は意味を持たない
+    # （AWS LBC が Pod IP を直接 EndpointSlice から解決するため、Node のラベルとは無関係）。
+    # 残したままだと「絞り込みが効いている」という誤解を招くため、targetType=ip への
+    # 変更と合わせて nodeSelector は削除する。
     all_k8s = template.find_resources("Custom::AWSCDK-EKS-KubernetesResource")
     bindings_literals = [
         _manifest_literals(res["Properties"]["Manifest"])
@@ -777,7 +805,25 @@ def test_target_group_binding_node_selector_scopes_to_broker_nodegroup(template)
     ]
     assert bindings_literals
     for literals in bindings_literals:
-        assert '"nodeSelector":{"matchLabels":{"role":"kafka-broker"}}' in literals
+        assert '"targetType":"ip"' in literals
+        assert "nodeSelector" not in literals
+
+
+def test_target_group_binding_networking_ingress_uses_listener_container_port(template):
+    # networking.ingress は AWS LBC が SG に自動追加する許可ポートを決める。ip mode では
+    # 実トラフィックが Pod の container port（external listener の port、全 broker 共通で
+    # 固定値）に直接届くため、broker ごとに異なる NodePort ではなく、この固定値を参照する
+    # 必要がある。
+    _, external_listener_port = parse_kafka_external_listener(manifest_dir("kafka"))
+    all_k8s = template.find_resources("Custom::AWSCDK-EKS-KubernetesResource")
+    bindings_literals = [
+        _manifest_literals(res["Properties"]["Manifest"])
+        for res in all_k8s.values()
+        if "TargetGroupBinding" in _manifest_literals(res["Properties"]["Manifest"])
+    ]
+    assert bindings_literals
+    for literals in bindings_literals:
+        assert f'"port":{external_listener_port}' in literals
 
 
 def test_kafka_cluster_manifest_includes_all_broker_node_ports(template):

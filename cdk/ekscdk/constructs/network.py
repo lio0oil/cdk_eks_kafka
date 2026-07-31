@@ -21,6 +21,7 @@ class NetworkConstruct(Construct):
         scope: Construct,
         construct_id: str,
         nlb_ports: list[tuple[str, int, int]],
+        kafka_target_port: int,
         config: ClusterConfig,
     ) -> None:
         super().__init__(scope, construct_id)
@@ -153,21 +154,32 @@ class NetworkConstruct(Construct):
         )
 
         # ── NLB TargetGroup + Listener ────────────────────────────────────────
-        # リスナーとターゲットグループは nlb_ports（kafka-cluster.yaml 由来）で決定する。
-        # TargetType.INSTANCE で作成し、ターゲット登録は AWS Load Balancer Controller の
-        # TargetGroupBinding が Service Endpoints と同期して行う（KafkaConstruct で設定）。
-        # これによりローリング更新時の Pod 移動にも追従できる。
+        # リスナーは nlb_ports（kafka-cluster.yaml 由来、broker ごとに異なる）で決定する。
+        # ターゲット登録は AWS Load Balancer Controller の TargetGroupBinding が Service
+        # Endpoints と同期して行う（KafkaConstruct で設定）。これによりローリング更新時の
+        # Pod 移動にも追従できる。
+        # TargetType.IP で作成する: TargetType.INSTANCE + nodeSelector（broker nodegroup に
+        # 限定）でも、broker nodegroup 内で該当 Pod のいない他ノードまで target 登録されて
+        # しまう（nodeSelector は Node label までしか絞れず Pod 単位では絞れない）。
+        # IP なら AWS LBC が EndpointSlice から Pod IP を直接登録するため、per-broker
+        # Service が選択する 1 Pod だけが正確に 1 target になる。
+        # port は broker ごとの NodePort ではなく kafka_target_port（external listener の
+        # 内部 port、全 broker 共通の固定値）を使う: Pod の実際の bind port は NodePort とは
+        # 独立していて、どの broker でも常に同じ値のため。
+        # ip target type + TCP protocol は client IP preservation がデフォルト無効なので、
+        # 明示的に有効化する（instance target type は常に有効、切替による回帰を防ぐ）。
         self._kafka_target_groups: dict[str, elbv2.NetworkTargetGroup] = {}
-        for name, listener_port, node_port in nlb_ports:
+        for name, listener_port, _ in nlb_ports:
             tg = elbv2.NetworkTargetGroup(
                 self,
                 f"Kafka{name}Tg",
                 vpc=self._vpc,
-                port=node_port,
+                port=kafka_target_port,
                 protocol=elbv2.Protocol.TCP,
-                target_type=elbv2.TargetType.INSTANCE,
+                target_type=elbv2.TargetType.IP,
+                preserve_client_ip=True,
                 health_check=elbv2.HealthCheck(
-                    port=str(node_port),
+                    port=str(kafka_target_port),
                     protocol=elbv2.Protocol.TCP,
                     healthy_threshold_count=2,
                     unhealthy_threshold_count=2,

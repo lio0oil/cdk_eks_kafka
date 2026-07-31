@@ -29,7 +29,14 @@ scrape は Prometheus Operator が PodMonitor / ServiceMonitor CRD を読み取�
 chart デフォルトの datasource（`name: Prometheus`、`isDefault: true`、`url: http://<release>-kube-prometheus-stack-prometheus:9090`）をそのまま使う。Strimzi 公式 dashboard を含む既存 dashboard が `Prometheus` 名でハードコード参照するため命名は維持。Grafana の Pod Identity は付与するが managed policy は何も attach しない（in-cluster 通信のみで AWS API を叩かないため IAM 不要）。Grafana ダッシュボードは `monitoring/dashboards/*.yaml` を ConfigMap ラベル `grafana_dashboard=1` で sidecar に自動取り込み。アクセスは `kubectl port-forward svc/<release>-grafana -n monitoring 3000:80`。
 
 ### Kafka 外部接続のポート設計
-`kafka-cluster.yaml` の external listener は NodePort 型。共有 NLB → NodePort → Kafka broker の経路で、bootstrap に 30094、broker 0〜2 に 30095〜30097 を使用する。advertised port（9095〜9097）はクライアントがブローカーに繋ぎ直す際のポートで NodePort とは別。`externalTrafficPolicy: Local` でクライアント送信元 IP 保持・余分なホップ排除。
+`kafka-cluster.yaml` の external listener は NodePort 型。bootstrap に 30094、broker 0〜2 に 30095〜30097 を Service の nodePort として割り当てる（Strimzi が `type: nodeport` の per-broker advertised host/port 個別設定に要求するため必須のフィールドだが、実際の NLB トラフィックはこの nodePort を経由しない。下記「TargetGroup は targetType=ip」を参照）。advertised port（9095〜9097）はクライアントがブローカーに繋ぎ直す際のポートで nodePort とは別の値。
+
+### Kafka NLB TargetGroup は targetType=ip（instance ではない）
+当初は Strimzi の定番リファレンス（[Using Strimzi with Amazon NLB Load Balancers](https://strimzi.io/blog/2020/01/02/using-strimzi-with-amazon-nlb-loadbalancers/)）に倣い `targetType: instance` + `nodeSelector`（broker nodegroup に限定）+ `externalTrafficPolicy: Local` を採用していたが、この組み合わせでも per-broker target group に「該当 broker pod のいない同じ nodegroup 内の他ノード」まで登録されてしまう問題があった（`nodeSelector` は Node label までしか絞れず、特定 Pod が乗っているノード単位の絞り込みはできないため。`externalTrafficPolicy: Local` はその余分なノードを Unhealthy にするだけで、target 登録自体は防げない）。
+
+`targetType: ip` に変更すると、AWS LBC が Service の EndpointSlice から Pod IP を直接 target 登録するため、per-broker Service が選択する 1 Pod だけが正確に 1 target になる（nodeSelector は不要になったため削除、TargetGroupBinding の `networking.ingress.ports.port` も broker ごとの nodePort ではなく external listener の内部 port（全 broker 共通の固定値、Pod が実際に bind する port）を参照するよう変更した）。
+
+トレードオフ: ip target type + TCP プロトコルは client IP preservation が **デフォルト無効**（instance target type は常に有効）。`externalTrafficPolicy: Local` はもう当該 NLB トラフィックの経路（Service / kube-proxy を経由せず Pod IP に直接届く）に効かなくなるため明示設定をやめ、代わりに NLB TargetGroup 側で `preserve_client_ip=True`（`network.py`）を明示することでクライアント送信元 IP 保持を維持する。ただし `preserve_client_ip` ON の状態でクライアントと接続先 broker pod が同一ノードに同居すると TCP の戻り経路が壊れる既知の問題があるため、検証用 Pod は `kafka` 系ノードに toleration を付けず同居させない（[README.md](../cdk/README.md) の「NLB 経由の Kafka 接続確認」参照）。
 
 ### Kafka 外部接続は TLS のみ（クライアント認証なし）
 `kafka-cluster.yaml` の external listener は `tls: true` だが `authentication` フィールドを持たない。これは意図的な設計で、本プロジェクトはブローカーに到達できるクライアントを個別に特定する必要がない（接続経路を VPC Endpoint Service + PrivateLink で限定しているため、ネットワーク到達可能性そのものを認可の境界としている）。mTLS / SCRAM / OAUTHBEARER を導入する必要が出た時点で `authentication` を追加し、対応する `KafkaUser` CR とクライアント証明書配布を設計する。

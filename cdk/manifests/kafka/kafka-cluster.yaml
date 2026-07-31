@@ -24,11 +24,10 @@ spec:
         type: nodeport # LoadBalancer から NodePort に変更（共有NLBを使用するため）
         tls: false
         configuration:
-          # Local: クライアント送信元 IP を保持し、余分な node 間ホップを回避する。
-          # Local にしても NLB target group への登録自体は防げない（Pod のいないノードも
-          # target-group-binding.yaml の nodeSelector で broker nodegroup に絞るまで
-          # 登録されてしまう。Local はその中で Pod のいないノードを Unhealthy にするだけ）。
-          externalTrafficPolicy: Local
+          # externalTrafficPolicy は明示しない（デフォルトの Cluster のまま）: NLB の
+          # TargetGroupBinding が targetType=ip（network.py）で Pod IP に直接トラフィックを
+          # 届けるため、Service / kube-proxy を経由する経路自体を通らない。クライアント
+          # 送信元 IP の保持は NLB TargetGroup 側の preserve_client_ip 属性で行う。
           bootstrap:
             nodePort: 30094
           # brokers[] は CDK 側で ClusterConfig.broker_count から動的に生成・注入する。

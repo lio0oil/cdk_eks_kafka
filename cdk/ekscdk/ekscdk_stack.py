@@ -32,9 +32,15 @@ class EksCdkStack(Stack):
         kafka_dir = manifest_dir("kafka")
         broker_count = config.broker_count
         nlb_ports = build_kafka_nlb_ports(kafka_dir, broker_count=broker_count)
-        external_listener_name, _ = parse_kafka_external_listener(kafka_dir)
+        external_listener_name, external_listener_port = parse_kafka_external_listener(kafka_dir)
 
-        network = NetworkConstruct(self, "Network", nlb_ports=nlb_ports, config=config)
+        network = NetworkConstruct(
+            self,
+            "Network",
+            nlb_ports=nlb_ports,
+            kafka_target_port=external_listener_port,
+            config=config,
+        )
         self._vpc = network.vpc
         eks_construct = EksClusterConstruct(
             self,
@@ -53,7 +59,7 @@ class EksCdkStack(Stack):
             broker_count=broker_count,
             nlb_dns_name=network.kafka_private_dns_name,
             kafka_target_groups=network.kafka_target_groups,
-            nlb_ports=nlb_ports,
+            kafka_target_port=external_listener_port,
             nlb_sg_id=network.kafka_nlb_sg.security_group_id,
             external_listener_name=external_listener_name,
             aws_lbc_chart=addons.aws_lbc_chart,
