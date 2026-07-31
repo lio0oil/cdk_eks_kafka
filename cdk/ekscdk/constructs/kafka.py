@@ -126,8 +126,10 @@ class KafkaConstruct(Construct):
         #            常に `kafka` を使う（実クラスタで確認済み）。
         # Broker N : kafka-cluster-broker-N             (broker ID N の pod を選択)
         #            こちらは broker KafkaNodePool 名（broker）に依存する。
-        # ローリング更新時の pod 移動にも追従するため、TargetType=instance でも
-        # Endpoints があるノードのみが NLB ターゲットになる。
+        # TargetType=instance は nodeSelector（target-group-binding.yaml）で broker
+        # nodegroup に絞らないと非 broker ノードグループまで target 登録されてしまう。
+        # ローリング更新時の pod 移動には externalTrafficPolicy: Local（kafka-cluster.yaml）
+        # が Pod のいないノードを Unhealthy にすることで追従する。
         # Service の port は number ではなく name `tcp-<listener>` で参照する
         # （Kubernetes Service の慣習：port は name 参照が推奨）。
         port_name = f"tcp-{external_listener_name}"

@@ -762,6 +762,24 @@ def test_target_group_binding_service_name_uses_broker_pool_name(template):
         assert '"name":"kafka-cluster-broker-' in literals
 
 
+def test_target_group_binding_node_selector_scopes_to_broker_nodegroup(template):
+    # targetType=instance の TargetGroupBinding は spec.nodeSelector を指定しないと
+    # AWS LBC がクラスタ内の全ノード（system-nodegroup / kafka-controller-nodegroup 含む）を
+    # target として登録してしまう。externalTrafficPolicy: Local は該当 Pod のいないノードを
+    # Unhealthy にするだけで登録自体は防げないため、nodeSelector で broker nodegroup
+    # （role: kafka-broker）に絞り込む必要がある（実クラスタで非 broker ノードの登録と
+    # Unhealthy 化を確認済み）。
+    all_k8s = template.find_resources("Custom::AWSCDK-EKS-KubernetesResource")
+    bindings_literals = [
+        _manifest_literals(res["Properties"]["Manifest"])
+        for res in all_k8s.values()
+        if "TargetGroupBinding" in _manifest_literals(res["Properties"]["Manifest"])
+    ]
+    assert bindings_literals
+    for literals in bindings_literals:
+        assert '"nodeSelector":{"matchLabels":{"role":"kafka-broker"}}' in literals
+
+
 def test_kafka_cluster_manifest_includes_all_broker_node_ports(template):
     # external listener の bootstrap.nodePort および brokers[] が KafkaCluster manifest に
     # 正しく含まれていることを確認する。
