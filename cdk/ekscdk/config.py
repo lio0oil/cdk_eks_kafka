@@ -45,6 +45,55 @@ class KafkaPoolResourceConfig:
 
 
 @dataclass
+class PrometheusResourceConfig:
+    """Prometheus の resources / storageSpec / retention / scrapeInterval。
+
+    kube-prometheus-stack-values.yaml の prometheusSpec 用プレースホルダーに
+    そのまま注入する値。broker_count 増設等でスクレイプ対象が増えると
+    見直しが必要になる値（TODO.md 参照）で、現状は暫定的に全環境共通で設定している。
+    """
+
+    memory_request: str
+    memory_limit: str
+    cpu_request: str
+    cpu_limit: str
+    storage_size: str
+    retention: str
+    scrape_interval: str
+
+
+@dataclass
+class AlertmanagerResourceConfig:
+    """Alertmanager の resources / storage（notification log / silence 永続化用）。
+
+    kube-prometheus-stack-values.yaml の alertmanagerSpec 用プレースホルダーに
+    そのまま注入する値。broker_count 増設等で通知量が増えると見直しが必要になる値
+    （TODO.md 参照）で、現状は暫定的に全環境共通で設定している。
+    """
+
+    memory_request: str
+    memory_limit: str
+    cpu_request: str
+    cpu_limit: str
+    storage_size: str
+
+
+@dataclass
+class FluentBitResourceConfig:
+    """Fluent Bit の resources / INPUT バッファ上限（Mem_Buf_Limit）。
+
+    fluent-bit-values.yaml のプレースホルダーにそのまま注入する値。ノード当たりの
+    ログ流量が増えると見直しが必要になる値で、現状は暫定的に全環境共通で設定している。
+    """
+
+    memory_request: str
+    memory_limit: str
+    cpu_request: str
+    cpu_limit: str
+    mem_buf_limit: str
+
+
+@dataclass
 class ClusterConfig:
     """EKS クラスター構成値の一元管理クラス。
 
@@ -119,6 +168,22 @@ class ClusterConfig:
     # consumer (Spark Structured Streaming) の checkpointLocation 用 S3 バケット名 suffix。
     # 実名は `kafka-consumer-checkpoint-{account}-{suffix}` (アカウント+環境でグローバル衝突を回避)。
     s3_consumer_checkpoint_suffix: str
+    # in-cluster Prometheus の resources/storageSpec/retention/scrapeInterval。
+    # broker_count 増設で per-broker metrics（kafka-exporter/JMX）が増えた際や、SLO 月次
+    # レポート要件で retention を伸ばす際に見直せるよう config 化（TODO.md 参照）。
+    # 現状は暫定的に全環境共通値。
+    prometheus_resources: PrometheusResourceConfig
+    # in-cluster Alertmanager の resources/storage（notification log / silence 永続化用）。
+    # broker_count 増設で通知量が増えた際に見直せるよう config 化。
+    alertmanager_resources: AlertmanagerResourceConfig
+    # in-cluster Prometheus / Alertmanager の replica 数（HA 構成のサイズ）。
+    # 値は現状 dev/stg/prd 共通の標準サイズのままだが、他の性能パラメータと同じ
+    # 仕組みに揃えて config 化する。
+    prometheus_replicas: int
+    alertmanager_replicas: int
+    # Fluent Bit の resources / INPUT バッファ上限（Mem_Buf_Limit）。ノード当たりの
+    # ログ流量が変わった場合に見直せるよう config 化。
+    fluent_bit_resources: FluentBitResourceConfig
 
     @classmethod
     def for_dev(cls, cluster_name: str = "eks-cluster-dev") -> ClusterConfig:
@@ -184,6 +249,31 @@ class ClusterConfig:
             s3_table_bucket_name="kafka-events-dev",
             s3_table_bucket_removal_policy=RemovalPolicy.DESTROY,
             s3_consumer_checkpoint_suffix="dev",
+            prometheus_resources=PrometheusResourceConfig(
+                memory_request="512Mi",
+                memory_limit="1Gi",
+                cpu_request="250m",
+                cpu_limit="500m",
+                storage_size="20Gi",
+                retention="15d",
+                scrape_interval="30s",
+            ),
+            alertmanager_resources=AlertmanagerResourceConfig(
+                memory_request="64Mi",
+                memory_limit="128Mi",
+                cpu_request="50m",
+                cpu_limit="100m",
+                storage_size="1Gi",
+            ),
+            prometheus_replicas=2,
+            alertmanager_replicas=3,
+            fluent_bit_resources=FluentBitResourceConfig(
+                memory_request="128Mi",
+                memory_limit="256Mi",
+                cpu_request="50m",
+                cpu_limit="200m",
+                mem_buf_limit="5MB",
+            ),
         )
 
     @classmethod
@@ -241,6 +331,31 @@ class ClusterConfig:
             s3_table_bucket_name="kafka-events-stg",
             s3_table_bucket_removal_policy=RemovalPolicy.RETAIN,
             s3_consumer_checkpoint_suffix="stg",
+            prometheus_resources=PrometheusResourceConfig(
+                memory_request="512Mi",
+                memory_limit="1Gi",
+                cpu_request="250m",
+                cpu_limit="500m",
+                storage_size="20Gi",
+                retention="15d",
+                scrape_interval="30s",
+            ),
+            alertmanager_resources=AlertmanagerResourceConfig(
+                memory_request="64Mi",
+                memory_limit="128Mi",
+                cpu_request="50m",
+                cpu_limit="100m",
+                storage_size="1Gi",
+            ),
+            prometheus_replicas=2,
+            alertmanager_replicas=3,
+            fluent_bit_resources=FluentBitResourceConfig(
+                memory_request="128Mi",
+                memory_limit="256Mi",
+                cpu_request="50m",
+                cpu_limit="200m",
+                mem_buf_limit="5MB",
+            ),
         )
 
     @classmethod
@@ -298,4 +413,29 @@ class ClusterConfig:
             s3_table_bucket_name="kafka-events",
             s3_table_bucket_removal_policy=RemovalPolicy.RETAIN,
             s3_consumer_checkpoint_suffix="prd",
+            prometheus_resources=PrometheusResourceConfig(
+                memory_request="512Mi",
+                memory_limit="1Gi",
+                cpu_request="250m",
+                cpu_limit="500m",
+                storage_size="20Gi",
+                retention="15d",
+                scrape_interval="30s",
+            ),
+            alertmanager_resources=AlertmanagerResourceConfig(
+                memory_request="64Mi",
+                memory_limit="128Mi",
+                cpu_request="50m",
+                cpu_limit="100m",
+                storage_size="1Gi",
+            ),
+            prometheus_replicas=2,
+            alertmanager_replicas=3,
+            fluent_bit_resources=FluentBitResourceConfig(
+                memory_request="128Mi",
+                memory_limit="256Mi",
+                cpu_request="50m",
+                cpu_limit="200m",
+                mem_buf_limit="5MB",
+            ),
         )

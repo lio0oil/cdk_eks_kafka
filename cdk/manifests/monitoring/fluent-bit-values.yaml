@@ -5,11 +5,11 @@ tolerations:
   - operator: Exists
 resources:
   requests:
-    memory: 128Mi
-    cpu: 50m
+    memory: <FLUENT_BIT_MEMORY_REQUEST>
+    cpu: <FLUENT_BIT_CPU_REQUEST>
   limits:
-    memory: 256Mi
-    cpu: 200m
+    memory: <FLUENT_BIT_MEMORY_LIMIT>
+    cpu: <FLUENT_BIT_CPU_LIMIT>
 config:
   inputs: |
     [INPUT]
@@ -18,7 +18,7 @@ config:
         Path              /var/log/containers/*.log
         multiline.parser  docker, cri
         DB                /var/log/flb_kube.db
-        Mem_Buf_Limit     5MB
+        Mem_Buf_Limit     <FLUENT_BIT_MEM_BUF_LIMIT>
   filters: |
     [FILTER]
         Name                kubernetes

@@ -381,7 +381,7 @@ def test_pod_monitor_manifest_applied(template, pod_monitor_name):
     assert len(matched) == 1, f"PodMonitor {pod_monitor_name} が apply されていない"
 
 
-def test_kube_prometheus_stack_enables_prometheus_and_operator(template):
+def test_kube_prometheus_stack_enables_prometheus_and_operator(template, config):
     # chart values で prometheus / Operator を有効化していること（無効化していた頃の
     # 設定を誤って残すと in-cluster Prometheus が立たず Grafana にデータが入らない）。
     charts = template.find_resources("Custom::AWSCDK-EKS-HelmChart")
@@ -391,11 +391,46 @@ def test_kube_prometheus_stack_enables_prometheus_and_operator(template):
     # 無効化していたときは `enabled: false` を明示していたため、両 enable: false が無いことを assert
     assert '"prometheus":{"enabled":false' not in values_literals
     assert '"prometheusOperator":{"enabled":false' not in values_literals
-    # 2 replica HA / 15 day retention を assert（コスト・容量・可用性の前提）
-    assert '"replicas":2' in values_literals
-    assert '"retention":"15d"' in values_literals
+    # replicas / retention / storage size / scrapeInterval は ClusterConfig が真実の源（環境別に
+    # 変更しうる値のため config.py 側の値をそのまま assert し、二重管理を避ける）
+    assert f'"replicas":{config.prometheus_replicas}' in values_literals
+    assert f'"retention":"{config.prometheus_resources.retention}"' in values_literals
+    assert f'"scrapeInterval":"{config.prometheus_resources.scrape_interval}"' in values_literals
+    assert f'"storage":"{config.prometheus_resources.storage_size}"' in values_literals
     # AZ 跨ぎの topologySpread が外れると 2 replica が同 AZ に乗りうる
     assert "topology.kubernetes.io/zone" in values_literals
+
+
+def test_prometheus_resources_come_from_config(template, config):
+    # broker_count 増設等でスクレイプ対象が増えた際に resources を見直せるよう、
+    # config.prometheus_resources の値がそのまま chart values に反映されていることを検証する。
+    charts = template.find_resources("Custom::AWSCDK-EKS-HelmChart")
+    kps = [res for res in charts.values() if res["Properties"].get("Chart") == "kube-prometheus-stack"]
+    assert len(kps) == 1
+    literals = _manifest_literals(kps[0]["Properties"]["Values"])
+    resources = config.prometheus_resources
+
+    assert f'"requests":{{"memory":"{resources.memory_request}","cpu":"{resources.cpu_request}"}}' in literals
+    assert f'"limits":{{"memory":"{resources.memory_limit}","cpu":"{resources.cpu_limit}"}}' in literals
+
+
+def test_alertmanager_resources_come_from_config(template, config):
+    charts = template.find_resources("Custom::AWSCDK-EKS-HelmChart")
+    kps = [res for res in charts.values() if res["Properties"].get("Chart") == "kube-prometheus-stack"]
+    assert len(kps) == 1
+    literals = _manifest_literals(kps[0]["Properties"]["Values"])
+    resources = config.alertmanager_resources
+
+    assert f'"requests":{{"memory":"{resources.memory_request}","cpu":"{resources.cpu_request}"}}' in literals
+    assert f'"limits":{{"memory":"{resources.memory_limit}","cpu":"{resources.cpu_limit}"}}' in literals
+
+
+def test_alertmanager_storage_size_comes_from_config(template, config):
+    charts = template.find_resources("Custom::AWSCDK-EKS-HelmChart")
+    kps = [res for res in charts.values() if res["Properties"].get("Chart") == "kube-prometheus-stack"]
+    assert len(kps) == 1
+    literals = _manifest_literals(kps[0]["Properties"]["Values"])
+    assert f'"storage":"{config.alertmanager_resources.storage_size}"' in literals
 
 
 def test_alertmanager_sns_topic_exists(template):
@@ -431,7 +466,7 @@ def test_alertmanager_sa_iam_policy_grants_sns_publish(template):
     assert isinstance(resource, (dict, list))
 
 
-def test_kube_prometheus_stack_enables_alertmanager(template):
+def test_kube_prometheus_stack_enables_alertmanager(template, config):
     """alertmanager が 3 replica HA / AZ 分散 / PDB maxUnavailable: 1 で有効化される。
 
     enabled: false 時代に書いていた `"alertmanager":{"enabled":false}` リテラルが
@@ -443,9 +478,9 @@ def test_kube_prometheus_stack_enables_alertmanager(template):
     literals = _manifest_literals(kps[0]["Properties"]["Values"])
     assert '"alertmanager":{"enabled":false' not in literals
     assert '"alertmanager":{"enabled":true' in literals
-    # 3 replica gossip cluster（標準サイズ）
-    assert '"replicas":3' in literals
-    # AZ 跨ぎの topologySpread が外れると 3 replica が同 AZ に乗りうる
+    # gossip cluster の replica 数（標準サイズ）は ClusterConfig が真実の源
+    assert f'"replicas":{config.alertmanager_replicas}' in literals
+    # AZ 跨ぎの topologySpread が外れると replica が同 AZ に乗りうる
     assert "topology.kubernetes.io/zone" in literals
     # PDB は Prometheus と Alertmanager の両方で enabled（chart デフォルト minAvailable: 1）。
     # 同一リテラルが 2 箇所以上出現することで両方有効を invariant 化する。片方が消えた
@@ -606,6 +641,20 @@ def test_kube_prometheus_stack_enables_prometheus_pdb(template):
     assert len(kps) == 1
     values_literals = _manifest_literals(kps[0]["Properties"]["Values"])
     assert '"podDisruptionBudget":{"enabled":true}' in values_literals
+
+
+def test_fluent_bit_resources_and_buffer_limit_come_from_config(template, config):
+    # ノード当たりのログ流量が変わった場合に見直せるよう、config.fluent_bit_resources /
+    # fluent_bit_mem_buf_limit の値がそのまま chart values に反映されていることを検証する。
+    charts = template.find_resources("Custom::AWSCDK-EKS-HelmChart")
+    fluent_bit = [res for res in charts.values() if res["Properties"].get("Chart") == "fluent-bit"]
+    assert len(fluent_bit) == 1
+    literals = _manifest_literals(fluent_bit[0]["Properties"]["Values"])
+    resources = config.fluent_bit_resources
+
+    assert f'"requests":{{"memory":"{resources.memory_request}","cpu":"{resources.cpu_request}"}}' in literals
+    assert f'"limits":{{"memory":"{resources.memory_limit}","cpu":"{resources.cpu_limit}"}}' in literals
+    assert f"Mem_Buf_Limit     {config.fluent_bit_resources.mem_buf_limit}" in literals
 
 
 @pytest.mark.parametrize(

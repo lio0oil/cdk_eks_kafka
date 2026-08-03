@@ -157,6 +157,20 @@ class MonitoringConstruct(Construct):
             "kube-prometheus-stack-values.yaml",
             REGION=region,
             SNS_TOPIC_ARN=alertmanager_topic.topic_arn,
+            PROMETHEUS_RETENTION=config.prometheus_resources.retention,
+            PROMETHEUS_STORAGE_SIZE=config.prometheus_resources.storage_size,
+            PROMETHEUS_SCRAPE_INTERVAL=config.prometheus_resources.scrape_interval,
+            PROMETHEUS_MEMORY_REQUEST=config.prometheus_resources.memory_request,
+            PROMETHEUS_MEMORY_LIMIT=config.prometheus_resources.memory_limit,
+            PROMETHEUS_CPU_REQUEST=config.prometheus_resources.cpu_request,
+            PROMETHEUS_CPU_LIMIT=config.prometheus_resources.cpu_limit,
+            ALERTMANAGER_MEMORY_REQUEST=config.alertmanager_resources.memory_request,
+            ALERTMANAGER_MEMORY_LIMIT=config.alertmanager_resources.memory_limit,
+            ALERTMANAGER_CPU_REQUEST=config.alertmanager_resources.cpu_request,
+            ALERTMANAGER_CPU_LIMIT=config.alertmanager_resources.cpu_limit,
+            PROMETHEUS_REPLICAS=str(config.prometheus_replicas),
+            ALERTMANAGER_REPLICAS=str(config.alertmanager_replicas),
+            ALERTMANAGER_STORAGE_SIZE=config.alertmanager_resources.storage_size,
         )
         kps = cluster.add_helm_chart(
             "KubePrometheusStack",
@@ -236,6 +250,11 @@ class MonitoringConstruct(Construct):
                 "fluent-bit-values.yaml",
                 REGION=region,
                 LOG_GROUP_NAME=log_group.log_group_name,
+                FLUENT_BIT_MEMORY_REQUEST=config.fluent_bit_resources.memory_request,
+                FLUENT_BIT_MEMORY_LIMIT=config.fluent_bit_resources.memory_limit,
+                FLUENT_BIT_CPU_REQUEST=config.fluent_bit_resources.cpu_request,
+                FLUENT_BIT_CPU_LIMIT=config.fluent_bit_resources.cpu_limit,
+                FLUENT_BIT_MEM_BUF_LIMIT=config.fluent_bit_resources.mem_buf_limit,
             ),
         )
         fluent_bit.node.add_dependency(fluent_bit_sa)

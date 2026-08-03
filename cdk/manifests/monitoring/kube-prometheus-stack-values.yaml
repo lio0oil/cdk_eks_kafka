@@ -34,12 +34,14 @@ prometheus:
     # ロードバランスするため Grafana 側の datasource 設定は変更不要。
     # データ重複排除（Thanos / Mimir 等）は導入しない: 短期保存の
     # ダッシュボード用途では 2 系列の値が同等で実害が無い。
-    replicas: 2
+    replicas: <PROMETHEUS_REPLICAS>
     # 15 日保持。retention とサンプル取り込みレートで PVC 容量が決まる。
     # 60s scrape × ~70K series × 15 日 = 約 8GB（圧縮後）見込み。
     # gp3 20Gi はその約 2.5 倍のヘッドルームで、cardinality が増えても余裕がある。
     # 各 replica が独立に保管するため EBS 代は replicas 数に比例（20Gi × 2 = 40Gi）。
-    retention: 15d
+    retention: <PROMETHEUS_RETENTION>
+    # cardinality / series 数が環境で変わった場合に調整できるよう明示化（chart デフォルトと同値）。
+    scrapeInterval: <PROMETHEUS_SCRAPE_INTERVAL>
     # 全 Namespace の ServiceMonitor / PodMonitor を対象にする（PodMonitor を
     # 任意 NS に置けるようにするため）。
     serviceMonitorSelectorNilUsesHelmValues: false
@@ -50,11 +52,11 @@ prometheus:
     # DedicatedKafka taint には toleration を持たないため自然に弾かれる）
     resources:
       requests:
-        memory: 512Mi
-        cpu: 250m
+        memory: <PROMETHEUS_MEMORY_REQUEST>
+        cpu: <PROMETHEUS_CPU_REQUEST>
       limits:
-        memory: 1Gi
-        cpu: 500m
+        memory: <PROMETHEUS_MEMORY_LIMIT>
+        cpu: <PROMETHEUS_CPU_LIMIT>
     # 2 replica を別 AZ に分散させて AZ 単一障害耐性を確保する。
     # ScheduleAnyway は best-effort（AZ 偏りを許容してでも schedule する）。
     # DoNotSchedule にすると Node 不足や AZ 不整合で Pod が Pending に陥り、
@@ -73,7 +75,7 @@ prometheus:
           accessModes: [ReadWriteOnce]
           resources:
             requests:
-              storage: 20Gi
+              storage: <PROMETHEUS_STORAGE_SIZE>
   # chart デフォルトは enabled: false で、2 replica HA でもノードドレインで両 Pod が
   # 同時 evict されうる。active-active で片肺残しを保証するため有効化する。
   # 値は chart デフォルトの minAvailable: 1 にそのまま乗る（templates が omit "enabled" で
@@ -95,7 +97,7 @@ alertmanager:
     # 3 replica gossip cluster（標準サイズ）。AZ 単一障害でも 2 peer 残る。
     # active-active gossip による通知の de-dup で重複配信を抑える（Prometheus の
     # active-active 2 replica と組み合わせて経路全体が単一障害耐性を持つ）。
-    replicas: 3
+    replicas: <ALERTMANAGER_REPLICAS>
     # 3 replica を 3 AZ に分散させる。AZ 不整合で Pod が Pending にならないよう
     # ScheduleAnyway（Prometheus と同じ best-effort 方針）。
     topologySpreadConstraints:
@@ -108,11 +110,11 @@ alertmanager:
     # Alertmanager は処理量が小さいため Prometheus 比でかなり軽量。
     resources:
       requests:
-        memory: 64Mi
-        cpu: 50m
+        memory: <ALERTMANAGER_MEMORY_REQUEST>
+        cpu: <ALERTMANAGER_CPU_REQUEST>
       limits:
-        memory: 128Mi
-        cpu: 100m
+        memory: <ALERTMANAGER_MEMORY_LIMIT>
+        cpu: <ALERTMANAGER_CPU_LIMIT>
     # notification log（同一通知の二重送信防止）と silence 設定の永続化。
     # Pod 再起動でこれらが消えると、再起動直後に既送通知が再送されたり
     # 設定済み silence が失効したりして運用ノイズが増えるため、永続ボリュームを必須にする。
@@ -123,7 +125,7 @@ alertmanager:
           accessModes: [ReadWriteOnce]
           resources:
             requests:
-              storage: 1Gi
+              storage: <ALERTMANAGER_STORAGE_SIZE>
   # chart デフォルトは enabled: false で、3 replica あっても PDB が生成されずノードドレインで
   # 同時 evict されうる。enabled: true だけ渡せば chart デフォルトの minAvailable: 1 に乗る
   # （Prometheus の PDB と同じ流儀）。templates が omit "enabled" で残りを spec にダンプする
