@@ -42,7 +42,7 @@ Strimzi 公式リポジトリの `examples/metrics/` 配下 20 項目（`documen
 | 5 | `prometheus-alertmanager-config/alert-manager-config.yaml` | 対象外 | 同等機能を`kube-prometheus-stack-values.yaml`の`alertmanager.config`でSNS向けに構築済み |
 | 6 | `prometheus-install/alert-manager.yaml` | 対象外 | kube-prometheus-stackがAlertmanager本体をデプロイ済み |
 | 7 | `prometheus-install/pod-monitors/*`（4個） | 一部 | kafka-resources / cluster-operator / entity-operator の3個を`manifests/monitoring/prometheus-install/pod-monitors/`に配置。bridgeは未使用コンポーネントのため対象外 |
-| 8 | `prometheus-install/prometheus-rules/*`（8個） | 一部 | kafka-rules / kafka-exporter-topic / cluster-operator-rules / entity-operator-rules / certificate-rules の5個を`manifests/monitoring/prometheus-install/prometheus-rules/`に配置、無編集。bridge / connect / mirrormaker2 は未使用コンポーネントのため対象外 |
+| 8 | `prometheus-install/prometheus-rules/*`（8個） | 一部 | kafka-rules / kafka-exporter-topic / cluster-operator-rules / entity-operator-rules / certificate-rules の5個を`manifests/monitoring/prometheus-install/prometheus-rules/`に配置。bridge / connect / mirrormaker2 は未使用コンポーネントのため対象外。kafka-rulesのみ、KafkaNodePool名がbroker/controller（公式サンプル想定のkafkaに加えて実際に存在する名前）に対応するためPod/PVC名regexを`.+-kafka-[0-9]+`から`.+-(kafka\|broker\|controller)-[0-9]+`に変更している（他4件は無編集） |
 | 9 | `prometheus-install/prometheus.yaml` | 対象外 | kube-prometheus-stackがPrometheus本体をデプロイ済み |
 | 10-14 | `strimzi-metrics-reporter/*`（ダッシュボード5+CR定義4） | 対象外 | `metricsConfig.type: strimziMetricsReporter`用。ローカルは`jmxPrometheusExporter`のため非互換 |
 | 15 | `kafka-bridge-metrics.yaml` | 対象外 | Bridge未使用 |

@@ -1,9 +1,12 @@
+import re
+
 import pytest
 import yaml
 
 from ekscdk.constructs._manifest import (
     build_kafka_broker_configs,
     build_kafka_nlb_ports,
+    load_manifest,
     load_manifest_with_subs,
     manifest_dir,
 )
@@ -116,3 +119,41 @@ def test_build_kafka_broker_configs_key_order_matches_strimzi_yaml():
 
 def test_build_kafka_broker_configs_zero_returns_empty():
     assert build_kafka_broker_configs(broker_count=0, advertised_host="h") == []
+
+
+def test_kafka_rules_pod_regex_matches_actual_broker_and_controller_pod_names():
+    """prometheus-rules-kafka.yaml の Pod/PVC 名 regex が実際の NodePool 命名（broker/controller）に一致する。
+
+    Strimzi 公式サンプルは NodePool 名が `kafka` である前提の regex（`.+-kafka-[0-9]+`）を
+    使うが、本プロジェクトは broker/controller という別名にしているため、無編集のままだと
+    ScrapeProblem / KafkaBrokerContainersDown / KafkaContainerRestartedInTheLast5Minutes /
+    KafkaRunningOutOfSpace が実際の Pod に一致せず機能しない（container_last_seen 系は
+    absent() のため常時誤発火、up 系・PVC 系は一致 series が無く常時未発火になる）。
+    """
+    manifest = load_manifest(
+        manifest_dir("monitoring"), "prometheus-install/prometheus-rules/prometheus-rules-kafka.yaml"
+    )
+    rules_by_alert = {r["alert"]: r["expr"] for r in manifest["spec"]["groups"][0]["rules"]}
+
+    sample_pod_names = ["kafka-cluster-broker-0", "kafka-cluster-controller-0"]
+    for alert_name, label_pattern in [
+        ("ScrapeProblem", r'kubernetes_pod_name=~"([^"]+)"'),
+        ("KafkaBrokerContainersDown", r'pod=~"([^"]+)"'),
+        ("KafkaContainerRestartedInTheLast5Minutes", r'pod=~"([^"]+)"'),
+    ]:
+        expr = rules_by_alert[alert_name]
+        match = re.search(label_pattern, expr)
+        assert match, f"{alert_name} に pod 名 regex が見つからない: {expr!r}"
+        pod_regex = match.group(1)
+        for pod_name in sample_pod_names:
+            assert re.fullmatch(pod_regex, pod_name), (
+                f"{alert_name} の regex {pod_regex!r} が実際の Pod 名 {pod_name!r} にマッチしない"
+            )
+
+    pvc_match = re.search(r'persistentvolumeclaim=~"([^"]+)"', rules_by_alert["KafkaRunningOutOfSpace"])
+    assert pvc_match
+    pvc_regex = pvc_match.group(1)
+    for pvc_name in ["data-0-kafka-cluster-broker-0", "data-0-kafka-cluster-controller-0"]:
+        assert re.fullmatch(pvc_regex, pvc_name), (
+            f"KafkaRunningOutOfSpace の regex {pvc_regex!r} が実際の PVC 名 {pvc_name!r} にマッチしない"
+        )
