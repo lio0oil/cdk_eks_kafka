@@ -7,56 +7,23 @@ metadata:
     app: strimzi
 data:
   kafka-metrics-config.yml: |
+    # See https://github.com/prometheus/jmx_exporter for more info about JMX Prometheus Exporter metrics
     lowercaseOutputName: true
     rules:
-    # JVM memory (heap / nonheap)
-    - pattern: "java.lang<type=Memory><HeapMemoryUsage>(\\w+)"
-      name: jvm_memory_bytes_$1
-      type: GAUGE
-      labels:
-        area: "heap"
-    - pattern: "java.lang<type=Memory><NonHeapMemoryUsage>(\\w+)"
-      name: jvm_memory_bytes_$1
-      type: GAUGE
-      labels:
-        area: "nonheap"
-    - pattern: "java.lang<type=MemoryPool, name=(.+)><Usage>(\\w+)"
-      name: jvm_memory_pool_bytes_$2
-      type: GAUGE
-      labels:
-        pool: "$1"
-    # JVM GC
-    - pattern: "java.lang<type=GarbageCollector, name=(.+)><>CollectionCount"
-      name: jvm_gc_collection_seconds_count
-      type: COUNTER
-      labels:
-        gc: "$1"
-    - pattern: "java.lang<type=GarbageCollector, name=(.+)><>CollectionTime"
-      name: jvm_gc_collection_seconds_sum
-      type: COUNTER
-      labels:
-        gc: "$1"
-    # JVM threads / class loading
-    - pattern: "java.lang<type=Threading><>(\\w+)"
-      name: jvm_threads_$1
-      type: GAUGE
-    - pattern: "java.lang<type=ClassLoading><>(\\w+)"
-      name: jvm_classes_$1
-      type: GAUGE
-    # Kafka metrics
+    # Special cases and very specific rules
     - pattern: kafka.server<type=(.+), name=(.+), clientId=(.+), topic=(.+), partition=(.*)><>Value
       name: kafka_server_$1_$2
       type: GAUGE
       labels:
-       clientId: "$3"
-       topic: "$4"
-       partition: "$5"
+        clientId: "$3"
+        topic: "$4"
+        partition: "$5"
     - pattern: kafka.server<type=(.+), name=(.+), clientId=(.+), brokerHost=(.+), brokerPort=(.+)><>Value
       name: kafka_server_$1_$2
       type: GAUGE
       labels:
-       clientId: "$3"
-       broker: "$4:$5"
+        clientId: "$3"
+        broker: "$4:$5"
     - pattern: kafka.server<type=(.+), cipher=(.+), protocol=(.+), listener=(.+), networkProcessor=(.+)><>connections
       name: kafka_server_$1_connections_tls_info
       type: GAUGE
@@ -73,21 +40,36 @@ data:
         clientSoftwareVersion: "$3"
         listener: "$4"
         networkProcessor: "$5"
+    - pattern: "kafka.server<type=(.+), listener=(.+), networkProcessor=(.+)><>(.+-total):"
+      name: kafka_server_$1_$4
+      type: COUNTER
+      labels:
+        listener: "$2"
+        networkProcessor: "$3"
     - pattern: "kafka.server<type=(.+), listener=(.+), networkProcessor=(.+)><>(.+):"
       name: kafka_server_$1_$4
       type: GAUGE
       labels:
-       listener: "$2"
-       networkProcessor: "$3"
+        listener: "$2"
+        networkProcessor: "$3"
+    - pattern: kafka.server<type=(.+), listener=(.+), networkProcessor=(.+)><>(.+-total)
+      name: kafka_server_$1_$4
+      type: COUNTER
+      labels:
+        listener: "$2"
+        networkProcessor: "$3"
     - pattern: kafka.server<type=(.+), listener=(.+), networkProcessor=(.+)><>(.+)
       name: kafka_server_$1_$4
       type: GAUGE
       labels:
-       listener: "$2"
-       networkProcessor: "$3"
+        listener: "$2"
+        networkProcessor: "$3"
+    # Some percent metrics use MeanRate attribute
+    # Ex) kafka.server<type=(KafkaRequestHandlerPool), name=(RequestHandlerAvgIdlePercent)><>MeanRate
     - pattern: kafka.(\w+)<type=(.+), name=(.+)Percent\w*><>MeanRate
       name: kafka_$1_$2_$3_percent
       type: GAUGE
+    # Generic gauges for percents
     - pattern: kafka.(\w+)<type=(.+), name=(.+)Percent\w*><>Value
       name: kafka_$1_$2_$3_percent
       type: GAUGE
@@ -96,6 +78,7 @@ data:
       type: GAUGE
       labels:
         "$4": "$5"
+    # Generic per-second counters with 0-2 key/value pairs
     - pattern: kafka.(\w+)<type=(.+), name=(.+)PerSec\w*, (.+)=(.+), (.+)=(.+)><>Count
       name: kafka_$1_$2_$3_total
       type: COUNTER
@@ -110,6 +93,7 @@ data:
     - pattern: kafka.(\w+)<type=(.+), name=(.+)PerSec\w*><>Count
       name: kafka_$1_$2_$3_total
       type: COUNTER
+    # Generic gauges with 0-2 key/value pairs
     - pattern: kafka.(\w+)<type=(.+), name=(.+), (.+)=(.+), (.+)=(.+)><>Value
       name: kafka_$1_$2_$3
       type: GAUGE
@@ -124,6 +108,8 @@ data:
     - pattern: kafka.(\w+)<type=(.+), name=(.+)><>Value
       name: kafka_$1_$2_$3
       type: GAUGE
+    # Emulate Prometheus 'Summary' metrics for the exported 'Histogram's.
+    # Note that these are missing the '_sum' metric!
     - pattern: kafka.(\w+)<type=(.+), name=(.+), (.+)=(.+), (.+)=(.+)><>Count
       name: kafka_$1_$2_$3_count
       type: COUNTER
@@ -156,9 +142,29 @@ data:
       type: GAUGE
       labels:
         quantile: "0.$4"
-  cruise-control-config.yml: |
-    lowercaseOutputName: true
-    rules:
-    - pattern: kafka.cruisecontrol<name=(.+)><>(\w+)
-      name: kafka_cruisecontrol_$1_$2
+    # KRaft overall related metrics
+    # distinguish between always increasing COUNTER (total and max) and variable GAUGE (all others) metrics
+    - pattern: "kafka.server<type=raft-metrics><>(.+-total|.+-max):"
+      name: kafka_server_raftmetrics_$1
+      type: COUNTER
+    - pattern: "kafka.server<type=raft-metrics><>(current-state): (.+)"
+      name: kafka_server_raftmetrics_$1
+      value: 1
+      type: UNTYPED
+      labels:
+        $1: "$2"
+    - pattern: "kafka.server<type=raft-metrics><>(.+):"
+      name: kafka_server_raftmetrics_$1
+      type: GAUGE
+    # KRaft "low level" channels related metrics
+    # distinguish between always increasing COUNTER (total and max) and variable GAUGE (all others) metrics
+    - pattern: "kafka.server<type=raft-channel-metrics><>(.+-total|.+-max):"
+      name: kafka_server_raftchannelmetrics_$1
+      type: COUNTER
+    - pattern: "kafka.server<type=raft-channel-metrics><>(.+):"
+      name: kafka_server_raftchannelmetrics_$1
+      type: GAUGE
+    # Broker metrics related to fetching metadata topic records in KRaft mode
+    - pattern: "kafka.server<type=broker-metadata-metrics><>(.+):"
+      name: kafka_server_brokermetadatametrics_$1
       type: GAUGE

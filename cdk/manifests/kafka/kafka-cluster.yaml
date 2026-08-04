@@ -64,8 +64,8 @@ spec:
       type: jmxPrometheusExporter
       valueFrom:
         configMapKeyRef:
-          name: kafka-metrics
-          key: cruise-control-config.yml
+          name: cruise-control-metrics
+          key: metrics-config.yml
     logging:
       type: inline
       loggers:

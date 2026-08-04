@@ -228,6 +228,40 @@ def test_kafka_cluster_disables_auto_topic_creation(template):
     assert '"auto.create.topics.enable":false' in literals
 
 
+def test_kafka_and_cruise_control_use_separate_jmx_configmaps(template):
+    # Strimzi 公式サンプルでも kafka-metrics と cruise-control-metrics は別 ConfigMap
+    # （名前・key が異なる）のため、1 つに統合せずそれぞれ apply し、Kafka CR も
+    # component ごとに対応する ConfigMap を参照する。
+    all_k8s = template.find_resources("Custom::AWSCDK-EKS-KubernetesResource")
+
+    kafka_metrics_cms = [
+        res
+        for res in all_k8s.values()
+        if '"kind":"ConfigMap"' in _manifest_literals(res["Properties"]["Manifest"])
+        and '"name":"kafka-metrics"' in _manifest_literals(res["Properties"]["Manifest"])
+    ]
+    assert len(kafka_metrics_cms) == 1
+
+    cruise_control_cms = [
+        res
+        for res in all_k8s.values()
+        if '"kind":"ConfigMap"' in _manifest_literals(res["Properties"]["Manifest"])
+        and '"name":"cruise-control-metrics"' in _manifest_literals(res["Properties"]["Manifest"])
+    ]
+    assert len(cruise_control_cms) == 1
+
+    kafka_crs = [
+        res
+        for res in all_k8s.values()
+        if '"kind":"Kafka"' in _manifest_literals(res["Properties"]["Manifest"])
+        and '"kind":"KafkaNodePool"' not in _manifest_literals(res["Properties"]["Manifest"])
+    ]
+    assert len(kafka_crs) == 1
+    literals = _manifest_literals(kafka_crs[0]["Properties"]["Manifest"])
+    assert '"name":"kafka-metrics","key":"kafka-metrics-config.yml"' in literals
+    assert '"name":"cruise-control-metrics","key":"metrics-config.yml"' in literals
+
+
 def _interface_endpoint_service_literals(template) -> list[str]:
     # Interface 型 VPC Endpoint の ServiceName をリテラル文字列化して返す。
     # ServiceName は com.amazonaws.<region>.<service> を Fn::Join で組み、region は
@@ -379,6 +413,30 @@ def test_pod_monitor_manifest_applied(template, pod_monitor_name):
         and f'"name":"{pod_monitor_name}"' in _manifest_literals(res["Properties"]["Manifest"])
     ]
     assert len(matched) == 1, f"PodMonitor {pod_monitor_name} が apply されていない"
+
+
+@pytest.mark.parametrize(
+    "dashboard_name",
+    [
+        "strimzi-kafka-dashboard",
+        "strimzi-exporter-dashboard",
+        "strimzi-operators-dashboard",
+        "strimzi-cruise-control-dashboard",
+        "strimzi-kraft-dashboard",
+    ],
+)
+def test_grafana_dashboard_configmap_applied(template, dashboard_name):
+    # grafana_dashboard=1 ラベル付き ConfigMap を kube-prometheus-stack の sidecar が
+    # 自動取り込みする。Strimzi公式dashboard起点の5件が全て apply されていることを確認する。
+    all_k8s = template.find_resources("Custom::AWSCDK-EKS-KubernetesResource")
+    matched = [
+        res
+        for res in all_k8s.values()
+        if '"kind":"ConfigMap"' in _manifest_literals(res["Properties"]["Manifest"])
+        and f'"name":"{dashboard_name}"' in _manifest_literals(res["Properties"]["Manifest"])
+        and '"grafana_dashboard":"1"' in _manifest_literals(res["Properties"]["Manifest"])
+    ]
+    assert len(matched) == 1, f"Dashboard ConfigMap {dashboard_name} が apply されていない"
 
 
 def test_kube_prometheus_stack_enables_prometheus_and_operator(template, config):
@@ -545,16 +603,6 @@ def test_dev_system_nodegroup_uses_larger_instance(dev_template):
     )
 
 
-def test_kube_prometheus_stack_disables_default_kubelet_too_many_pods(template):
-    # chart 同梱の KubeletTooManyPods は severity: info 固定で個別上書き手段が無いため、
-    # defaultRules.disabled で無効化して prometheus-rules-node.yaml 側で warning 再定義する。
-    charts = template.find_resources("Custom::AWSCDK-EKS-HelmChart")
-    kps = [res for res in charts.values() if res["Properties"].get("Chart") == "kube-prometheus-stack"]
-    assert len(kps) == 1
-    literals = _manifest_literals(kps[0]["Properties"]["Values"])
-    assert '"disabled":{"KubeletTooManyPods":true}' in literals
-
-
 def test_kube_prometheus_stack_disables_managed_control_plane_components(template):
     # EKS のコントロールプレーン（kube-controller-manager / kube-scheduler）は AWS マネージドで
     # 外部 scrape 不可。chart デフォルトの enabled: true のままだと到達不能な ServiceMonitor が残り、
@@ -566,21 +614,6 @@ def test_kube_prometheus_stack_disables_managed_control_plane_components(templat
     literals = _manifest_literals(kps[0]["Properties"]["Values"])
     assert '"kubeControllerManager":{"enabled":false}' in literals
     assert '"kubeScheduler":{"enabled":false}' in literals
-
-
-def test_node_capacity_rule_overrides_kubelet_too_many_pods_as_warning(template):
-    # 無効化した chart default を写し、severity を info -> warning に上げたルールが apply される。
-    # autoscaler が無い本環境では Pod capacity 到達が即 Pending 固定に直結するため info では弱い。
-    all_k8s = template.find_resources("Custom::AWSCDK-EKS-KubernetesResource")
-    matched = [
-        res
-        for res in all_k8s.values()
-        if '"name":"node-capacity-rules"' in _manifest_literals(res["Properties"]["Manifest"])
-    ]
-    assert len(matched) == 1
-    literals = _manifest_literals(matched[0]["Properties"]["Manifest"])
-    assert '"alert":"KubeletTooManyPods"' in literals
-    assert '"severity":"warning"' in literals
 
 
 def test_alertmanager_sns_log_forwarder_present_in_dev(dev_template):
@@ -613,14 +646,16 @@ def test_kube_prometheus_stack_alertmanager_uses_sns_receiver(template):
 
 @pytest.mark.parametrize(
     "rule_group_name",
-    ["strimzi-kafka-rules", "alertmanager-smoke-rules", "node-capacity-rules"],
+    [
+        "kafka-rules",
+        "kafka-exporter-topic",
+        "strimzi-cluster-operator-rules",
+        "strimzi-entity-operator",
+        "kafka-certificates",
+    ],
 )
 def test_prometheus_rule_manifest_applied(template, rule_group_name):
-    """PrometheusRule CR が apply される（Kafka 系本番候補 + 動作確認用 smoke の 2 系統）。
-
-    smoke ルール（alertmanager-smoke-rules）は動作確認後に削除予定。削除時はこの
-    パラメータと対応 manifest を一緒に消す。
-    """
+    """PrometheusRule CR（Strimzi公式 prometheus-rules 起点、稼働コンポーネント分）が apply される。"""
     all_k8s = template.find_resources("Custom::AWSCDK-EKS-KubernetesResource")
     matched = [
         res

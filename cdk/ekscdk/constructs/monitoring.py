@@ -14,7 +14,6 @@ from ekscdk.constructs._manifest import load, load_with_subs, manifest_dir
 from ekscdk.constructs.addons import AddonsConstruct
 
 _DIR = manifest_dir("monitoring")
-_DIR_KAFKA = manifest_dir("kafka")
 
 
 class MonitoringConstruct(Construct):
@@ -29,7 +28,8 @@ class MonitoringConstruct(Construct):
         gp3 PVC 20Gi）/ Prometheus Operator / Grafana / Alertmanager（3 replica HA、
         gp3 PVC 1Gi、SNS receiver）/ kube-state-metrics / node-exporter
       - Strimzi 系 PodMonitor 3 件（kafka-resources / cluster-operator / entity-operator）
-      - PrometheusRule: Strimzi 公式起点の Kafka 系ルール / Alertmanager 経路疎通用 smoke
+      - Grafana Dashboard ConfigMap 5 件（kafka / exporter / operators / cruise-control / kraft）
+      - PrometheusRule 5 件: Strimzi 公式 prometheus-rules をそのまま適用（稼働コンポーネント分のみ）
       - Fluent Bit DaemonSet: ログ → CloudWatch Logs
 
     Grafana は chart デフォルトの in-cluster Prometheus datasource をそのまま使う。
@@ -191,14 +191,14 @@ class MonitoringConstruct(Construct):
         # 後に apply、対象 NS の存在も依存に張る。
         kafka_pm = cluster.add_manifest(
             "KafkaResourcesPodMonitor",
-            load(_DIR_KAFKA, "kafka-pod-monitor.yaml"),
+            load(_DIR, "prometheus-install/pod-monitors/kafka-pod-monitor.yaml"),
         )
         kafka_pm.node.add_dependency(kps)
         kafka_pm.node.add_dependency(kafka_namespace)
 
         cluster_op_pm = cluster.add_manifest(
             "StrimziClusterOperatorPodMonitor",
-            load(_DIR_KAFKA, "cluster-operator-pod-monitor.yaml"),
+            load(_DIR, "prometheus-install/pod-monitors/cluster-operator-pod-monitor.yaml"),
         )
         cluster_op_pm.node.add_dependency(kps)
         # strimzi-system NS は Strimzi chart が create_namespace=True で作るため依存する。
@@ -206,7 +206,7 @@ class MonitoringConstruct(Construct):
 
         entity_op_pm = cluster.add_manifest(
             "StrimziEntityOperatorPodMonitor",
-            load(_DIR_KAFKA, "entity-operator-pod-monitor.yaml"),
+            load(_DIR, "prometheus-install/pod-monitors/entity-operator-pod-monitor.yaml"),
         )
         entity_op_pm.node.add_dependency(kps)
         entity_op_pm.node.add_dependency(kafka_namespace)
@@ -218,24 +218,26 @@ class MonitoringConstruct(Construct):
             "grafana-strimzi-kafka-dashboard.yaml",
             "grafana-strimzi-exporter-dashboard.yaml",
             "grafana-strimzi-operators-dashboard.yaml",
+            "grafana-strimzi-cruise-control-dashboard.yaml",
+            "grafana-strimzi-kraft-dashboard.yaml",
         ):
             cm_id = "Dash" + fname.removeprefix("grafana-strimzi-").removesuffix("-dashboard.yaml").title().replace(
                 "-", ""
             )
-            cm = cluster.add_manifest(cm_id, load(_DIR, f"dashboards/{fname}"))
+            cm = cluster.add_manifest(cm_id, load(_DIR, f"grafana-dashboards/{fname}"))
             cm.node.add_dependency(kps)
 
-        # ── PrometheusRule（Kafka 本番候補 + Alertmanager 経路疎通用 smoke）─────
+        # ── PrometheusRule（Strimzi 公式 prometheus-rules 起点、稼働コンポーネント分のみ）──
         # Prometheus Operator が CRD（PrometheusRule）を提供するため kps 依存。
-        # smoke ルール（prometheus-rules-smoke.yaml）は動作確認専用で、検証完了後に
-        # ファイル / この loop の対応エントリ / テストパラメータを 1 PR で削除する。
         for fname in (
             "prometheus-rules-kafka.yaml",
-            "prometheus-rules-node.yaml",
-            "prometheus-rules-smoke.yaml",
+            "prometheus-rules-kafka-exporter-topic.yaml",
+            "prometheus-rules-cluster-operator.yaml",
+            "prometheus-rules-entity-operator.yaml",
+            "prometheus-rules-certificate.yaml",
         ):
             rule_id = "Rule" + fname.removeprefix("prometheus-rules-").removesuffix(".yaml").title().replace("-", "")
-            rule = cluster.add_manifest(rule_id, load(_DIR, fname))
+            rule = cluster.add_manifest(rule_id, load(_DIR, f"prometheus-install/prometheus-rules/{fname}"))
             rule.node.add_dependency(kps)
 
         # ── Fluent Bit DaemonSet（Helm）───────────────────────────────────────

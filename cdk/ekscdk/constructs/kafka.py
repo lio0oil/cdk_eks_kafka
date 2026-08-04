@@ -11,12 +11,13 @@ from ekscdk.constructs._manifest import (
 )
 
 _DIR = manifest_dir("kafka")
+_DIR_MONITORING = manifest_dir("monitoring")
 
 
 class KafkaConstruct(Construct):
     """Kafka 基盤 Construct（Kubernetes リソースのみ管理）
 
-    - JMX メトリクス ConfigMap
+    - JMX メトリクス ConfigMap（Kafka broker 用 / Cruise Control 用の 2 件）
     - KafkaNodePool（controller x3 / broker x3）
     - Kafka CR（KRaft モード / 外部リスナー NodePort）
     - TargetGroupBinding（NLB TargetGroup と Strimzi NodePort Service の動的バインド）
@@ -45,8 +46,17 @@ class KafkaConstruct(Construct):
         super().__init__(scope, construct_id)
 
         # ── JMX メトリクス ConfigMap ──────────────────────────────────────────
-        cm = cluster.add_manifest("KafkaMetricsCm", load(_DIR, "cm.yaml"))
+        # Kafka broker 用と Cruise Control 用は Strimzi 公式サンプルでも別 ConfigMap
+        # （名前・key が異なる）のため、1 つに統合せずそれぞれ apply する。ファイル自体は
+        # 公式 examples/metrics/ の配置に合わせ manifests/monitoring/ 側に置くが、
+        # Kafka CR がこの ConfigMap に依存するため apply の所有権は KafkaConstruct のまま。
+        cm = cluster.add_manifest("KafkaMetricsCm", load(_DIR_MONITORING, "kafka-metrics.yaml"))
         cm.node.add_dependency(kafka_namespace)
+
+        cruise_control_cm = cluster.add_manifest(
+            "CruiseControlMetricsCm", load(_DIR_MONITORING, "kafka-cruise-control-metrics.yaml")
+        )
+        cruise_control_cm.node.add_dependency(kafka_namespace)
 
         # kafka_delete_claim を YAML の boolean リテラル文字列に変換（True → "true"）
         delete_claim_str = "true" if config.kafka_delete_claim else "false"
@@ -115,6 +125,7 @@ class KafkaConstruct(Construct):
         )
         kafka_cr = cluster.add_manifest("KafkaCluster", kafka_cr_manifest)
         kafka_cr.node.add_dependency(cm)
+        kafka_cr.node.add_dependency(cruise_control_cm)
         kafka_cr.node.add_dependency(controller_pool)
         kafka_cr.node.add_dependency(broker_pool)
 

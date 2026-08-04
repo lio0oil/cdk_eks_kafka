@@ -3,15 +3,6 @@
 # Grafana は同 chart 同梱の in-cluster Prometheus を datasource として直接 query する。
 # Alertmanager は 3 replica HA で有効化、通知先は AWS SNS（Pod Identity で sns:Publish）。
 
-# chart 同梱の KubeletTooManyPods は severity: info 固定で、chart には個別ルールの severity を
-# 上書きする値が無い（defaultRules.disabled で無効化のみ可能）。Cluster Autoscaler / Karpenter を
-# 持たず nodegroup が固定サイズの本環境では Pod capacity 到達がスケールアウトで自動解消されず
-# 新規 Pod が Pending に固定されるため、ここで無効化して prometheus-rules-node.yaml 側で
-# severity: warning として再定義する。
-defaultRules:
-  disabled:
-    KubeletTooManyPods: true
-
 # EKS のコントロールプレーンは AWS マネージドで kube-controller-manager / kube-scheduler を
 # 外部から scrape できない。chart デフォルトの enabled: true のままだと到達不能な ServiceMonitor が
 # 作られ、それに gate された KubeControllerManagerDown / KubeSchedulerDown が常時 firing する
@@ -152,16 +143,6 @@ alertmanager:
         - receiver: 'null'
           matchers:
             - alertname =~ "InfoInhibitor|Watchdog"
-        # 経路疎通確認用の smoke は常時 firing 設計。subscribe 完了から初回受信までの
-        # 待ち時間を最短化するため、smoke 専用 route で group_wait と repeat_interval を
-        # 極短に設定する（group_wait: 0s で初回 publish 即時、repeat_interval: 1m で
-        # subscribe 完了後最大 1 分以内に受信できる）。smoke 削除 PR を出すまでに通知が
-        # 数通積もるが、検証用途では許容範囲。smoke ルール削除と同時にこの route も削除。
-        - receiver: default-sns
-          matchers:
-            - alertname = "AlertmanagerSmokeTest"
-          group_wait: 0s
-          repeat_interval: 1m
     receivers:
       # chart デフォルトの routes が参照する破棄用 receiver。
       - name: 'null'
