@@ -10,7 +10,7 @@ from aws_cdk import aws_sns_subscriptions as sns_subs
 from constructs import Construct
 
 from ekscdk.config import ClusterConfig
-from ekscdk.constructs._manifest import load, load_with_subs, manifest_dir
+from ekscdk.constructs._manifest import load_manifest, load_manifest_with_subs, load_manifests, manifest_dir
 from ekscdk.constructs.addons import AddonsConstruct
 
 _DIR = manifest_dir("monitoring")
@@ -30,6 +30,8 @@ class MonitoringConstruct(Construct):
       - Strimzi 系 PodMonitor 3 件（kafka-resources / cluster-operator / entity-operator）
       - Grafana Dashboard ConfigMap 5 件（kafka / exporter / operators / cruise-control / kraft）
       - PrometheusRule 5 件: Strimzi 公式 prometheus-rules をそのまま適用（稼働コンポーネント分のみ）
+      - Strimzi kube-state-metrics: Kafka/KafkaTopic/KafkaUser 等 CR ステータス監視の専用インスタンス
+        + PrometheusRule（examples/metrics/kube-state-metrics/ 起点）
       - Fluent Bit DaemonSet: ログ → CloudWatch Logs
 
     Grafana は chart デフォルトの in-cluster Prometheus datasource をそのまま使う。
@@ -59,7 +61,7 @@ class MonitoringConstruct(Construct):
         )
 
         # ── monitoring Namespace ──────────────────────────────────────────────
-        namespace = cluster.add_manifest("MonitoringNamespace", load(_DIR, "namespace.yaml"))
+        namespace = cluster.add_manifest("MonitoringNamespace", load_manifest(_DIR, "namespace.yaml"))
 
         # ── Fluent Bit Pod Identity ───────────────────────────────────────────
         fluent_bit_sa = cluster.add_service_account(
@@ -152,7 +154,7 @@ class MonitoringConstruct(Construct):
         # in-cluster Prometheus + Operator + Grafana + Alertmanager を chart 同梱で
         # deploy。Alertmanager は 3 replica HA、receiver は SNS（sigv4）。Grafana
         # datasource は chart デフォルトの in-cluster Prometheus をそのまま使う。
-        kps_values = load_with_subs(
+        kps_values = load_manifest_with_subs(
             _DIR,
             "kube-prometheus-stack-values.yaml",
             REGION=region,
@@ -191,14 +193,14 @@ class MonitoringConstruct(Construct):
         # 後に apply、対象 NS の存在も依存に張る。
         kafka_pm = cluster.add_manifest(
             "KafkaResourcesPodMonitor",
-            load(_DIR, "prometheus-install/pod-monitors/kafka-pod-monitor.yaml"),
+            load_manifest(_DIR, "prometheus-install/pod-monitors/kafka-pod-monitor.yaml"),
         )
         kafka_pm.node.add_dependency(kps)
         kafka_pm.node.add_dependency(kafka_namespace)
 
         cluster_op_pm = cluster.add_manifest(
             "StrimziClusterOperatorPodMonitor",
-            load(_DIR, "prometheus-install/pod-monitors/cluster-operator-pod-monitor.yaml"),
+            load_manifest(_DIR, "prometheus-install/pod-monitors/cluster-operator-pod-monitor.yaml"),
         )
         cluster_op_pm.node.add_dependency(kps)
         # strimzi-system NS は Strimzi chart が create_namespace=True で作るため依存する。
@@ -206,7 +208,7 @@ class MonitoringConstruct(Construct):
 
         entity_op_pm = cluster.add_manifest(
             "StrimziEntityOperatorPodMonitor",
-            load(_DIR, "prometheus-install/pod-monitors/entity-operator-pod-monitor.yaml"),
+            load_manifest(_DIR, "prometheus-install/pod-monitors/entity-operator-pod-monitor.yaml"),
         )
         entity_op_pm.node.add_dependency(kps)
         entity_op_pm.node.add_dependency(kafka_namespace)
@@ -224,7 +226,7 @@ class MonitoringConstruct(Construct):
             cm_id = "Dash" + fname.removeprefix("grafana-strimzi-").removesuffix("-dashboard.yaml").title().replace(
                 "-", ""
             )
-            cm = cluster.add_manifest(cm_id, load(_DIR, f"grafana-dashboards/{fname}"))
+            cm = cluster.add_manifest(cm_id, load_manifest(_DIR, f"grafana-dashboards/{fname}"))
             cm.node.add_dependency(kps)
 
         # ── PrometheusRule（Strimzi 公式 prometheus-rules 起点、稼働コンポーネント分のみ）──
@@ -237,8 +239,29 @@ class MonitoringConstruct(Construct):
             "prometheus-rules-certificate.yaml",
         ):
             rule_id = "Rule" + fname.removeprefix("prometheus-rules-").removesuffix(".yaml").title().replace("-", "")
-            rule = cluster.add_manifest(rule_id, load(_DIR, f"prometheus-install/prometheus-rules/{fname}"))
+            rule = cluster.add_manifest(rule_id, load_manifest(_DIR, f"prometheus-install/prometheus-rules/{fname}"))
             rule.node.add_dependency(kps)
+
+        # ── Strimzi kube-state-metrics（CR ステータス監視）──────────────────────
+        # kube-prometheus-stack 同梱の kube-state-metrics は Strimzi CRD を知らないため、
+        # Strimzi 公式の専用インスタンス（examples/metrics/kube-state-metrics/）を別途 apply する。
+        # Kafka / KafkaTopic / KafkaUser 等 CRD の .status.conditions を Ready/Warning/
+        # Deprecated としてメトリクス化し、対応する PrometheusRule でアラートする。
+        ksm_cm = cluster.add_manifest("StrimziKsmConfigMap", load_manifest(_DIR, "kube-state-metrics/configmap.yaml"))
+        ksm_cm.node.add_dependency(namespace)
+
+        ksm_docs = load_manifests(_DIR, "kube-state-metrics/ksm.yaml")
+        ksm = cluster.add_manifest("StrimziKubeStateMetrics", *ksm_docs)
+        ksm.node.add_dependency(ksm_cm)
+        # ClusterRole が kafka.strimzi.io / core.strimzi.io / access.strimzi.io の CRD を
+        # 参照するため、Strimzi chart（CRD 登録元）に依存する。
+        ksm.node.add_dependency(addons.strimzi_chart)
+        ksm.node.add_dependency(kps)
+
+        ksm_rules = cluster.add_manifest(
+            "StrimziKsmPrometheusRule", load_manifest(_DIR, "kube-state-metrics/prometheus-rules.yaml")
+        )
+        ksm_rules.node.add_dependency(kps)
 
         # ── Fluent Bit DaemonSet（Helm）───────────────────────────────────────
         fluent_bit = cluster.add_helm_chart(
@@ -247,7 +270,7 @@ class MonitoringConstruct(Construct):
             repository=config.fluent_bit_chart_repo,
             namespace="monitoring",
             version=config.fluent_bit_chart_version,
-            values=load_with_subs(
+            values=load_manifest_with_subs(
                 _DIR,
                 "fluent-bit-values.yaml",
                 REGION=region,

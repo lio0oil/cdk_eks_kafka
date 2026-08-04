@@ -19,7 +19,12 @@ def manifest_dir(*parts: str) -> str:
     return os.path.join(_MANIFESTS_ROOT, *parts)
 
 
-def load_with_subs(base_dir: str, filename: str, **subs: str) -> dict:
+def load_manifest_with_subs(base_dir: str, filename: str, **subs: str) -> dict:
+    """テンプレート変数を置換した YAML を単一 manifest として読む（`yaml.safe_load` 相当）。
+
+    ファイル内に `---` 区切りの複数ドキュメントがあるとエラーになる。
+    複数ドキュメントを読みたい場合は load_manifests を使う。
+    """
     return yaml.safe_load(load_text_with_subs(base_dir, filename, **subs))
 
 
@@ -27,7 +32,7 @@ def load_text_with_subs(base_dir: str, filename: str, **subs: str) -> str:
     """テンプレート変数を置換した raw text を返す（YAML パースしない）。
 
     AMP Scraper の configurationBlob のように、YAML 文字列のまま base64 encode する
-    用途で使う。YAML として読みたい場合は load / load_with_subs を使う。
+    用途で使う。YAML として読みたい場合は load_manifest / load_manifest_with_subs を使う。
     """
     with open(os.path.join(base_dir, filename)) as f:
         text = f.read()
@@ -36,17 +41,19 @@ def load_text_with_subs(base_dir: str, filename: str, **subs: str) -> str:
     return text
 
 
-def load(base_dir: str, filename: str) -> dict:
-    return load_with_subs(base_dir, filename)
+def load_manifest(base_dir: str, filename: str) -> dict:
+    """YAML ファイルを単一 manifest（dict 1件）として読む。"""
+    return load_manifest_with_subs(base_dir, filename)
 
 
-def load_all(base_dir: str, filename: str) -> list[dict]:
+def load_manifests(base_dir: str, filename: str) -> list[dict]:
+    """`---` 区切りの複数ドキュメントを持つ YAML ファイルを manifest のリストとして読む。"""
     with open(os.path.join(base_dir, filename)) as f:
         return [doc for doc in yaml.safe_load_all(f) if doc is not None]
 
 
 def _get_external_listener(base_dir: str) -> dict:
-    manifest = load(base_dir, "kafka-cluster.yaml")
+    manifest = load_manifest(base_dir, "kafka-cluster.yaml")
     try:
         listeners = manifest["spec"]["kafka"]["listeners"]
     except KeyError as e:

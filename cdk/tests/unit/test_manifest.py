@@ -4,27 +4,27 @@ import yaml
 from ekscdk.constructs._manifest import (
     build_kafka_broker_configs,
     build_kafka_nlb_ports,
-    load_with_subs,
+    load_manifest_with_subs,
     manifest_dir,
 )
 
 
-def test_load_with_subs_replaces_placeholders(tmp_path):
+def test_load_manifest_with_subs_replaces_placeholders(tmp_path):
     (tmp_path / "test.yaml").write_text("host: <HOST>\nport: <PORT>")
-    result = load_with_subs(str(tmp_path), "test.yaml", HOST="example.com", PORT="9094")
+    result = load_manifest_with_subs(str(tmp_path), "test.yaml", HOST="example.com", PORT="9094")
     assert result["host"] == "example.com"
     assert result["port"] == 9094
 
 
-def test_load_with_subs_no_substitutions(tmp_path):
+def test_load_manifest_with_subs_no_substitutions(tmp_path):
     (tmp_path / "test.yaml").write_text("key: value")
-    result = load_with_subs(str(tmp_path), "test.yaml")
+    result = load_manifest_with_subs(str(tmp_path), "test.yaml")
     assert result["key"] == "value"
 
 
-def test_load_with_subs_unreplaced_placeholder_stays(tmp_path):
+def test_load_manifest_with_subs_unreplaced_placeholder_stays(tmp_path):
     (tmp_path / "test.yaml").write_text("host: <UNREPLACED>")
-    result = load_with_subs(str(tmp_path), "test.yaml")
+    result = load_manifest_with_subs(str(tmp_path), "test.yaml")
     assert result["host"] == "<UNREPLACED>"
 
 

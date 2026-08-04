@@ -9,7 +9,7 @@ from aws_cdk import aws_iam as iam
 from constructs import Construct
 
 from ekscdk.config import ClusterConfig
-from ekscdk.constructs._manifest import load, manifest_dir
+from ekscdk.constructs._manifest import load_manifest, manifest_dir
 
 _DIR = manifest_dir("addons")
 _DIR_KAFKA = manifest_dir("kafka")
@@ -44,7 +44,7 @@ class AddonsConstruct(Construct):
         synth / deploy できるようにする。KafkaConstruct はこの Namespace を受け取って
         NodePool 等の実体を apply する。
         """
-        return self._cluster.add_manifest("KafkaNamespace", load(_DIR_KAFKA, "namespace.yaml"))
+        return self._cluster.add_manifest("KafkaNamespace", load_manifest(_DIR_KAFKA, "namespace.yaml"))
 
     def _add_eks_addons(self) -> None:
         # aws-ebs-csi-driver addon は ebs-csi-controller-sa という ServiceAccount を
@@ -128,7 +128,7 @@ class AddonsConstruct(Construct):
     def _add_gp3_storage_class(self) -> None:
         # Kafka broker/controller と Prometheus/Alertmanager が共有するデフォルト StorageClass。
         # Kafka 専用の StorageClass（gp3-kafka）は単一消費者のため KafkaConstruct 側で管理する。
-        self._cluster.add_manifest("Gp3StorageClass", load(_DIR, "gp3-storageclass.yaml"))
+        self._cluster.add_manifest("Gp3StorageClass", load_manifest(_DIR, "gp3-storageclass.yaml"))
 
     def _add_strimzi(self, kafka_namespace: eks.KubernetesManifest) -> eks.HelmChart:
         chart = self._cluster.add_helm_chart(

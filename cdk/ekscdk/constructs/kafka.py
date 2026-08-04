@@ -5,8 +5,8 @@ from constructs import Construct
 from ekscdk.config import ClusterConfig
 from ekscdk.constructs._manifest import (
     build_kafka_broker_configs,
-    load,
-    load_with_subs,
+    load_manifest,
+    load_manifest_with_subs,
     manifest_dir,
 )
 
@@ -50,11 +50,11 @@ class KafkaConstruct(Construct):
         # （名前・key が異なる）のため、1 つに統合せずそれぞれ apply する。ファイル自体は
         # 公式 examples/metrics/ の配置に合わせ manifests/monitoring/ 側に置くが、
         # Kafka CR がこの ConfigMap に依存するため apply の所有権は KafkaConstruct のまま。
-        cm = cluster.add_manifest("KafkaMetricsCm", load(_DIR_MONITORING, "kafka-metrics.yaml"))
+        cm = cluster.add_manifest("KafkaMetricsCm", load_manifest(_DIR_MONITORING, "kafka-metrics.yaml"))
         cm.node.add_dependency(kafka_namespace)
 
         cruise_control_cm = cluster.add_manifest(
-            "CruiseControlMetricsCm", load(_DIR_MONITORING, "kafka-cruise-control-metrics.yaml")
+            "CruiseControlMetricsCm", load_manifest(_DIR_MONITORING, "kafka-cruise-control-metrics.yaml")
         )
         cruise_control_cm.node.add_dependency(kafka_namespace)
 
@@ -66,14 +66,14 @@ class KafkaConstruct(Construct):
         # AddonsConstruct が管理する default StorageClass（gp3）を共有せず、
         # broker/controller 専用の StorageClass を用意する（IOPS/throughput を
         # 監視系と切り離して個別チューニングできるようにするため）。
-        cluster.add_manifest("Gp3KafkaStorageClass", load(_DIR, "gp3-kafka-storageclass.yaml"))
+        cluster.add_manifest("Gp3KafkaStorageClass", load_manifest(_DIR, "gp3-kafka-storageclass.yaml"))
 
         # ── KafkaNodePool: controller ─────────────────────────────────────────
         # KafkaNodePool CRD は Strimzi Operator chart が導入するため、chart 未導入の
         # クラスタに apply すると CRD 未登録で失敗する。
         controller_pool = cluster.add_manifest(
             "KafkaControllerPool",
-            load_with_subs(
+            load_manifest_with_subs(
                 _DIR,
                 "node-pool-controller.yaml",
                 DELETE_CLAIM=delete_claim_str,
@@ -93,7 +93,7 @@ class KafkaConstruct(Construct):
         # ── KafkaNodePool: broker ─────────────────────────────────────────────
         broker_pool = cluster.add_manifest(
             "KafkaBrokerPool",
-            load_with_subs(
+            load_manifest_with_subs(
                 _DIR,
                 "node-pool-broker.yaml",
                 BROKER_REPLICAS=str(broker_count),
@@ -113,7 +113,7 @@ class KafkaConstruct(Construct):
         # ── Kafka CR ──────────────────────────────────────────────────────────
         # kafka-cluster.yaml の external listener には brokers[] を含めず、
         # ここで broker_count から生成して inject する（broker_count を単一の真実の源にする）。
-        kafka_cr_manifest = load(_DIR, "kafka-cluster.yaml")
+        kafka_cr_manifest = load_manifest(_DIR, "kafka-cluster.yaml")
         external_listener = next(
             listener
             for listener in kafka_cr_manifest["spec"]["kafka"]["listeners"]
@@ -155,7 +155,7 @@ class KafkaConstruct(Construct):
 
             binding = cluster.add_manifest(
                 f"TargetGroupBinding{tg_key}",
-                load_with_subs(
+                load_manifest_with_subs(
                     _DIR,
                     "target-group-binding.yaml",
                     BINDING_NAME=binding_name,
@@ -176,5 +176,5 @@ class KafkaConstruct(Construct):
         # Strimzi Topic Operator (entityOperator) が KafkaTopic CR を監視し
         # 実 Kafka に Topic を作成する。Operator は Kafka CR より後に起動するため
         # kafka_cr への依存だけで apply 順序は十分。
-        test_topic = cluster.add_manifest("KafkaTopicTestTopic", load(_DIR, "topics/test-topic.yaml"))
+        test_topic = cluster.add_manifest("KafkaTopicTestTopic", load_manifest(_DIR, "topics/test-topic.yaml"))
         test_topic.node.add_dependency(kafka_cr)

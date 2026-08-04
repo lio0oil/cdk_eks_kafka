@@ -1,3 +1,5 @@
+import json
+
 import aws_cdk as core
 import pytest
 from aws_cdk import assertions
@@ -664,6 +666,77 @@ def test_prometheus_rule_manifest_applied(template, rule_group_name):
         and f'"name":"{rule_group_name}"' in _manifest_literals(res["Properties"]["Manifest"])
     ]
     assert len(matched) == 1, f"PrometheusRule {rule_group_name} が apply されていない"
+
+
+@pytest.mark.parametrize(
+    ("kind", "name"),
+    [
+        ("ServiceAccount", "strimzi-kube-state-metrics"),
+        ("ClusterRole", "strimzi-kube-state-metrics"),
+        ("ClusterRoleBinding", "strimzi-kube-state-metrics"),
+        ("Service", "strimzi-kube-state-metrics"),
+        ("Deployment", "strimzi-kube-state-metrics"),
+        ("ServiceMonitor", "strimzi-kube-state-metrics"),
+    ],
+)
+def test_strimzi_kube_state_metrics_manifest_applied(template, kind, name):
+    # kube-prometheus-stack 同梱の kube-state-metrics は Strimzi CRD を知らないため、
+    # Strimzi 公式の専用インスタンス（ServiceAccount/ClusterRole/ClusterRoleBinding/
+    # Service/Deployment/ServiceMonitor の 6 リソース）を別途 apply している。
+    all_k8s = template.find_resources("Custom::AWSCDK-EKS-KubernetesResource")
+    matched = [
+        res
+        for res in all_k8s.values()
+        if f'"kind":"{kind}"' in _manifest_literals(res["Properties"]["Manifest"])
+        and f'"name":"{name}"' in _manifest_literals(res["Properties"]["Manifest"])
+    ]
+    assert len(matched) == 1, f"{kind} {name} が apply されていない"
+
+
+def test_strimzi_kube_state_metrics_cluster_role_is_read_only(template):
+    # CRD の .status を読むだけの用途のため、list/watch 以外の verb（write/delete 等）を
+    # 持たせない。誤って書き込み権限を付与するリグレッションを検知する。
+    all_k8s = template.find_resources("Custom::AWSCDK-EKS-KubernetesResource")
+    matched = [
+        res
+        for res in all_k8s.values()
+        if '"kind":"ClusterRole"' in _manifest_literals(res["Properties"]["Manifest"])
+        and '"name":"strimzi-kube-state-metrics"' in _manifest_literals(res["Properties"]["Manifest"])
+    ]
+    assert len(matched) == 1
+    manifest_str = matched[0]["Properties"]["Manifest"]
+    assert isinstance(manifest_str, str)
+    docs = json.loads(manifest_str)
+    cluster_role = next(
+        d for d in docs if d.get("kind") == "ClusterRole" and d["metadata"]["name"] == "strimzi-kube-state-metrics"
+    )
+    verbs = {v for rule in cluster_role["rules"] for v in rule["verbs"]}
+    assert verbs == {"list", "watch"}
+
+
+def test_strimzi_kube_state_metrics_configmap_applied(template):
+    all_k8s = template.find_resources("Custom::AWSCDK-EKS-KubernetesResource")
+    matched = [
+        res
+        for res in all_k8s.values()
+        if '"kind":"ConfigMap"' in _manifest_literals(res["Properties"]["Manifest"])
+        and '"name":"strimzi-kube-state-metrics-config"' in _manifest_literals(res["Properties"]["Manifest"])
+    ]
+    assert len(matched) == 1, "kube-state-metrics 用 ConfigMap が apply されていない"
+
+
+def test_strimzi_kube_state_metrics_prometheus_rule_applied(template):
+    all_k8s = template.find_resources("Custom::AWSCDK-EKS-KubernetesResource")
+    matched = [
+        res
+        for res in all_k8s.values()
+        if '"kind":"PrometheusRule"' in _manifest_literals(res["Properties"]["Manifest"])
+        and '"name":"strimzi-kube-state-metrics"' in _manifest_literals(res["Properties"]["Manifest"])
+    ]
+    assert len(matched) == 1
+    literals = _manifest_literals(matched[0]["Properties"]["Manifest"])
+    assert '"alert":"KafkaTopicNotReady"' in literals
+    assert '"alert":"KafkaNotReady"' in literals
 
 
 def test_kube_prometheus_stack_enables_prometheus_pdb(template):
