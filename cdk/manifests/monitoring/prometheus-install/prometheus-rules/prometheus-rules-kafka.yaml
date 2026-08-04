@@ -1,7 +1,11 @@
 # Strimzi 公式サンプルは KafkaNodePool 名が `kafka` である前提で Pod/PVC 名 regex に
 # `.+-kafka-[0-9]+` を使うが、本プロジェクトは NodePool 名を broker/controller にしている
 # （node-pool-broker.yaml / node-pool-controller.yaml）ため、無編集のままだと該当 Pod に
-# 一致せず機能しない。regex 部分のみ `.+-(kafka|broker|controller)-[0-9]+` に変更している。
+# 一致せず機能しない。ScrapeProblem / KafkaContainerRestartedInTheLast5Minutes /
+# KafkaRunningOutOfSpace は `.+-(kafka|broker|controller)-[0-9]+` に変更（broker/controller
+# どちらの障害でも意味は壊れない）。KafkaBrokerContainersDown だけは absent() ベースで
+# 「マッチする series が全て消えた時のみ発火」するため、両方含めると「両方同時に全滅」
+# しないと発火しなくなり検知力が落ちる。アラート名の通り broker のみに絞っている。
 apiVersion: monitoring.coreos.com/v1
 kind: PrometheusRule
 metadata:
@@ -70,7 +74,10 @@ spec:
         summary: 'Prometheus unable to scrape metrics from {{ $labels.kubernetes_pod_name }}/{{ $labels.instance }}'
         description: 'Prometheus was unable to scrape metrics from {{ $labels.kubernetes_pod_name }}/{{ $labels.instance }} for more than 3 minutes'
     - alert: KafkaBrokerContainersDown
-      expr: absent(container_last_seen{container="kafka",pod=~".+-(kafka|broker|controller)-[0-9]+"})
+      # absent() は「マッチする series が 1 つも無い」時のみ発火するため、broker/controller
+      # を両方含めると「両方同時に全滅」しないと発火しない条件になり、アラート名が示す
+      # 「broker のみ全滅」を検知できなくなる。他 3 件と異なりここは broker のみに絞る。
+      expr: absent(container_last_seen{container="kafka",pod=~".+-(kafka|broker)-[0-9]+"})
       for: 3m
       labels:
         severity: major

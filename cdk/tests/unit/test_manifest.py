@@ -121,24 +121,28 @@ def test_build_kafka_broker_configs_zero_returns_empty():
     assert build_kafka_broker_configs(broker_count=0, advertised_host="h") == []
 
 
+def _kafka_rules_by_alert() -> dict[str, str]:
+    manifest = load_manifest(
+        manifest_dir("monitoring"), "prometheus-install/prometheus-rules/prometheus-rules-kafka.yaml"
+    )
+    return {r["alert"]: r["expr"] for r in manifest["spec"]["groups"][0]["rules"]}
+
+
 def test_kafka_rules_pod_regex_matches_actual_broker_and_controller_pod_names():
     """prometheus-rules-kafka.yaml の Pod/PVC 名 regex が実際の NodePool 命名（broker/controller）に一致する。
 
     Strimzi 公式サンプルは NodePool 名が `kafka` である前提の regex（`.+-kafka-[0-9]+`）を
     使うが、本プロジェクトは broker/controller という別名にしているため、無編集のままだと
-    ScrapeProblem / KafkaBrokerContainersDown / KafkaContainerRestartedInTheLast5Minutes /
-    KafkaRunningOutOfSpace が実際の Pod に一致せず機能しない（container_last_seen 系は
-    absent() のため常時誤発火、up 系・PVC 系は一致 series が無く常時未発火になる）。
+    ScrapeProblem / KafkaContainerRestartedInTheLast5Minutes / KafkaRunningOutOfSpace が
+    実際の Pod に一致せず機能しない（up 系・PVC 系は一致 series が無く常時未発火になる）。
+    これらは broker/controller どちらの障害でも意味が壊れないため両方にマッチしてよい
+    （KafkaBrokerContainersDown は absent() の意味が変わるため対象外、別テストで検証）。
     """
-    manifest = load_manifest(
-        manifest_dir("monitoring"), "prometheus-install/prometheus-rules/prometheus-rules-kafka.yaml"
-    )
-    rules_by_alert = {r["alert"]: r["expr"] for r in manifest["spec"]["groups"][0]["rules"]}
+    rules_by_alert = _kafka_rules_by_alert()
 
     sample_pod_names = ["kafka-cluster-broker-0", "kafka-cluster-controller-0"]
     for alert_name, label_pattern in [
         ("ScrapeProblem", r'kubernetes_pod_name=~"([^"]+)"'),
-        ("KafkaBrokerContainersDown", r'pod=~"([^"]+)"'),
         ("KafkaContainerRestartedInTheLast5Minutes", r'pod=~"([^"]+)"'),
     ]:
         expr = rules_by_alert[alert_name]
@@ -157,3 +161,18 @@ def test_kafka_rules_pod_regex_matches_actual_broker_and_controller_pod_names():
         assert re.fullmatch(pvc_regex, pvc_name), (
             f"KafkaRunningOutOfSpace の regex {pvc_regex!r} が実際の PVC 名 {pvc_name!r} にマッチしない"
         )
+
+
+def test_kafka_broker_containers_down_matches_broker_only_not_controller():
+    """KafkaBrokerContainersDown は absent() ベースのため、broker/controller 両方を
+
+    regex に含めると「両方同時に全滅した時だけ」発火する条件に意味が変わってしまう
+    （どちらか一方のみ全滅した場合に検知できなくなる）。アラート名の通り broker の
+    container 消失だけを対象にする regex であることを固定する。
+    """
+    expr = _kafka_rules_by_alert()["KafkaBrokerContainersDown"]
+    match = re.search(r'pod=~"([^"]+)"', expr)
+    assert match, f"KafkaBrokerContainersDown に pod 名 regex が見つからない: {expr!r}"
+    pod_regex = match.group(1)
+    assert re.fullmatch(pod_regex, "kafka-cluster-broker-0")
+    assert not re.fullmatch(pod_regex, "kafka-cluster-controller-0")
