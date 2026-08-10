@@ -144,6 +144,11 @@ class ClusterConfig:
     # 既存ブローカーの advertisedPort/nodePort は変えない（クライアント接続が壊れる）ため、
     # 増設は末尾追加・縮退は Cruise Control での reassign 後に行うこと。
     broker_count: int
+    # test-topic (KafkaTopic CR) の保持期間（retention.ms、ミリ秒文字列）。
+    # topics/test-topic.yaml の spec.config.retention.ms にそのまま注入する。
+    # 現状は Kafka のデフォルト値（log.retention.hours=168h=7日）を明示化した値を
+    # 全環境共通で設定している。
+    kafka_topic_retention_ms: str
     # EKS クラスターの削除保護（CloudFormation の DeletionProtection）
     # 有効化すると aws eks delete-cluster が拒否される（誤削除防止）
     # dev は False（環境破棄を容易に）、stg/prd は True（事故防止）
@@ -242,6 +247,7 @@ class ClusterConfig:
                 jvm_xmx="1024m",
             ),
             broker_count=3,
+            kafka_topic_retention_ms="604800000",
             deletion_protection=False,
             enable_vpc_flow_logs=False,
             enable_control_plane_logs=False,
@@ -324,6 +330,7 @@ class ClusterConfig:
                 jvm_xmx="1024m",
             ),
             broker_count=3,
+            kafka_topic_retention_ms="604800000",
             deletion_protection=True,
             enable_vpc_flow_logs=True,
             enable_control_plane_logs=True,
@@ -406,6 +413,7 @@ class ClusterConfig:
                 jvm_xmx="1024m",
             ),
             broker_count=3,
+            kafka_topic_retention_ms="604800000",
             deletion_protection=True,
             enable_vpc_flow_logs=True,
             enable_control_plane_logs=True,

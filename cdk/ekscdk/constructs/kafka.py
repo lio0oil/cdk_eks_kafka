@@ -176,5 +176,12 @@ class KafkaConstruct(Construct):
         # Strimzi Topic Operator (entityOperator) が KafkaTopic CR を監視し
         # 実 Kafka に Topic を作成する。Operator は Kafka CR より後に起動するため
         # kafka_cr への依存だけで apply 順序は十分。
-        test_topic = cluster.add_manifest("KafkaTopicTestTopic", load_manifest(_DIR, "topics/test-topic.yaml"))
+        test_topic = cluster.add_manifest(
+            "KafkaTopicTestTopic",
+            load_manifest_with_subs(
+                _DIR,
+                "topics/test-topic.yaml",
+                RETENTION_MS=config.kafka_topic_retention_ms,
+            ),
+        )
         test_topic.node.add_dependency(kafka_cr)

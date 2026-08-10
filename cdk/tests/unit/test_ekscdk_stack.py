@@ -1022,6 +1022,19 @@ def test_kafka_topic_test_topic_is_applied(template):
     assert '"replicas":3' in literals
 
 
+def test_kafka_topic_test_topic_retention_matches_config(template, config):
+    # retention.ms は ClusterConfig.kafka_topic_retention_ms が真実の源（環境別に
+    # 上書きできるよう config 化）。KafkaTopic CR の spec.config.retention.ms に
+    # そのまま反映されていることを確認する。
+    all_k8s = template.find_resources("Custom::AWSCDK-EKS-KubernetesResource")
+    topics = [
+        res for res in all_k8s.values() if '"kind":"KafkaTopic"' in _manifest_literals(res["Properties"]["Manifest"])
+    ]
+    assert len(topics) == 1
+    literals = _manifest_literals(topics[0]["Properties"]["Manifest"])
+    assert f'"retention.ms":{config.kafka_topic_retention_ms}' in literals
+
+
 def test_gp3_storage_classes_split_by_workload(template):
     # Kafka broker/controller と Prometheus/Alertmanager は I/O 特性が異なるため、
     # gp3 StorageClass を共有せず gp3（default, 監視系用）と gp3-kafka（Kafka 専用）に分離する。
