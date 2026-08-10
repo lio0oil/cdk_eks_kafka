@@ -87,10 +87,9 @@ cluster 上で常時稼働する Pod を機能ドメイン別に整理する。�
 
 | ルール | 管理 | 出典 |
 |---|---|---|
-| chart `defaultRules`（`KubeletTooManyPods` 等の Kubernetes / Node / Prometheus 系） | chart 同梱（リポジトリに無い） | [kube-prometheus-stack `templates/prometheus/rules-1.14/`](https://github.com/prometheus-community/helm-charts/tree/main/charts/kube-prometheus-stack/templates/prometheus/rules-1.14)（`KubeletTooManyPods` は `kubernetes-system-kubelet.yaml`）。上流は [kube-prometheus](https://github.com/prometheus-operator/kube-prometheus) → [kubernetes-mixin](https://github.com/kubernetes-monitoring/kubernetes-mixin)。runbook は https://runbooks.prometheus-operator.dev/ |
-| [`prometheus-rules-kafka.yaml`](manifests/monitoring/prometheus-rules-kafka.yaml) | このリポジトリ（CDK が apply） | [Strimzi 公式 `examples/metrics/prometheus-install/prometheus-rules/`](https://github.com/strimzi/strimzi-kafka-operator/tree/main/examples/metrics/prometheus-install/prometheus-rules)（Kafka 系は `prometheus-kafka-rules.yaml`）を起点に閾値を調整 |
-| [`prometheus-rules-node.yaml`](manifests/monitoring/prometheus-rules-node.yaml) | このリポジトリ（CDK が apply） | chart 84.5.0 の `KubeletTooManyPods` を写し severity を info→warning に変更。chart 側は [`kube-prometheus-stack-values.yaml`](manifests/monitoring/kube-prometheus-stack-values.yaml) の `defaultRules.disabled` で無効化 |
-| [`prometheus-rules-smoke.yaml`](manifests/monitoring/prometheus-rules-smoke.yaml) | このリポジトリ（CDK が apply） | 独自（Prometheus → Alertmanager → SNS の経路疎通確認用。検証後に削除予定） |
+| chart `defaultRules`（Kubernetes / Node / Prometheus 系） | chart 同梱（リポジトリに無い） | [kube-prometheus-stack `templates/prometheus/rules-1.14/`](https://github.com/prometheus-community/helm-charts/tree/main/charts/kube-prometheus-stack/templates/prometheus/rules-1.14)。上流は [kube-prometheus](https://github.com/prometheus-operator/kube-prometheus) → [kubernetes-mixin](https://github.com/kubernetes-monitoring/kubernetes-mixin)。runbook は https://runbooks.prometheus-operator.dev/ 。[`kube-prometheus-stack-values.yaml`](manifests/monitoring/kube-prometheus-stack-values.yaml) では無効化しておらず chart デフォルトのまま有効（`kubeControllerManager.enabled: false` / `kubeScheduler.enabled: false` に連動する分のみ自動的に外れる） |
+| [`prometheus-install/prometheus-rules/`](manifests/monitoring/prometheus-install/prometheus-rules/) 配下 5 件（kafka / kafka-exporter-topic / cluster-operator / entity-operator / certificate） | このリポジトリ（CDK が apply） | [Strimzi 公式 `examples/metrics/prometheus-install/prometheus-rules/`](https://github.com/strimzi/strimzi-kafka-operator/tree/main/examples/metrics/prometheus-install/prometheus-rules)（8 件中 5 件を採用。bridge / connect / mirrormaker2 は未使用コンポーネントのため対象外）。`kafka` のみ Pod/PVC 名 regex を実際の KafkaNodePool 名（broker/controller）に合わせて修正、他 4 件は無編集 |
+| [`kube-state-metrics/prometheus-rules.yaml`](manifests/monitoring/kube-state-metrics/prometheus-rules.yaml) | このリポジトリ（CDK が apply） | [Strimzi 公式 `examples/metrics/kube-state-metrics/`](https://github.com/strimzi/strimzi-kafka-operator/tree/main/examples/metrics/kube-state-metrics) 起点。Kafka / KafkaTopic / KafkaUser 等 CR の `.status.conditions` 監視（`KafkaTopicNotReady` 等） |
 
 chart 同梱ルールの実際の本文は `helm show chart` 系コマンド、またはデプロイ後に `kubectl get prometheusrules -n monitoring -o yaml` で確認できる。
 
@@ -247,11 +246,27 @@ GitOps の核心的なメリットは「git push だけで変更が完結する�
 
 ### 前提条件
 
+以下のツールをインストール済みであること。
+
+| ツール | 用途 |
+|---|---|
+| Node.js | AWS CDK CLI（npm パッケージ）の実行基盤 |
+| AWS CDK CLI（`cdk`） | `cdk deploy` / `cdk synth` の実行 |
+| uv | Python 依存関係管理・実行（`uv sync` / `uv run`） |
+| AWS CLI | 認証情報の設定、`aws eks update-kubeconfig` 等 |
+| kubectl | デプロイ後の動作確認（本 README 全体で使用）。`cdk deploy` 自体は Lambda 経由の kubectl provider を使うため不要 |
+
 ```bash
 uv sync
 
 export CDK_DEFAULT_ACCOUNT=<AWSアカウントID>
 export CDK_DEFAULT_REGION=ap-northeast-1
+```
+
+AWS 認証情報（`aws configure` や SSO 等）を設定済みであること。対象アカウント・リージョンで CDK を初めて使う場合は、初回のみ Bootstrap が必要:
+
+```bash
+uv run cdk bootstrap
 ```
 
 ### 1. IAM ロール作成
