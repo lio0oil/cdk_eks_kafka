@@ -42,6 +42,20 @@ def on_delivery(err, msg) -> None:
     )
 
 
+def produce_one(bootstrap_servers: str, topic: str, index: int) -> None:
+    """1 件だけ送信して flush() で配送を待つ。動作確認用。"""
+    kafka_producer = build_producer(bootstrap_servers)
+    kafka_producer.produce(
+        topic,
+        key=str(index).encode("utf-8"),
+        value=make_envelope_payload(index),
+        on_delivery=on_delivery,
+    )
+    remaining = kafka_producer.flush(timeout=10)
+    if remaining > 0:
+        raise RuntimeError(f"produce_one: flush 後も {remaining} 件未配送")
+
+
 def run(
     producer: Producer,
     total: int | None,

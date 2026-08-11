@@ -11,6 +11,9 @@ dependencies = [
     "protobuf>=6,<7",
 ]
 
+[dependency-groups]
+dev = ["locust>=2.31.0", "pytest>=8.0.0", "pytest-mock>=3.14.0"]
+
 [tool.ruff]
 line-length = 120
 
@@ -18,12 +21,18 @@ line-length = 120
 select = ["I"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["constants"]
+known-first-party = ["constants", "producer"]
 
 [tool.pyright]
 venvPath = "."
 venv = ".venv"
 typeCheckingMode = "standard"
-include = ["producer.py", "constants.py"]
+include = ["producer.py", "constants.py", "locustfile.py", "tests"]
 # protoc 自動生成ファイルは動的属性が多く pyright と相性が悪いので型チェック対象外。
 exclude = ["**/__pycache__", "**/.*", ".venv", "**/*_pb2.py", "**/node_modules"]
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = ["-ra", "-q", "--strict-markers", "--strict-config"]
