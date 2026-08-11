@@ -1058,6 +1058,71 @@ def test_gp3_storage_classes_split_by_workload(template):
     assert '"storageclass.kubernetes.io/is-default-class":"true"' not in literals_by_name["gp3-kafka"]
 
 
+def test_kafka_esm_sg_egress_restricted_to_kafka_nlb_sg(template):
+    # KafkaEsmSg の description は「outbound to Kafka NLB only」を謳っているため、
+    # 実際の egress も allow_all_outbound（0.0.0.0/0 全ポート）ではなく、
+    # Kafka NLB SG（宛先を SG 参照で限定）への TCP のみに絞る。
+    # allow_all_outbound=False の SecurityGroup に add_egress_rule で追加したルールは
+    # インラインの SecurityGroupEgress プロパティではなく別リソース
+    # (AWS::EC2::SecurityGroupEgress) として合成される。
+    sgs = template.find_resources("AWS::EC2::SecurityGroup")
+    esm_sgs = [
+        res
+        for res in sgs.values()
+        if res["Properties"].get("GroupDescription", "").startswith("Self-managed Kafka ESM")
+    ]
+    assert len(esm_sgs) == 1
+    assert "SecurityGroupEgress" not in esm_sgs[0]["Properties"]
+
+    egress_rules = template.find_resources("AWS::EC2::SecurityGroupEgress")
+    assert len(egress_rules) == 1
+    rule = next(iter(egress_rules.values()))["Properties"]
+    assert rule["IpProtocol"] == "tcp"
+    assert "CidrIp" not in rule
+    assert isinstance(rule["DestinationSecurityGroupId"], dict)
+
+
+def test_kafka_consumer_buckets_are_private_and_encrypted(dev_template):
+    # KafkaConsumerInfraConstruct が作る data_bucket（Lambda 実行時の設定/データ読み取り
+    # 用）と artifact_bucket（Lambda デプロイパッケージ格納用）の 2 個。dev の
+    # EksCdkStack には他に S3 バケットが無い（enable_vpc_flow_logs=False）ため、
+    # ちょうど 2 個であることまで検証してリグレッション（重複作成）を防ぐ。
+    buckets = dev_template.find_resources("AWS::S3::Bucket")
+    assert len(buckets) == 2
+    for res in buckets.values():
+        props = res["Properties"]
+        assert props["BucketEncryption"] == {
+            "ServerSideEncryptionConfiguration": [{"ServerSideEncryptionByDefault": {"SSEAlgorithm": "AES256"}}]
+        }
+        assert props["PublicAccessBlockConfiguration"] == {
+            "BlockPublicAcls": True,
+            "BlockPublicPolicy": True,
+            "IgnorePublicAcls": True,
+            "RestrictPublicBuckets": True,
+        }
+
+
+def test_kafka_consumer_artifact_bucket_is_versioned(dev_template):
+    # KafkaConsumerAppStack は S3 VersionId を明示指定して Code.from_bucket で参照する
+    # （S3Key だけでは CloudFormation がコード変更を検知できないため）。
+    # バージョニング無効だと VersionId が発行されず参照できないため必須。
+    buckets = dev_template.find_resources("AWS::S3::Bucket")
+    versioned = [
+        res
+        for res in buckets.values()
+        if res["Properties"].get("VersioningConfiguration", {}).get("Status") == "Enabled"
+    ]
+    assert len(versioned) == 1
+
+
+def test_kafka_consumer_data_bucket_is_not_versioned(dev_template):
+    # data_bucket はバージョニング不要（Lambda 実行時に最新版を読むだけ）。
+    # artifact_bucket との取り違えが無いことの裏付けにもなる。
+    buckets = dev_template.find_resources("AWS::S3::Bucket")
+    unversioned = [res for res in buckets.values() if "VersioningConfiguration" not in res["Properties"]]
+    assert len(unversioned) == 1
+
+
 def test_kafka_node_pools_use_dedicated_storage_class(template):
     # broker/controller の EBS 性能要件は監視系（gp3 default）と切り離して個別チューニング
     # できるようにするため、gp3-kafka を参照していること（旧 default gp3 の参照が

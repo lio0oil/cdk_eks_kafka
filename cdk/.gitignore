@@ -12,3 +12,6 @@ cdk.out
 
 # CDK context cache（AWSアカウントIDを含むため）
 cdk.context.json
+
+# Lambda ビルド成果物（scripts/upload-kafka-consumer-lambda.sh が build_lambda_zip で生成）
+lambda/*/build/

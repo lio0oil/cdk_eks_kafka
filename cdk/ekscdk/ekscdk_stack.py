@@ -1,6 +1,7 @@
 from aws_cdk import CfnOutput, Stack
 from aws_cdk import aws_ec2 as ec2
 from aws_cdk import aws_iam as iam
+from aws_cdk import aws_s3 as s3
 from constructs import Construct
 
 from ekscdk.config import ClusterConfig
@@ -12,6 +13,7 @@ from ekscdk.constructs._manifest import (
 from ekscdk.constructs.addons import AddonsConstruct
 from ekscdk.constructs.eks_cluster import EksClusterConstruct
 from ekscdk.constructs.kafka import KafkaConstruct
+from ekscdk.constructs.kafka_consumer_infra import KafkaConsumerInfraConstruct
 from ekscdk.constructs.monitoring import MonitoringConstruct
 from ekscdk.constructs.network import NetworkConstruct
 
@@ -75,9 +77,31 @@ class EksCdkStack(Stack):
             addons=addons,
             kafka_namespace=addons.kafka_namespace,
         )
+        kafka_consumer_infra = KafkaConsumerInfraConstruct(
+            self,
+            "KafkaConsumerInfra",
+            vpc=network.vpc,
+            kafka_nlb_sg=network.kafka_nlb_sg,
+            config=config,
+        )
+        self._esm_sg = kafka_consumer_infra.esm_sg
+        self._data_bucket = kafka_consumer_infra.data_bucket
+        self._artifact_bucket = kafka_consumer_infra.artifact_bucket
 
         CfnOutput(self, "KafkaNlbDnsName", value=network.kafka_nlb.load_balancer_dns_name)
 
     @property
     def vpc(self) -> ec2.IVpc:
         return self._vpc
+
+    @property
+    def esm_sg(self) -> ec2.ISecurityGroup:
+        return self._esm_sg
+
+    @property
+    def data_bucket(self) -> s3.IBucket:
+        return self._data_bucket
+
+    @property
+    def artifact_bucket(self) -> s3.IBucket:
+        return self._artifact_bucket

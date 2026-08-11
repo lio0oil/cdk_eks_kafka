@@ -189,6 +189,13 @@ class ClusterConfig:
     # Fluent Bit の resources / INPUT バッファ上限（Mem_Buf_Limit）。ノード当たりの
     # ログ流量が変わった場合に見直せるよう config 化。
     fluent_bit_resources: FluentBitResourceConfig
+    # KafkaConsumerAppStack（Lambda ESM）がデプロイする Lambda コードの S3 VersionId。
+    # アーティファクトバケットは KafkaConsumerInfraConstruct（EksCdkStack）が作るが、
+    # 中身の zip は cdk deploy の外（scripts/ のアップロードスクリプト）でアップロードする
+    # 運用のため、ここに手動で反映するまでは None（KafkaConsumerAppStack 自体を作らない）。
+    # None → EksCdkStack のみ（バケットは作られるが空）。値を設定 → app.py が
+    # KafkaConsumerAppStack を追加でデプロイし、そのバージョンの zip を Lambda に反映する。
+    kafka_consumer_code_object_version: str | None
 
     @classmethod
     def for_dev(cls, cluster_name: str = "eks-cluster-dev") -> ClusterConfig:
@@ -280,6 +287,7 @@ class ClusterConfig:
                 cpu_limit="200m",
                 mem_buf_limit="5MB",
             ),
+            kafka_consumer_code_object_version=None,
         )
 
     @classmethod
@@ -363,6 +371,7 @@ class ClusterConfig:
                 cpu_limit="200m",
                 mem_buf_limit="5MB",
             ),
+            kafka_consumer_code_object_version=None,
         )
 
     @classmethod
@@ -446,4 +455,5 @@ class ClusterConfig:
                 cpu_limit="200m",
                 mem_buf_limit="5MB",
             ),
+            kafka_consumer_code_object_version=None,
         )

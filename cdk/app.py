@@ -6,8 +6,11 @@ import aws_cdk as cdk
 from aws_cdk import aws_iam as iam
 
 from ekscdk.config import ClusterConfig
+from ekscdk.constructs._manifest import manifest_dir, parse_kafka_external_listener
+from ekscdk.constructs.network import KAFKA_PRIVATE_DNS_NAME
 from ekscdk.ekscdk_stack import EksCdkStack
 from ekscdk.iam_stack import IamStack
+from ekscdk.kafka_consumer_app_stack import KafkaConsumerAppStack
 from ekscdk.s3tables_stack import S3TablesStack
 from ekscdk.test_ec2_stack import TestEc2Stack
 
@@ -73,5 +76,25 @@ if _env_name == "dev":
         env=env,
     )
     test_ec2_stack.add_dependency(infra_stack)
+
+# Stack 4: Kafka Lambda コンシューマ（アプリ層、ESM で test-topic を購読）
+# EksCdkStack が管理するアーティファクトバケットへの zip アップロードと VersionId の
+# config 反映（kafka_consumer_code_object_version）を済ませるまでは作らない（README 参照）。
+if config.kafka_consumer_code_object_version is not None:
+    _, external_listener_port = parse_kafka_external_listener(manifest_dir("kafka"))
+    kafka_consumer_app_stack = KafkaConsumerAppStack(
+        app,
+        "KafkaConsumerAppStack",
+        vpc=infra_stack.vpc,
+        bootstrap_dns_name=KAFKA_PRIVATE_DNS_NAME,
+        bootstrap_port=external_listener_port,
+        esm_sg=infra_stack.esm_sg,
+        data_bucket=infra_stack.data_bucket,
+        artifact_bucket=infra_stack.artifact_bucket,
+        code_object_version=config.kafka_consumer_code_object_version,
+        config=config,
+        env=env,
+    )
+    kafka_consumer_app_stack.add_dependency(infra_stack)
 
 app.synth()
