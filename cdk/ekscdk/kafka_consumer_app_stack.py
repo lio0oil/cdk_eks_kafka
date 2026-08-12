@@ -80,6 +80,12 @@ class KafkaConsumerAppStack(Stack):
             code=lambda_.Code.from_bucket(artifact_bucket, ARTIFACT_CODE_KEY, object_version=code_object_version),
             timeout=Duration.seconds(30),
             log_group=log_group,
+            # ALC（Advanced Logging Controls）でログレベルを制御する。ハンドラ側で
+            # logger.setLevel() を固定すると ALC の application_log_level が無視される
+            # ため、コードでは設定しない方針（index.py 参照）。ApplicationLogLevel は
+            # JSON format でないと指定できない（Lambda API 制約）。
+            logging_format=lambda_.LoggingFormat.JSON,
+            application_log_level_v2=lambda_.ApplicationLogLevel.INFO,
         )
         # Function（L2）は内部生成する実行ロールの role_name を公開していないため、
         # aws-lbc-pod-identity と同じ流儀（addons.py）で CfnRole 経由で上書きする。

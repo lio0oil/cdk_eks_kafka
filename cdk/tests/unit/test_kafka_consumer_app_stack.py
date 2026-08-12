@@ -83,6 +83,21 @@ def test_kafka_consumer_function_exists(template):
     )
 
 
+def test_kafka_consumer_function_uses_advanced_logging_controls(template):
+    # ALC（Advanced Logging Controls）で application_log_level を制御するため、
+    # ハンドラ側の logger.setLevel() は使わない方針（コード固定だと ALC 設定が無視される）。
+    # ApplicationLogLevel は JSON format でないと設定できない（Lambda API 制約）。
+    template.has_resource_properties(
+        "AWS::Lambda::Function",
+        {
+            "LoggingConfig": {
+                "LogFormat": "JSON",
+                "ApplicationLogLevel": "INFO",
+            },
+        },
+    )
+
+
 def test_kafka_consumer_event_source_mapping_targets_bootstrap_and_topic(template):
     # bootstrap servers は NLB の Private Hosted Zone 名 (kafka.local) + external listener
     # port（KafkaConstruct が Kafka CR に注入する advertisedHost と同じ経路）。
