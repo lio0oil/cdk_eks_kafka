@@ -174,6 +174,16 @@ def test_kafka_consumer_execution_role_has_s3tables_write_permissions(template):
     assert any(_arn_resource_contains(r, "bucket/kafka-events/table/*") for r in resources)
 
 
+def test_kafka_consumer_execution_role_has_fixed_name(template):
+    # role_name を明示しないと CloudFormation の物理 ID からロール名が自動生成され、
+    # コンソール上で他の実行ロールと見分けづらい。config.cluster_name を含めることで
+    # 環境（dev/stg/prd）ごとに一意になる（eks-cluster-admin-{cluster_name} 等と同じ規約）。
+    template.has_resource_properties(
+        "AWS::IAM::Role",
+        {"RoleName": "kafka-lambda-consumer-eks-cluster"},
+    )
+
+
 def test_kafka_consumer_execution_role_can_read_data_bucket(template):
     # 実行ロールに付与する S3 権限は GetObject + ListBucket（読み取り + 一覧）のみで、
     # Resource はバケット ARN 限定（"*" ではない）であること。data_bucket は

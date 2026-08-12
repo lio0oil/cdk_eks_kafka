@@ -1,3 +1,5 @@
+from typing import cast
+
 from aws_cdk import CfnOutput, Duration, Stack
 from aws_cdk import aws_ec2 as ec2
 from aws_cdk import aws_iam as iam
@@ -79,6 +81,10 @@ class KafkaConsumerAppStack(Stack):
             timeout=Duration.seconds(30),
             log_group=log_group,
         )
+        # Function（L2）は内部生成する実行ロールの role_name を公開していないため、
+        # aws-lbc-pod-identity と同じ流儀（addons.py）で CfnRole 経由で上書きする。
+        execution_role = cast(iam.IRole, consumer.role)
+        cast(iam.CfnRole, execution_role.node.default_child).role_name = f"kafka-lambda-consumer-{config.cluster_name}"
 
         data_bucket.grant_read(consumer)
 
