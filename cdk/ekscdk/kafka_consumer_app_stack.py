@@ -1,6 +1,6 @@
 from typing import cast
 
-from aws_cdk import CfnOutput, Duration, Stack
+from aws_cdk import CfnOutput, Duration, RemovalPolicy, Stack
 from aws_cdk import aws_ec2 as ec2
 from aws_cdk import aws_iam as iam
 from aws_cdk import aws_lambda as lambda_
@@ -94,6 +94,19 @@ class KafkaConsumerAppStack(Stack):
 
         data_bucket.grant_read(consumer)
 
+        # S3 の on_failure destination はバケット単位でしか指定できない（キー・プレフィックス
+        # を絞る手段がない）ため、data_bucket を流用すると本来の読み取り用途のデータと
+        # 失敗レコードが混在してしまう。専用バケットを別途用意する。
+        dlq_bucket = s3.Bucket(
+            self,
+            "KafkaLambdaConsumerDlqBucket",
+            block_public_access=s3.BlockPublicAccess.BLOCK_ALL,
+            encryption=s3.BucketEncryption.S3_MANAGED,
+            enforce_ssl=True,
+            removal_policy=config.log_removal_policy,
+            auto_delete_objects=config.log_removal_policy == RemovalPolicy.DESTROY,
+        )
+
         consumer.add_to_role_policy(
             iam.PolicyStatement(
                 actions=[
@@ -140,6 +153,25 @@ class KafkaConsumerAppStack(Stack):
                 vpc=vpc,
                 vpc_subnets=vpc_subnets,
                 security_group=esm_sg,
+                # デフォルトの 500ms だと呼び出し回数が増えやすいため 1 秒に伸ばす。
+                # 秒単位でしか指定できず、一度変更すると 500ms 既定には ESM 再作成でしか
+                # 戻せない（AWS Lambda Developer Guide: invocation-eventsourcemapping.html）。
+                max_batching_window=Duration.seconds(1),
+                # log_level（EventSourceMappingLogLevel） / metrics_config / retry_attempts /
+                # max_record_age 等は Provisioned Mode（provisioned_poller_config）有効時のみ
+                # 対応（Standard Mode では cdk deploy が ValidationException で失敗する）ため、
+                # 本構成では未設定のままにする。
+                # on_failure（DestinationConfig）は Standard Mode でも Management Console
+                # 上で設定可能（プロビジョンドモードオフの状態で表示される）。破棄された
+                # レコードを追える手段として dlq_bucket を宛先にする。retry_attempts が
+                # 未設定（-1 = 無限）でも on_failure を設定すると、無限リトライと DLQ の
+                # 組み合わせを避けるため Lambda 側が実質 MaximumRetryAttempts=10 を自動適用する
+                # （AWS Lambda Developer Guide: kafka-retry-configurations.html。CDK 側では
+                # 明示指定していないため CloudFormation テンプレートには現れない）。
+                # S3OnFailureDestination.bind() の引数名が IEventSourceDlq プロトコル定義と
+                # 食い違っており（実装側 _target / プロトコル側 target）、pyright が構造的
+                # 部分型チェックで不一致を報告する（aws-cdk-lib 側の型スタブの既知の不整合）。
+                on_failure=cast(lambda_.IEventSourceDlq, lambda_event_sources.S3OnFailureDestination(dlq_bucket)),
             )
         )
 

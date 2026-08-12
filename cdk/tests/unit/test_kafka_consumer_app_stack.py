@@ -202,20 +202,81 @@ def test_kafka_consumer_execution_role_has_fixed_name(template):
 def test_kafka_consumer_execution_role_can_read_data_bucket(template):
     # 実行ロールに付与する S3 権限は GetObject + ListBucket（読み取り + 一覧）のみで、
     # Resource はバケット ARN 限定（"*" ではない）であること。data_bucket は
-    # EksCdkStack（インフラ側）が管理するため、これはクロススタック参照の権限付与。
+    # EksCdkStack（インフラ側）が管理するため、これはクロススタック参照
+    # （Fn::ImportValue）になる。dlq_bucket（本スタック内、Fn::GetAtt）向けの読み取り
+    # 権限（S3OnFailureDestination.bind の grantReadWrite 由来）と区別するため、
+    # Resource に Fn::ImportValue を含むものだけを対象にする。
     policies = template.find_resources("AWS::IAM::Policy")
     matching: list[dict] = []
     for p in policies.values():
         for stmt in p["Properties"]["PolicyDocument"]["Statement"]:
             action = stmt.get("Action")
             actions = set(action if isinstance(action, list) else [action])
-            if any(a.startswith("s3:GetObject") for a in actions):
+            if not any(a.startswith("s3:GetObject") for a in actions):
+                continue
+            resource = stmt["Resource"]
+            resources = resource if isinstance(resource, list) else [resource]
+            if any(isinstance(r, dict) and "Fn::ImportValue" in r for r in resources):
                 matching.append(stmt)
     assert len(matching) == 1, "S3 読み取り権限を持つ Statement がちょうど 1 個ではない"
     stmt = matching[0]
     resource = stmt["Resource"]
     resources = resource if isinstance(resource, list) else [resource]
     assert resources != ["*"]
+    assert all(r != "*" for r in resources)
+
+
+def test_kafka_consumer_dlq_bucket_is_dedicated(template):
+    # on_failure destination は S3 の場合バケット単位でしか指定できず（キー・プレフィックス
+    # を絞る手段がない）、data_bucket を流用すると本来の読み取り用途のデータと失敗レコードが
+    # 同じバケットに混在してしまう。そのため専用バケットを新規作成する。
+    template.resource_count_is("AWS::S3::Bucket", 1)
+    template.has_resource_properties(
+        "AWS::S3::Bucket",
+        {
+            "PublicAccessBlockConfiguration": {
+                "BlockPublicAcls": True,
+                "BlockPublicPolicy": True,
+                "IgnorePublicAcls": True,
+                "RestrictPublicBuckets": True,
+            },
+        },
+    )
+
+
+def test_kafka_consumer_event_source_mapping_has_s3_on_failure_destination(template):
+    # retry_attempts / max_record_age は Standard Mode では変更できずデフォルトの
+    # -1（無限）が常に適用されるため、詰まったバッチはリトライされ続け先に進めなくなる。
+    # せめて手動介入のきっかけを残すため on_failure（DestinationConfig）を設定する。
+    # on_failure 自体は Standard Mode でも Management Console 上で設定可能
+    # （プロビジョンドモードオフの状態で表示される）。宛先は本スタック内で新規作成した
+    # 専用バケットのため、同一スタック内参照の Fn::GetAtt になる。
+    template.has_resource_properties(
+        "AWS::Lambda::EventSourceMapping",
+        {
+            "DestinationConfig": {
+                "OnFailure": {"Destination": assertions.Match.object_like({"Fn::GetAtt": assertions.Match.any_value()})}
+            }
+        },
+    )
+
+
+def test_kafka_consumer_execution_role_can_write_dlq_bucket_on_failure(template):
+    # S3OnFailureDestination の bind() が実行ロールに書き込み権限を自動付与することの確認。
+    # data_bucket への読み取り権限（test_kafka_consumer_execution_role_can_read_data_bucket）
+    # とは別の Statement で、専用 DLQ バケットのみを対象にする。
+    policies = template.find_resources("AWS::IAM::Policy")
+    matching: list[dict] = []
+    for p in policies.values():
+        for stmt in p["Properties"]["PolicyDocument"]["Statement"]:
+            action = stmt.get("Action")
+            actions = set(action if isinstance(action, list) else [action])
+            if any(a.startswith("s3:PutObject") for a in actions):
+                matching.append(stmt)
+    assert len(matching) == 1, "S3 書き込み権限を持つ Statement がちょうど 1 個ではない"
+    stmt = matching[0]
+    resource = stmt["Resource"]
+    resources = resource if isinstance(resource, list) else [resource]
     assert all(r != "*" for r in resources)
 
 
@@ -227,6 +288,17 @@ def test_dev_kafka_consumer_subnets_pinned_to_single_az(dev_template):
     configs = next(iter(mappings.values()))["Properties"]["SourceAccessConfigurations"]
     subnet_configs = [c for c in configs if c["Type"] == "VPC_SUBNET"]
     assert len(subnet_configs) == 1
+
+
+def test_kafka_consumer_event_source_mapping_has_batching_window(template):
+    # デフォルトの 500ms バッチウィンドウだとログ出力だけのスタブハンドラでも呼び出し
+    # 回数が増えやすいため、明示的に伸ばして呼び出し効率を上げる。値は秒単位でしか
+    # 指定できず、一度変更すると 500ms 既定に戻すには ESM の再作成が必要（AWS Lambda
+    # Developer Guide: invocation-eventsourcemapping.html の Batching behavior 注記）。
+    template.has_resource_properties(
+        "AWS::Lambda::EventSourceMapping",
+        {"MaximumBatchingWindowInSeconds": 1},
+    )
 
 
 def test_prd_kafka_consumer_subnets_span_multiple_az(template):
