@@ -53,7 +53,7 @@ class KafkaConsumerInfraConstruct(Construct):
     （scripts/ のアップロードスクリプト）で行う運用のため、ここでは空のバケットを
     用意するだけで Lambda 関数自体は作らない。
 
-    - esm_sg: self-managed Kafka ESM のポーラー ENI 用 SG（Kafka NLB 以外への送信不可）
+    - esm_sg: self-managed Kafka ESM のポーラー ENI 用 SG（Kafka NLB と AWS HTTPS API 以外への送信不可）
     - data_bucket: Lambda 実行時の設定・データ読み取り用（読み取り専用の grant は
       アプリ側が Lambda 実行ロールに対して行う）
     - artifact_bucket: Lambda デプロイパッケージ（zip）の格納先。バージョニング有効に
@@ -77,13 +77,20 @@ class KafkaConsumerInfraConstruct(Construct):
             "KafkaEsmSg",
             vpc=vpc,
             allow_all_outbound=False,
-            description="Self-managed Kafka ESM poller ENI (outbound to Kafka NLB only).",
+            description="Self-managed Kafka ESM poller ENI (outbound to Kafka NLB and AWS HTTPS APIs only).",
         )
         # bootstrap 接続後、Kafka クライアントは各 partition のリーダー broker（advertised
         # port はブローカーごとに異なる、_manifest.py 参照）にも直接接続するため、
         # 単一ポートには絞れない。宛先を Kafka NLB の SG 参照に限定することで、
         # ポート番号を broker_count に追従させずに「NLB 以外への送信不可」を維持する。
         self._esm_sg.add_egress_rule(kafka_nlb_sg, ec2.Port.all_tcp())
+        # ESM ポーラー ENI は Kafka broker への到達性に加え、Lambda invoke API と STS への
+        # 到達性も必須（self-managed Kafka の VPC アクセス要件、AWS Lambda Developer Guide
+        # with-kafka-permissions.html）。欠けると「your event source VPC must be able to
+        # connect to Lambda and STS」で ESM が Kafka に接続できなくなる。NAT Gateway 越しに
+        # 到達させる想定で、Lambda/STS には宛先を絞れる VPC エンドポイント用プレフィックス
+        # リストが存在しないため 0.0.0.0/0:443 とする。
+        self._esm_sg.add_egress_rule(ec2.Peer.any_ipv4(), ec2.Port.tcp(443))
 
         is_destroyable = config.log_removal_policy == RemovalPolicy.DESTROY
 

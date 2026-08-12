@@ -1059,12 +1059,12 @@ def test_gp3_storage_classes_split_by_workload(template):
 
 
 def test_kafka_esm_sg_egress_restricted_to_kafka_nlb_sg(template):
-    # KafkaEsmSg の description は「outbound to Kafka NLB only」を謳っているため、
-    # 実際の egress も allow_all_outbound（0.0.0.0/0 全ポート）ではなく、
-    # Kafka NLB SG（宛先を SG 参照で限定）への TCP のみに絞る。
-    # allow_all_outbound=False の SecurityGroup に add_egress_rule で追加したルールは
-    # インラインの SecurityGroupEgress プロパティではなく別リソース
-    # (AWS::EC2::SecurityGroupEgress) として合成される。
+    # KafkaEsmSg の description は「outbound to Kafka NLB and AWS HTTPS APIs only」を
+    # 謳っているため、実際の egress も allow_all_outbound（0.0.0.0/0 全ポート）ではなく、
+    # Kafka NLB SG（宛先を SG 参照で限定）への TCP に絞る。SG 参照の egress ルールは
+    # 循環参照を避けるため、CDK によりインラインの SecurityGroupEgress プロパティではなく
+    # 別リソース (AWS::EC2::SecurityGroupEgress) として合成される
+    # （CIDR 宛先の 443 ルールはインラインに残る、別テストで検証）。
     sgs = template.find_resources("AWS::EC2::SecurityGroup")
     esm_sgs = [
         res
@@ -1072,14 +1072,41 @@ def test_kafka_esm_sg_egress_restricted_to_kafka_nlb_sg(template):
         if res["Properties"].get("GroupDescription", "").startswith("Self-managed Kafka ESM")
     ]
     assert len(esm_sgs) == 1
-    assert "SecurityGroupEgress" not in esm_sgs[0]["Properties"]
+    inline_egress = esm_sgs[0]["Properties"].get("SecurityGroupEgress", [])
+    assert all("DestinationSecurityGroupId" not in rule for rule in inline_egress)
 
     egress_rules = template.find_resources("AWS::EC2::SecurityGroupEgress")
-    assert len(egress_rules) == 1
-    rule = next(iter(egress_rules.values()))["Properties"]
+    nlb_rules = [r["Properties"] for r in egress_rules.values() if "DestinationSecurityGroupId" in r["Properties"]]
+    assert len(nlb_rules) == 1
+    rule = nlb_rules[0]
     assert rule["IpProtocol"] == "tcp"
     assert "CidrIp" not in rule
     assert isinstance(rule["DestinationSecurityGroupId"], dict)
+
+
+def test_kafka_esm_sg_egress_allows_https_for_lambda_and_sts(template):
+    # ESM ポーラー ENI は Kafka broker への到達性だけでなく、Lambda invoke API と STS
+    # （self-managed Kafka の VPC アクセス要件、AWS Lambda Developer Guide）への到達性も
+    # 必要。esm_sg は allow_all_outbound=False のため、443 を明示的に開けないと
+    # 「your event source VPC must be able to connect to Lambda and STS」エラーで
+    # ESM が Kafka に接続できない。Lambda/STS は VPC エンドポイント用のプレフィックス
+    # リストが存在せず宛先を CIDR で絞れないため、0.0.0.0/0:443 に限定する
+    # （NAT Gateway 経由、機微データを運ぶ SASL/TLS 認証は使っていないため許容範囲）。
+    # CIDR 宛先の egress ルールは CDK によりインラインの SecurityGroupEgress プロパティ
+    # として合成される（SG 参照ルールとは異なり別リソースにはならない）。
+    sgs = template.find_resources("AWS::EC2::SecurityGroup")
+    esm_sgs = [
+        res
+        for res in sgs.values()
+        if res["Properties"].get("GroupDescription", "").startswith("Self-managed Kafka ESM")
+    ]
+    assert len(esm_sgs) == 1
+    inline_egress = esm_sgs[0]["Properties"].get("SecurityGroupEgress", [])
+    https_rules = [r for r in inline_egress if r.get("CidrIp") == "0.0.0.0/0" and r.get("FromPort") == 443]
+    assert len(https_rules) == 1
+    rule = https_rules[0]
+    assert rule["IpProtocol"] == "tcp"
+    assert rule["ToPort"] == 443
 
 
 def test_kafka_consumer_buckets_are_private_and_encrypted(dev_template):
