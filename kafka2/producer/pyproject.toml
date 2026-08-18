@@ -9,6 +9,7 @@ dependencies = [
     "confluent-kafka>=2.6.0",
     # event_pb2.py を protoc 6.x で生成しているため、Python ランタイムも同じメジャーに揃える
     "protobuf>=6,<7",
+    "pyyaml>=6.0.3",
 ]
 
 [dependency-groups]
@@ -21,13 +22,13 @@ line-length = 120
 select = ["I"]
 
 [tool.ruff.lint.isort]
-known-first-party = ["constants", "producer"]
+known-first-party = ["constants", "producer", "send_from_file", "dump_envelope"]
 
 [tool.pyright]
 venvPath = "."
 venv = ".venv"
 typeCheckingMode = "standard"
-include = ["producer.py", "constants.py", "locustfile.py", "tests"]
+include = ["*.py", "tests"]
 # protoc 自動生成ファイルは動的属性が多く pyright と相性が悪いので型チェック対象外。
 exclude = ["**/__pycache__", "**/.*", ".venv", "**/*_pb2.py", "**/node_modules"]
 
