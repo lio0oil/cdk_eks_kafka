@@ -1,7 +1,19 @@
 import zlib
 
-from constants import make_envelope_payload
+from constants import HISTORY_RECORD_COUNT, build_envelope, make_envelope_payload
 from event_pb2 import Envelope  # pyright: ignore[reportAttributeAccessIssue]
+
+
+class TestBuildEnvelope:
+    def test_fills_common_user_and_history_records(self) -> None:
+        envelope = build_envelope(1)
+
+        assert envelope.common.id == 1
+        assert envelope.user.userid == 1
+        assert envelope.user.username == "user-1"
+        assert len(envelope.content.historyrecords) == HISTORY_RECORD_COUNT
+        assert envelope.content.historyrecords[0].historyid == HISTORY_RECORD_COUNT
+        assert envelope.content.historyrecords[0].memo == "memo-1-0"
 
 
 class TestMakeEnvelopePayload:

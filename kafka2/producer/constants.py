@@ -23,12 +23,11 @@ DEFAULT_COUNT = 10
 DEFAULT_INTERVAL_SECONDS = 1.0
 
 
-def make_envelope_payload(index: int) -> bytes:
-    """Envelope を 1 つ作って serialize し、zlib 圧縮して返す。
+def build_envelope(index: int) -> Envelope:
+    """Envelope を 1 つ作る。
 
     common / user は必ず埋め、content.historyrecords には HISTORY_RECORD_COUNT 件の
-    HistoryRecord を詰める。consumer 側は from_protobuf に渡す前に zlib 展開する
-    (kafka2/consumer/consumer.py 参照)。
+    HistoryRecord を詰める。
     """
     now = datetime.now(UTC).isoformat()
     envelope = Envelope()
@@ -42,4 +41,12 @@ def make_envelope_payload(index: int) -> bytes:
         record.datetime = now
         record.memo = f"memo-{index}-{i}"
         record.classification = f"classification-{i % CLASSIFICATION_COUNT}"
-    return zlib.compress(envelope.SerializeToString())
+    return envelope
+
+
+def make_envelope_payload(index: int) -> bytes:
+    """Envelope を作って serialize し、zlib 圧縮して返す。
+
+    consumer 側は from_protobuf に渡す前に zlib 展開する (kafka2/consumer/consumer.py 参照)。
+    """
+    return zlib.compress(build_envelope(index).SerializeToString())
