@@ -339,19 +339,43 @@ def test_application_log_group_retention_matches_config(template):
         "metrics-server",
         "eks-node-monitoring-agent",
         "snapshot-controller",
+        "coredns",
+        "vpc-cni",
+        "kube-proxy",
     ],
 )
 def test_eks_addon_present(template, addon_name):
     template.has_resource_properties("AWS::EKS::Addon", {"AddonName": addon_name})
 
 
-@pytest.mark.parametrize("addon_name", ["vpc-cni", "coredns", "kube-proxy"])
-def test_self_managed_networking_addon_not_managed(template, addon_name):
-    # vpc-cni/coredns/kube-proxy は bootstrap_self_managed_addons のデフォルト（True）
-    # による self-managed 版をそのまま使うため、EKS Managed Addon としては作成しない。
+def test_bootstrap_self_managed_addons_disabled(template):
+    # vpc-cni/coredns/kube-proxy を Managed Addon として明示管理するため、
+    # self-managed 版の自動 bootstrap（デフォルト True）は無効化する。
+    clusters = template.find_resources("AWS::EKS::Cluster")
+    cluster = next(iter(clusters.values()))
+    assert cluster["Properties"]["BootstrapSelfManagedAddons"] is False
+
+
+@pytest.mark.parametrize(
+    "nodegroup_name",
+    ["system-nodegroup", "kafka-broker-nodegroup", "kafka-controller-nodegroup"],
+)
+def test_nodegroup_depends_on_networking_addons(template, nodegroup_name):
+    # vpc-cni/kube-proxy が無いとノードが NotReady のままとなり NodeGroup 作成自体が
+    # タイムアウトするため、両 Addon の作成完了を待ってから NodeGroup を作る必要がある。
     addons = template.find_resources("AWS::EKS::Addon")
-    matched = [res for res in addons.values() if res["Properties"].get("AddonName") == addon_name]
-    assert matched == []
+    networking_addon_ids = {
+        logical_id
+        for logical_id, res in addons.items()
+        if res["Properties"].get("AddonName") in ("vpc-cni", "kube-proxy")
+    }
+    assert len(networking_addon_ids) == 2
+
+    nodegroups = template.find_resources("AWS::EKS::Nodegroup")
+    matched = [res for res in nodegroups.values() if res["Properties"]["NodegroupName"] == nodegroup_name]
+    assert len(matched) == 1
+    depends_on = set(matched[0].get("DependsOn", []))
+    assert networking_addon_ids <= depends_on
 
 
 @pytest.mark.parametrize(

@@ -125,6 +125,17 @@ class AddonsConstruct(Construct):
             addon_version=self._config.addon_versions["snapshot-controller"],
         )
 
+        # coredns は Pod をスケジュールするノードが無いと Addon 作成自体がタイムアウトする
+        # ため、NodeGroup 作成後（EksClusterConstruct 完了後）である AddonsConstruct 側で導入する。
+        # vpc-cni/kube-proxy は逆に NodeGroup 作成前が必須のため EksClusterConstruct 側で導入済み。
+        eks.Addon(
+            self,
+            "CoreDns",
+            cluster=self._cluster,
+            addon_name="coredns",
+            addon_version=self._config.addon_versions["coredns"],
+        )
+
     def _add_gp3_storage_class(self) -> None:
         # Kafka broker/controller と Prometheus/Alertmanager が共有するデフォルト StorageClass。
         # Kafka 専用の StorageClass（gp3-kafka）は単一消費者のため KafkaConstruct 側で管理する。

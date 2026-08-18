@@ -34,6 +34,11 @@ class EksClusterConstruct(Construct):
             default_capacity_type=DefaultCapacityType.NODEGROUP,
             endpoint_access=eks.EndpointAccess.PUBLIC_AND_PRIVATE,
             bootstrap_cluster_creator_admin_permissions=True,
+            # vpc-cni/coredns/kube-proxy を self-managed 版の自動 bootstrap に任せず
+            # Managed Addon として明示管理する（バージョン更新をアドオン単位で制御するため）。
+            # そのため vpc-cni/kube-proxy は本コンストラクタ内で NodeGroup 作成前に導入する
+            # （下記 _add_networking_addons 呼び出し部のコメント参照）。
+            bootstrap_self_managed_addons=False,
             kubectl_provider_options=eks.KubectlProviderOptions(
                 kubectl_layer=KubectlV35Layer(self, "KubectlLayer"),
             ),
@@ -91,6 +96,28 @@ class EksClusterConstruct(Construct):
                 access_policies=_cluster_admin_policy,
             )
 
+        # vpc-cni/kube-proxy は Node が kubelet 登録後に Ready になるための前提コンポーネント。
+        # bootstrap_self_managed_addons=False のため self-managed 版は入らず、CNI が無いと
+        # ノードが NotReady のままとなり NodeGroup 作成（CfnNodegroup の CREATE）自体が
+        # タイムアウトする。そのため NodeGroup 作成より前に Managed Addon として導入し、
+        # 各 add_nodegroup_capacity の戻り値に add_dependency で順序を明示する。
+        # coredns は逆に Pod をスケジュールするノードが無いと Addon 作成がタイムアウトする
+        # ため、NodeGroup 作成後に導入する必要があり AddonsConstruct 側で管理する。
+        vpc_cni_addon = eks.Addon(
+            self,
+            "VpcCni",
+            cluster=self._cluster,  # type: ignore[arg-type]
+            addon_name="vpc-cni",
+            addon_version=config.addon_versions["vpc-cni"],
+        )
+        kube_proxy_addon = eks.Addon(
+            self,
+            "KubeProxy",
+            cluster=self._cluster,  # type: ignore[arg-type]
+            addon_name="kube-proxy",
+            addon_version=config.addon_versions["kube-proxy"],
+        )
+
         # kafka_single_az=True の場合は VPC の 1 AZ 目だけに固定する（dev のコスト最適化。
         # AZ 跨ぎのデータ転送料と broker 間レプリケーションの AZ 間トラフィックを避ける）。
         # system-nodegroup（Prometheus 等の監視 scrape 対象含む）も同じ 1 AZ に揃える:
@@ -108,7 +135,7 @@ class EksClusterConstruct(Construct):
         # taint は打たない（kafka 用ノードを DedicatedKafka taint で隔離する設計のため、
         # system 側を taint で守る必要がない。toleration 未指定の Pod は自然に system に
         # schedule される）
-        self._cluster.add_nodegroup_capacity(
+        system_nodegroup = self._cluster.add_nodegroup_capacity(
             "SystemNodeGroup",
             nodegroup_name="system-nodegroup",
             instance_types=[ec2.InstanceType(config.system_instance_type)],
@@ -121,6 +148,7 @@ class EksClusterConstruct(Construct):
             labels={"role": "system"},
             enable_node_auto_repair=True,
         )
+        system_nodegroup.node.add_dependency(vpc_cni_addon, kube_proxy_addon)
 
         # Kafka 用ノードグループは broker と controller で分離する。
         # 役割ごとに最適なインスタンスサイズが異なる（broker は memory-optimized、
@@ -129,7 +157,7 @@ class EksClusterConstruct(Construct):
         # で物理的に配置を分離する。これにより 1 ノード障害で broker と controller を
         # 同時に失うリスクも回避できる。
         # 各 nodegroup は max=desired+1 でローリング時の新ノード起動余裕を確保する。
-        self._cluster.add_nodegroup_capacity(
+        kafka_broker_nodegroup = self._cluster.add_nodegroup_capacity(
             "KafkaBrokerNodeGroup",
             nodegroup_name="kafka-broker-nodegroup",
             instance_types=[ec2.InstanceType(config.kafka_broker_instance_type)],
@@ -149,9 +177,10 @@ class EksClusterConstruct(Construct):
             ],
             enable_node_auto_repair=True,
         )
+        kafka_broker_nodegroup.node.add_dependency(vpc_cni_addon, kube_proxy_addon)
 
         controller_count = config.kafka_controller_count
-        self._cluster.add_nodegroup_capacity(
+        kafka_controller_nodegroup = self._cluster.add_nodegroup_capacity(
             "KafkaControllerNodeGroup",
             nodegroup_name="kafka-controller-nodegroup",
             instance_types=[ec2.InstanceType(config.kafka_controller_instance_type)],
@@ -171,6 +200,7 @@ class EksClusterConstruct(Construct):
             ],
             enable_node_auto_repair=True,
         )
+        kafka_controller_nodegroup.node.add_dependency(vpc_cni_addon, kube_proxy_addon)
 
     @property
     def cluster(self) -> eks.ICluster:
