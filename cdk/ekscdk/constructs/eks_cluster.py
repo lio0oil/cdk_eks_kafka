@@ -36,8 +36,8 @@ class EksClusterConstruct(Construct):
             bootstrap_cluster_creator_admin_permissions=True,
             # vpc-cni/coredns/kube-proxy を self-managed 版の自動 bootstrap に任せず
             # Managed Addon として明示管理する（バージョン更新をアドオン単位で制御するため）。
-            # そのため vpc-cni/kube-proxy は本コンストラクタ内で NodeGroup 作成前に導入する
-            # （下記 _add_networking_addons 呼び出し部のコメント参照）。
+            # 自動 bootstrap と違い作成順序を自前で担保する必要があり、その順序は NodeGroup
+            # との前後関係で決まるため、Managed Addon は本 Construct に集約している。
             bootstrap_self_managed_addons=False,
             kubectl_provider_options=eks.KubectlProviderOptions(
                 kubectl_layer=KubectlV35Layer(self, "KubectlLayer"),
@@ -102,7 +102,7 @@ class EksClusterConstruct(Construct):
         # タイムアウトする。そのため NodeGroup 作成より前に Managed Addon として導入し、
         # 各 add_nodegroup_capacity の戻り値に add_dependency で順序を明示する。
         # coredns は逆に Pod をスケジュールするノードが無いと Addon 作成がタイムアウトする
-        # ため、NodeGroup 作成後に導入する必要があり AddonsConstruct 側で管理する。
+        # ため、NodeGroup 作成後に導入する（本コンストラクタ末尾）。
         vpc_cni_addon = eks.Addon(
             self,
             "VpcCni",
@@ -202,6 +202,116 @@ class EksClusterConstruct(Construct):
         )
         kafka_controller_nodegroup.node.add_dependency(vpc_cni_addon, kube_proxy_addon)
 
+        # ここから下は Pod をスケジュールするノードを要する Addon（Deployment / DaemonSet を持つ）。
+        # ノードが無い状態で作ると ACTIVE に到達できず CREATE がタイムアウトするため、
+        # いずれも全 NodeGroup の作成完了を待たせる。
+        nodegroups = (system_nodegroup, kafka_broker_nodegroup, kafka_controller_nodegroup)
+
+        # eks-pod-identity-agent は add_service_account(POD_IDENTITY) が初回参照時に遅延生成する
+        # Addon。DaemonSet のためノード 0 台でも ACTIVE になってしまい「Addon が存在する」以上の
+        # 保証が得られないので、ここで先に参照して NodeGroup を待たせ、ACTIVE 到達が実際の
+        # Pod 起動を伴うようにする（Pod Identity でクレデンシャルを得るワークロードの前提）。
+        cast(eks.IAddon, self._cluster.eks_pod_identity_agent).node.add_dependency(*nodegroups)
+
+        # coredns は DNS の提供元。Pod は外部ドメイン（AWS API エンドポイント等）の名前解決も
+        # CoreDNS 経由で行うため、DNS を要するワークロード側から coredns_addon に依存させる。
+        self._coredns_addon = eks.Addon(
+            self,
+            "CoreDns",
+            cluster=self._cluster,  # type: ignore[arg-type]
+            addon_name="coredns",
+            addon_version=config.addon_versions["coredns"],
+        )
+        self._coredns_addon.node.add_dependency(*nodegroups)
+
+        # aws-ebs-csi-driver addon は ebs-csi-controller-sa という ServiceAccount を
+        # 自身で作成するため、CDK 側では add_service_account で SA を作らない
+        # （事前に同名 SA を作ると addon 作成時に衝突するため）。
+        # ただし PodIdentityAssociations の RoleArn は EKS/addon 側が自動生成できない
+        # （どのポリシーを付けるかはワークロード固有の権限設計でユーザー側が決める事項のため）。
+        # そのため IAM Role の作成だけは CDK 側に残す必要がある。
+        ebs_csi_role = iam.Role(
+            self,
+            "EbsCsiPodIdentityRole",
+            role_name=f"ebs-csi-pod-identity-{config.cluster_name}",
+            assumed_by=iam.ServicePrincipal("pods.eks.amazonaws.com").with_session_tags(),  # type: ignore[arg-type]
+        )
+        ebs_csi_role.add_managed_policy(
+            iam.ManagedPolicy.from_aws_managed_policy_name("service-role/AmazonEBSCSIDriverPolicy")
+        )
+
+        # aws_eks_v2.Addon（L2）は PodIdentityAssociations を公開していないため、
+        # aws-ebs-csi-driver だけは L1 の CfnAddon を直接使う。
+        # SA を自身で作らない他の addon と違い競合する事前作成 SA も無いため、
+        # ResolveConflicts のエスケープハッチは不要。
+        ebs_csi_addon = eks_l1.CfnAddon(
+            self,
+            "EbsCsiDriver",
+            addon_name="aws-ebs-csi-driver",
+            cluster_name=self._cluster.cluster_name,
+            addon_version=config.addon_versions["aws-ebs-csi-driver"],
+            pod_identity_associations=[
+                eks_l1.CfnAddon.PodIdentityAssociationProperty(
+                    role_arn=ebs_csi_role.role_arn,
+                    service_account="ebs-csi-controller-sa",
+                )
+            ],
+        )
+        ebs_csi_addon.node.add_dependency(*nodegroups)
+
+        # metrics-server / eks-node-monitoring-agent は SA を事前作成しないため衝突要因が無く、
+        # ResolveConflicts のエスケープハッチも不要。L2 の Addon で十分。
+        metrics_server_addon = eks.Addon(
+            self,
+            "MetricsServer",
+            cluster=self._cluster,  # type: ignore[arg-type]
+            addon_name="metrics-server",
+            addon_version=config.addon_versions["metrics-server"],
+        )
+        metrics_server_addon.node.add_dependency(*nodegroups)
+
+        node_monitoring_addon = eks.Addon(
+            self,
+            "NodeMonitoringAgent",
+            cluster=self._cluster,  # type: ignore[arg-type]
+            addon_name="eks-node-monitoring-agent",
+            addon_version=config.addon_versions["eks-node-monitoring-agent"],
+            # NMA は --verbosity フラグを zap level に -1 倍して渡すため、
+            # WARN 以上 (zapcore.WarnLevel = 1) にするには --verbosity=-1。
+            # additionalArgs は完全置換なので chart デフォルトの --metrics-address も含める。
+            configuration_values={
+                "nodeAgent": {
+                    "additionalArgs": [
+                        "--metrics-address=:8003",
+                        "--verbosity=-1",
+                    ],
+                },
+            },
+        )
+        node_monitoring_addon.node.add_dependency(*nodegroups)
+
+        # snapshot-controller は aws-ebs-csi-driver とは別の EKS Managed Addon。
+        # VolumeSnapshot 系 CRD + controller 本体をまとめて管理してくれるため、
+        # CRD だけを self-managed で apply する運用は行わない。
+        # SA を事前作成しないため衝突要因が無く、ResolveConflicts のエスケープハッチも不要。
+        snapshot_controller_addon = eks.Addon(
+            self,
+            "SnapshotController",
+            cluster=self._cluster,  # type: ignore[arg-type]
+            addon_name="snapshot-controller",
+            addon_version=config.addon_versions["snapshot-controller"],
+        )
+        snapshot_controller_addon.node.add_dependency(*nodegroups)
+
     @property
     def cluster(self) -> eks.ICluster:
         return cast(eks.ICluster, self._cluster)
+
+    @property
+    def coredns_addon(self) -> eks.IAddon:
+        """coredns Managed Addon。
+
+        Pod は外部ドメイン（AWS API エンドポイント等）の名前解決も CoreDNS 経由で行うため、
+        起動時に名前解決を要するワークロードはこの Addon に add_dependency() する。
+        """
+        return self._coredns_addon

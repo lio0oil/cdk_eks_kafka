@@ -11,7 +11,6 @@ from constructs import Construct
 
 from ekscdk.config import ClusterConfig
 from ekscdk.constructs._manifest import load_manifest, load_manifest_with_subs, load_manifests, manifest_dir
-from ekscdk.constructs.addons import AddonsConstruct
 
 _DIR = manifest_dir("monitoring")
 
@@ -44,7 +43,9 @@ class MonitoringConstruct(Construct):
         construct_id: str,
         cluster: eks.ICluster,
         config: ClusterConfig,
-        addons: AddonsConstruct,
+        coredns_addon: eks.IAddon,
+        gp3_storage_class: eks.KubernetesManifest,
+        strimzi_chart: eks.HelmChart,
         kafka_namespace: eks.KubernetesManifest,
     ) -> None:
         super().__init__(scope, construct_id)
@@ -181,11 +182,27 @@ class MonitoringConstruct(Construct):
             namespace="monitoring",
             version=config.kube_prometheus_stack_chart_version,
             values=kps_values,
+            # wait=True で Pod が Ready になるまで待つ。chart は Prometheus Operator の
+            # admission webhook（PrometheusRule を検証、patch.enabled=true のため
+            # failurePolicy=Fail）を導入するため、待たないと直後に apply する PrometheusRule が
+            # webhook 呼び出しに失敗する（AWS LBC の TargetGroupBinding と同じ失敗パターン）。
+            wait=True,
             timeout=Duration.minutes(15),
         )
-        kps.node.add_dependency(namespace)
-        kps.node.add_dependency(grafana_sa)
-        kps.node.add_dependency(alertmanager_sa)
+        # add_service_account(POD_IDENTITY) が自動生成する eks-pod-identity-agent Addon
+        # （各ノードで動く DaemonSet）への DependsOn は付与されないため明示する
+        # （addons.py の _add_aws_lbc と同じ理由）。coredns も Managed Addon 化により
+        # cluster CREATE 時点では存在しないため、名前解決を要する Pod 側で待つ。
+        # gp3 StorageClass は Prometheus / Alertmanager の PVC が要求するため、wait=True と
+        # 併せると未作成のままでは PVC が Pending で install がタイムアウトする。
+        kps.node.add_dependency(
+            namespace,
+            grafana_sa,
+            alertmanager_sa,
+            cast(eks.IAddon, cluster.eks_pod_identity_agent),
+            coredns_addon,
+            gp3_storage_class,
+        )
 
         # ── Kafka / Strimzi PodMonitor ─────────────────────────────────────────
         # broker / controller / cruise-control / kafka-exporter を 1 つの PodMonitor で
@@ -204,7 +221,7 @@ class MonitoringConstruct(Construct):
         )
         cluster_op_pm.node.add_dependency(kps)
         # strimzi-system NS は Strimzi chart が create_namespace=True で作るため依存する。
-        cluster_op_pm.node.add_dependency(addons.strimzi_chart)
+        cluster_op_pm.node.add_dependency(strimzi_chart)
 
         entity_op_pm = cluster.add_manifest(
             "StrimziEntityOperatorPodMonitor",
@@ -255,7 +272,7 @@ class MonitoringConstruct(Construct):
         ksm.node.add_dependency(ksm_cm)
         # ClusterRole が kafka.strimzi.io / core.strimzi.io / access.strimzi.io の CRD を
         # 参照するため、Strimzi chart（CRD 登録元）に依存する。
-        ksm.node.add_dependency(addons.strimzi_chart)
+        ksm.node.add_dependency(strimzi_chart)
         ksm.node.add_dependency(kps)
 
         ksm_rules = cluster.add_manifest(
@@ -282,4 +299,5 @@ class MonitoringConstruct(Construct):
                 FLUENT_BIT_MEM_BUF_LIMIT=config.fluent_bit_resources.mem_buf_limit,
             ),
         )
-        fluent_bit.node.add_dependency(fluent_bit_sa)
+        # Fluent Bit は logs.<region>.amazonaws.com の名前解決に CoreDNS を要する。
+        fluent_bit.node.add_dependency(fluent_bit_sa, cast(eks.IAddon, cluster.eks_pod_identity_agent), coredns_addon)

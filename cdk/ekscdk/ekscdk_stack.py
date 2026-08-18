@@ -52,8 +52,13 @@ class EksCdkStack(Stack):
             broker_count=broker_count,
             config=config,
         )
-        addons = AddonsConstruct(self, "Addons", cluster=eks_construct.cluster, config=config)
-        addons.node.add_dependency(eks_construct)
+        addons = AddonsConstruct(
+            self,
+            "Addons",
+            cluster=eks_construct.cluster,
+            coredns_addon=eks_construct.coredns_addon,
+            config=config,
+        )
         KafkaConstruct(
             self,
             "Kafka",
@@ -63,6 +68,7 @@ class EksCdkStack(Stack):
             kafka_target_groups=network.kafka_target_groups,
             kafka_target_port=external_listener_port,
             nlb_sg_id=network.kafka_nlb_sg.security_group_id,
+            vpc_id=network.vpc.vpc_id,
             external_listener_name=external_listener_name,
             aws_lbc_chart=addons.aws_lbc_chart,
             strimzi_chart=addons.strimzi_chart,
@@ -74,7 +80,9 @@ class EksCdkStack(Stack):
             "Monitoring",
             cluster=eks_construct.cluster,
             config=config,
-            addons=addons,
+            coredns_addon=eks_construct.coredns_addon,
+            gp3_storage_class=addons.gp3_storage_class,
+            strimzi_chart=addons.strimzi_chart,
             kafka_namespace=addons.kafka_namespace,
         )
         kafka_consumer_infra = KafkaConsumerInfraConstruct(

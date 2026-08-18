@@ -120,7 +120,13 @@ def addons_only_template():
                 broker_count=_config.broker_count,
                 config=_config,
             )
-            AddonsConstruct(self, "Addons", cluster=eks_construct.cluster, config=_config)
+            AddonsConstruct(
+                self,
+                "Addons",
+                cluster=eks_construct.cluster,
+                coredns_addon=eks_construct.coredns_addon,
+                config=_config,
+            )
 
     stack = _AddonsOnlyStack(app, "ekscdkAddonsOnly", env=env)
     return assertions.Template.from_stack(stack)
@@ -990,6 +996,26 @@ def test_target_group_binding_uses_ip_target_type_without_node_selector(template
         assert "nodeSelector" not in literals
 
 
+def test_target_group_binding_specifies_vpc_id(template):
+    """vpcID を省略すると AWS LBC の mutating webhook が値を埋めるために
+    DescribeTargetGroups を呼ぶ（公式ドキュメント記載の defaulting 動作）。
+
+    その AWS 呼び出しには Pod Identity のクレデンシャルと CoreDNS による名前解決が必要で、
+    どちらかが間に合わないと webhook が 10s deadline を超過して apply が失敗する
+    （kubernetes-sigs/aws-load-balancer-controller#3972 と同じ失敗パターン）。
+    targetType と併せて明示し、webhook 側に AWS 参照の理由を残さない。
+    """
+    all_k8s = template.find_resources("Custom::AWSCDK-EKS-KubernetesResource")
+    bindings_literals = [
+        _manifest_literals(res["Properties"]["Manifest"])
+        for res in all_k8s.values()
+        if "TargetGroupBinding" in _manifest_literals(res["Properties"]["Manifest"])
+    ]
+    assert bindings_literals
+    for literals in bindings_literals:
+        assert '"vpcID":' in literals
+
+
 def test_target_group_binding_networking_ingress_uses_listener_container_port(template):
     # networking.ingress は AWS LBC が SG に自動追加する許可ポートを決める。ip mode では
     # 実トラフィックが Pod の container port（external listener の port、全 broker 共通で
@@ -1237,6 +1263,126 @@ def test_eks_pod_identity_agent_addon_version_not_pinned(template):
     matched = [res for res in addons.values() if res["Properties"].get("AddonName") == "eks-pod-identity-agent"]
     assert len(matched) == 1
     assert "AddonVersion" not in matched[0]["Properties"]
+
+
+@pytest.mark.parametrize(
+    "chart",
+    [
+        "aws-load-balancer-controller",
+        "kube-prometheus-stack",
+        "fluent-bit",
+    ],
+)
+def test_pod_identity_helm_charts_wait_for_pod_identity_agent(template, chart):
+    """add_service_account(identity_type=POD_IDENTITY) は内部で eks-pod-identity-agent
+    Addon（各ノードで動く DaemonSet。Pod への一時クレデンシャル供給を担う）を自動生成するが、
+    生成された CfnPodIdentityAssociation にはこの Addon への DependsOn が自動では付かない。
+    Pod Identity 経由で AWS クレデンシャルを取得する Helm chart 側で明示的に依存させないと、
+    Addon が Ready になる前に Pod がスケジュールされクレデンシャル取得に失敗しうる。
+    """
+    addons = template.find_resources("AWS::EKS::Addon")
+    pia_ids = [name for name, res in addons.items() if res["Properties"].get("AddonName") == "eks-pod-identity-agent"]
+    assert len(pia_ids) == 1
+    pia_id = pia_ids[0]
+
+    charts = template.find_resources("Custom::AWSCDK-EKS-HelmChart")
+    matched = [res for res in charts.values() if res["Properties"].get("Chart") == chart]
+    assert len(matched) == 1
+    assert pia_id in matched[0].get("DependsOn", [])
+
+
+@pytest.mark.parametrize(
+    "addon_name",
+    [
+        "coredns",
+        "aws-ebs-csi-driver",
+        "metrics-server",
+        "snapshot-controller",
+        "eks-node-monitoring-agent",
+        # DaemonSet はノード 0 台でも Addon が ACTIVE になってしまい「存在する」以上の
+        # 保証が得られない。NodeGroup を待たせることで ACTIVE 到達が Pod 起動を伴うようにする。
+        "eks-pod-identity-agent",
+    ],
+)
+def test_node_dependent_addons_wait_for_all_nodegroups(template, addon_name):
+    """Pod をスケジュールするノードが無い状態で Addon を作ると ACTIVE に到達できず
+    CREATE がタイムアウトする。ノードを要する Addon は全 NodeGroup の完了を待つ。
+
+    vpc-cni / kube-proxy は逆に NodeGroup が Ready になる前提のため対象外
+    （順序は test_nodegroup_depends_on_networking_addons が担保する）。
+    """
+    addons = template.find_resources("AWS::EKS::Addon")
+    matched = [res for res in addons.values() if res["Properties"].get("AddonName") == addon_name]
+    assert len(matched) == 1
+
+    nodegroup_ids = set(template.find_resources("AWS::EKS::Nodegroup"))
+    assert len(nodegroup_ids) == 3
+    assert nodegroup_ids <= set(matched[0].get("DependsOn", []))
+
+
+def test_kube_prometheus_stack_waits_for_pods_ready(template):
+    """kube-prometheus-stack は Prometheus Operator の admission webhook
+    （PrometheusRule を検証する ValidatingWebhookConfiguration。chart デフォルトで有効、
+    patch.enabled=true のため failurePolicy=Fail）を導入する。
+
+    Wait を指定しないと Helm install は Operator Pod の Ready を待たずに返るため、
+    直後に apply される PrometheusRule が webhook 呼び出しに失敗しうる
+    （AWS LBC の TargetGroupBinding webhook と同じ失敗パターン）。
+    """
+    charts = template.find_resources("Custom::AWSCDK-EKS-HelmChart")
+    kps = [res for res in charts.values() if res["Properties"].get("Chart") == "kube-prometheus-stack"]
+    assert len(kps) == 1
+    assert kps[0]["Properties"].get("Wait") is True
+
+
+def test_kube_prometheus_stack_waits_for_gp3_storage_class(template):
+    """kps の Prometheus / Alertmanager は storageClassName: gp3 の PVC を要求する。
+    Wait 指定と併せると、StorageClass 未作成のままでは PVC が Pending のままとなり
+    Helm install がタイムアウトするため、StorageClass の作成完了を待つ。
+    """
+    manifests = template.find_resources("Custom::AWSCDK-EKS-KubernetesResource")
+    sc_ids = [
+        name
+        for name, res in manifests.items()
+        if '"kind":"StorageClass"' in _manifest_literals(res["Properties"]["Manifest"])
+        and '"name":"gp3"' in _manifest_literals(res["Properties"]["Manifest"])
+    ]
+    assert len(sc_ids) == 1
+
+    charts = template.find_resources("Custom::AWSCDK-EKS-HelmChart")
+    kps = [res for res in charts.values() if res["Properties"].get("Chart") == "kube-prometheus-stack"]
+    assert len(kps) == 1
+    assert sc_ids[0] in kps[0].get("DependsOn", [])
+
+
+@pytest.mark.parametrize(
+    "chart",
+    [
+        "strimzi-kafka-operator",
+        "aws-load-balancer-controller",
+        "kube-prometheus-stack",
+        "fluent-bit",
+    ],
+)
+def test_helm_charts_wait_for_coredns(template, chart):
+    """coredns を Managed Addon にしたことで、CoreDNS は cluster CREATE 時点ではなく
+    独立した CFN リソースとして作られるようになった。DependsOn を張らないと CFN は
+    coredns Addon と各 Helm chart を並列に流すため、DNS が未 Ready のまま Pod が起動しうる。
+
+    Pod は外部ドメイン（AWS API エンドポイント等）の名前解決も CoreDNS 経由で行う。
+    helm の wait は readiness probe（Pod ローカル）しか見ないため、AWS API に到達できない
+    状態でも chart 自体は成功してしまい、後続の apply で初めて失敗が表面化する
+    （AWS LBC の TargetGroupBinding webhook が DescribeTargetGroups でハングする等）。
+    """
+    addons = template.find_resources("AWS::EKS::Addon")
+    coredns_ids = [name for name, res in addons.items() if res["Properties"].get("AddonName") == "coredns"]
+    assert len(coredns_ids) == 1
+    coredns_id = coredns_ids[0]
+
+    charts = template.find_resources("Custom::AWSCDK-EKS-HelmChart")
+    matched = [res for res in charts.values() if res["Properties"].get("Chart") == chart]
+    assert len(matched) == 1
+    assert coredns_id in matched[0].get("DependsOn", [])
 
 
 def test_cluster_control_plane_logging_enabled(template):

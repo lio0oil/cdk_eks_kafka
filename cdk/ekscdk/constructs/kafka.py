@@ -37,6 +37,7 @@ class KafkaConstruct(Construct):
         kafka_target_groups: dict[str, elbv2.NetworkTargetGroup],
         kafka_target_port: int,
         nlb_sg_id: str,
+        vpc_id: str,
         external_listener_name: str,
         aws_lbc_chart: eks.HelmChart,
         strimzi_chart: eks.HelmChart,
@@ -164,6 +165,7 @@ class KafkaConstruct(Construct):
                     TARGET_GROUP_ARN=tg.target_group_arn,
                     NLB_SG_ID=nlb_sg_id,
                     TARGET_PORT=str(kafka_target_port),
+                    VPC_ID=vpc_id,
                 ),
             )
             binding.node.add_dependency(kafka_cr)

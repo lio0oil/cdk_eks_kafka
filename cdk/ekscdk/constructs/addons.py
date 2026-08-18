@@ -3,7 +3,6 @@ import os
 from typing import cast
 
 from aws_cdk import Duration, Stack
-from aws_cdk import aws_eks as eks_l1
 from aws_cdk import aws_eks_v2 as eks
 from aws_cdk import aws_iam as iam
 from constructs import Construct
@@ -16,20 +15,27 @@ _DIR_KAFKA = manifest_dir("kafka")
 
 
 class AddonsConstruct(Construct):
+    """クラスター共通の Kubernetes リソース（StorageClass / Namespace / Helm chart）を導入する。
+
+    EKS Managed Addon は NodeGroup との作成順序に制約があり、順序をリソース単位で
+    明示する必要があるため EksClusterConstruct 側に集約している（本 Construct は扱わない）。
+    """
+
     def __init__(
         self,
         scope: Construct,
         construct_id: str,
         cluster: eks.ICluster,
+        coredns_addon: eks.IAddon,
         config: ClusterConfig,
     ) -> None:
         super().__init__(scope, construct_id)
 
         self._cluster: eks.ICluster = cluster
+        self._coredns_addon = coredns_addon
         self._config = config
 
-        self._add_eks_addons()
-        self._add_gp3_storage_class()
+        self._gp3_storage_class = self._add_gp3_storage_class()
         self._kafka_namespace = self._add_kafka_namespace()
         self._strimzi_chart = self._add_strimzi(self._kafka_namespace)
         self._aws_lbc_chart = self._add_aws_lbc()
@@ -46,100 +52,10 @@ class AddonsConstruct(Construct):
         """
         return self._cluster.add_manifest("KafkaNamespace", load_manifest(_DIR_KAFKA, "namespace.yaml"))
 
-    def _add_eks_addons(self) -> None:
-        # aws-ebs-csi-driver addon は ebs-csi-controller-sa という ServiceAccount を
-        # 自身で作成するため、CDK 側では add_service_account で SA を作らない
-        # （事前に同名 SA を作ると addon 作成時に衝突するため）。
-        # ただし PodIdentityAssociations の RoleArn は EKS/addon 側が自動生成できない
-        # （どのポリシーを付けるかはワークロード固有の権限設計でユーザー側が決める事項のため）。
-        # そのため IAM Role の作成だけは CDK 側に残す必要がある。
-        ebs_csi_role = iam.Role(
-            self,
-            "EbsCsiPodIdentityRole",
-            role_name=f"ebs-csi-pod-identity-{self._config.cluster_name}",
-            assumed_by=iam.ServicePrincipal("pods.eks.amazonaws.com").with_session_tags(),  # type: ignore[arg-type]
-        )
-        ebs_csi_role.add_managed_policy(
-            iam.ManagedPolicy.from_aws_managed_policy_name("service-role/AmazonEBSCSIDriverPolicy")
-        )
-
-        # vpc-cni/coredns/kube-proxy は bootstrap_self_managed_addons のデフォルト（True）
-        # による self-managed 版をそのまま使うため、ここでは明示管理しない。
-
-        # aws_eks_v2.Addon（L2）は PodIdentityAssociations を公開していないため、
-        # aws-ebs-csi-driver だけは L1 の CfnAddon を直接使う。
-        # SA を自身で作らない他の addon と違い競合する事前作成 SA も無いため、
-        # ResolveConflicts のエスケープハッチは不要。
-        eks_l1.CfnAddon(
-            self,
-            "EbsCsiDriver",
-            addon_name="aws-ebs-csi-driver",
-            cluster_name=self._cluster.cluster_name,
-            addon_version=self._config.addon_versions["aws-ebs-csi-driver"],
-            pod_identity_associations=[
-                eks_l1.CfnAddon.PodIdentityAssociationProperty(
-                    role_arn=ebs_csi_role.role_arn,
-                    service_account="ebs-csi-controller-sa",
-                )
-            ],
-        )
-
-        # metrics-server / eks-node-monitoring-agent は SA を事前作成しないため衝突要因が無く、
-        # ResolveConflicts のエスケープハッチも不要。L2 の Addon で十分。
-        eks.Addon(
-            self,
-            "MetricsServer",
-            cluster=self._cluster,
-            addon_name="metrics-server",
-            addon_version=self._config.addon_versions["metrics-server"],
-        )
-
-        eks.Addon(
-            self,
-            "NodeMonitoringAgent",
-            cluster=self._cluster,
-            addon_name="eks-node-monitoring-agent",
-            addon_version=self._config.addon_versions["eks-node-monitoring-agent"],
-            # NMA は --verbosity フラグを zap level に -1 倍して渡すため、
-            # WARN 以上 (zapcore.WarnLevel = 1) にするには --verbosity=-1。
-            # additionalArgs は完全置換なので chart デフォルトの --metrics-address も含める。
-            configuration_values={
-                "nodeAgent": {
-                    "additionalArgs": [
-                        "--metrics-address=:8003",
-                        "--verbosity=-1",
-                    ],
-                },
-            },
-        )
-
-        # snapshot-controller は aws-ebs-csi-driver とは別の EKS Managed Addon。
-        # VolumeSnapshot 系 CRD + controller 本体をまとめて管理してくれるため、
-        # CRD だけを self-managed で apply する運用は行わない。
-        # SA を事前作成しないため衝突要因が無く、ResolveConflicts のエスケープハッチも不要。
-        eks.Addon(
-            self,
-            "SnapshotController",
-            cluster=self._cluster,
-            addon_name="snapshot-controller",
-            addon_version=self._config.addon_versions["snapshot-controller"],
-        )
-
-        # coredns は Pod をスケジュールするノードが無いと Addon 作成自体がタイムアウトする
-        # ため、NodeGroup 作成後（EksClusterConstruct 完了後）である AddonsConstruct 側で導入する。
-        # vpc-cni/kube-proxy は逆に NodeGroup 作成前が必須のため EksClusterConstruct 側で導入済み。
-        eks.Addon(
-            self,
-            "CoreDns",
-            cluster=self._cluster,
-            addon_name="coredns",
-            addon_version=self._config.addon_versions["coredns"],
-        )
-
-    def _add_gp3_storage_class(self) -> None:
+    def _add_gp3_storage_class(self) -> eks.KubernetesManifest:
         # Kafka broker/controller と Prometheus/Alertmanager が共有するデフォルト StorageClass。
         # Kafka 専用の StorageClass（gp3-kafka）は単一消費者のため KafkaConstruct 側で管理する。
-        self._cluster.add_manifest("Gp3StorageClass", load_manifest(_DIR, "gp3-storageclass.yaml"))
+        return self._cluster.add_manifest("Gp3StorageClass", load_manifest(_DIR, "gp3-storageclass.yaml"))
 
     def _add_strimzi(self, kafka_namespace: eks.KubernetesManifest) -> eks.HelmChart:
         chart = self._cluster.add_helm_chart(
@@ -177,7 +93,8 @@ class AddonsConstruct(Construct):
         )
         # watchNamespaces=["kafka"] が RoleBinding を作る対象 NS の存在を前提にするため、
         # kafka Namespace の作成完了を待ってから導入する。
-        chart.node.add_dependency(kafka_namespace)
+        # Operator Pod は Kafka broker の DNS 名解決に CoreDNS を要するため Addon を待つ。
+        chart.node.add_dependency(kafka_namespace, self._coredns_addon)
         return chart
 
     @property
@@ -198,6 +115,15 @@ class AddonsConstruct(Construct):
         kubectl apply されるよう順序を担保する。
         """
         return self._aws_lbc_chart
+
+    @property
+    def gp3_storage_class(self) -> eks.KubernetesManifest:
+        """デフォルト StorageClass（gp3）。
+
+        この StorageClass の PVC を要求するワークロード（Prometheus / Alertmanager）は、
+        作成完了を待たないと PVC が Pending のままになるため依存を張る。
+        """
+        return self._gp3_storage_class
 
     @property
     def strimzi_chart(self) -> eks.HelmChart:
@@ -273,4 +199,13 @@ class AddonsConstruct(Construct):
             timeout=Duration.minutes(10),
         )
         chart.node.add_dependency(sa)
+        # add_service_account(POD_IDENTITY) は内部で eks-pod-identity-agent Addon を
+        # 自動生成するが、生成される CfnPodIdentityAssociation にはこの Addon への
+        # DependsOn が付かない。Addon（各ノードで動く DaemonSet）が Ready になる前に
+        # AWS LBC Pod がスケジュールされるとクレデンシャル取得に失敗しうるため明示する。
+        chart.node.add_dependency(cast(eks.IAddon, self._cluster.eks_pod_identity_agent))
+        # AWS LBC は TargetGroupBinding の mutating webhook で DescribeTargetGroups を呼び、
+        # その名前解決に CoreDNS を要する。CoreDNS 未 Ready のまま webhook が呼ばれると
+        # 解決がハングして webhook の 10s deadline を超過する。
+        chart.node.add_dependency(self._coredns_addon)
         return chart
