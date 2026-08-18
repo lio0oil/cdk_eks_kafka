@@ -1,7 +1,9 @@
 # Locust の負荷定義ファイル。ファイル名は locustfile.py 固定 (慣習ではなく Locust の既定探索名で、
 # `-f` で明示しない限りこの名前のファイルをカレントディレクトリから探しに行く)。
-# `locust -f locustfile.py` で起動すると、このファイル内の User サブクラス (下記 KafkaProducerUser)
-# を Locust が自動検出し、Web UI またはヘッドレスモードで「仮想ユーザー」として並列実行する。
+# locust は dev 依存グループでのみ管理しているため `uv run locust -f locustfile.py` で起動する
+# (uv 管理の venv 外には locust コマンド自体が存在しない)。このファイル内の User サブクラス
+# (下記 KafkaProducerUser) を Locust が自動検出し、Web UI またはヘッドレスモードで「仮想ユーザー」
+# として並列実行する。
 import itertools
 import os
 import time
