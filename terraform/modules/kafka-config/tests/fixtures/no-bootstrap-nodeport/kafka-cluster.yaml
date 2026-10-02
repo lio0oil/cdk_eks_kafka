@@ -1,0 +1,8 @@
+spec:
+  kafka:
+    listeners:
+      - name: external
+        port: 9094
+        type: nodeport
+        configuration:
+          bootstrap: {}

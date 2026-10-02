@@ -1,0 +1,6 @@
+spec:
+  kafka:
+    listeners:
+      - name: plain
+        port: 9092
+        type: internal
