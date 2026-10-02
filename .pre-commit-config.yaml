@@ -42,3 +42,27 @@ repos:
         files: ^cdk/
         pass_filenames: false
         stages: [pre-commit]
+      - id: terraform-fmt
+        name: terraform / fmt
+        entry: terraform fmt -check -recursive -diff terraform
+        language: system
+        files: ^terraform/.*\.(tf|tfvars|tftest\.hcl)$
+        pass_filenames: false
+      - id: terraform-test
+        name: terraform / validate + test
+        # terraform test 内の相対パスは cwd 基準のため、module ごとに -chdir で実行する
+        entry: >-
+          bash -c 'set -e; for d in terraform/modules/*/; do
+          terraform -chdir="$d" init -backend=false -input=false >/dev/null;
+          terraform -chdir="$d" validate;
+          [ -d "$d/tests" ] && terraform -chdir="$d" test; done; true'
+        language: system
+        files: ^(terraform/|cdk/manifests/kafka/)
+        pass_filenames: false
+        stages: [pre-commit]
+      - id: terraform-tflint
+        name: terraform / tflint
+        entry: tflint --recursive --chdir=terraform
+        language: system
+        files: ^terraform/.*\.(tf|tfvars)$
+        pass_filenames: false
