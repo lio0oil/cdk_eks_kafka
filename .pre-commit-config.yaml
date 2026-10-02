@@ -50,14 +50,9 @@ repos:
         pass_filenames: false
       - id: terraform-test
         name: terraform / validate + test
-        # terraform test 内の相対パスは cwd 基準のため、module ごとに -chdir で実行する
-        entry: >-
-          bash -c 'set -e; for d in terraform/modules/*/; do
-          terraform -chdir="$d" init -backend=false -input=false >/dev/null;
-          terraform -chdir="$d" validate;
-          [ -d "$d/tests" ] && terraform -chdir="$d" test; done; true'
+        entry: bash terraform/scripts/check.sh
         language: system
-        files: ^(terraform/|cdk/manifests/kafka/)
+        files: ^(terraform/|cdk/manifests/)
         pass_filenames: false
         stages: [pre-commit]
       - id: terraform-tflint

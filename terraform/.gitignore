@@ -3,3 +3,12 @@
 *.tfstate.*
 *.tfplan
 crash.log
+
+# module 単体の init で生成される lock。依存の固定は root 側の lock で行う
+modules/**/.terraform.lock.hcl
+
+# archive_file が生成する Lambda のデプロイパッケージ
+*.zip
+
+# pre-commit の検証用に scripts/check.sh が作る一時コピー
+*.check/
