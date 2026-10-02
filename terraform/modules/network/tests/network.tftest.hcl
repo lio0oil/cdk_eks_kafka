@@ -1,10 +1,10 @@
 # command = apply は mock provider に対する適用で、実 AWS には触れない。
-# VPC ID など computed 値の受け渡し（参照の配線）を検証するために apply を使う。
+# 参照の配線を検証するために apply を使う。VPC と Subnet は Terraform の管理外で、data source で読むだけ。
 
 mock_provider "aws" {
-  mock_data "aws_availability_zones" {
+  mock_data "aws_vpc" {
     defaults = {
-      names = ["ap-northeast-1a", "ap-northeast-1c", "ap-northeast-1d"]
+      cidr_block = "10.0.0.0/16"
     }
   }
 
@@ -73,18 +73,32 @@ override_resource {
   }
 }
 
+# Subnet は Terraform の管理外のため、data source が返す値（所属 VPC と AZ）を与える
+override_data {
+  target = data.aws_subnet.private["subnet-aaaa"]
+  values = { vpc_id = "vpc-0123456789abcdef0", availability_zone = "ap-northeast-1a" }
+}
+
+override_data {
+  target = data.aws_subnet.private["subnet-bbbb"]
+  values = { vpc_id = "vpc-0123456789abcdef0", availability_zone = "ap-northeast-1c" }
+}
+
+override_data {
+  target = data.aws_subnet.private["subnet-cccc"]
+  values = { vpc_id = "vpc-0123456789abcdef0", availability_zone = "ap-northeast-1d" }
+}
+
 variables {
   cluster_name                = "eks-cluster-dev"
-  nat_gateways                = 1
-  kafka_single_az             = true
+  vpc_id                      = "vpc-0123456789abcdef0"
+  private_subnet_ids          = ["subnet-aaaa", "subnet-bbbb", "subnet-cccc"]
+  node_subnet_id              = "subnet-bbbb"
   enable_interface_endpoints  = false
   enable_vpc_flow_logs        = false
   log_force_destroy           = true
   kafka_target_port           = 9094
   private_dns_name            = "kafka.local"
-  vpc_cidr                    = "10.0.0.0/16"
-  public_subnet_cidrs         = ["10.0.0.0/24", "10.0.1.0/24", "10.0.2.0/24"]
-  private_subnet_cidrs        = ["10.0.3.0/24", "10.0.4.0/24", "10.0.5.0/24"]
   interface_endpoint_services = ["ecr.api", "ecr.dkr", "logs", "eks-auth"]
   nlb_name                    = "kafka-shared-nlb"
   target_group_health_check = {
@@ -98,84 +112,6 @@ variables {
     { name = "Broker1", listener_port = 9096, node_port = 30096 },
     { name = "Broker2", listener_port = 9097, node_port = 30097 },
   ]
-}
-
-run "vpc_layout_matches_legacy" {
-  command = apply
-
-  assert {
-    condition     = module.vpc.vpc_cidr_block == "10.0.0.0/16"
-    error_message = "VPC の CIDR が 10.0.0.0/16 ではない"
-  }
-
-  assert {
-    condition     = module.vpc.public_subnets_cidr_blocks == tolist(["10.0.0.0/24", "10.0.1.0/24", "10.0.2.0/24"])
-    error_message = "public subnet が /24 で 3 AZ に分割されていない"
-  }
-
-  assert {
-    condition     = module.vpc.private_subnets_cidr_blocks == tolist(["10.0.3.0/24", "10.0.4.0/24", "10.0.5.0/24"])
-    error_message = "private subnet が /24 で 3 AZ に分割されていない"
-  }
-
-  assert {
-    condition     = alltrue([for s in module.vpc.public_subnet_objects : s.tags["kubernetes.io/role/elb"] == "1"])
-    error_message = "public subnet に kubernetes.io/role/elb タグが付いていない"
-  }
-
-  assert {
-    condition     = alltrue([for s in module.vpc.private_subnet_objects : s.tags["kubernetes.io/role/internal-elb"] == "1"])
-    error_message = "private subnet に kubernetes.io/role/internal-elb タグが付いていない"
-  }
-}
-
-run "single_nat_gateway_by_default" {
-  command = apply
-
-  assert {
-    condition     = length(module.vpc.natgw_ids) == 1
-    error_message = "nat_gateways=1 で NAT Gateway が 1 台にならない"
-  }
-}
-
-run "nat_gateway_per_az" {
-  command = apply
-
-  variables {
-    nat_gateways = 3
-  }
-
-  assert {
-    condition     = length(module.vpc.natgw_ids) == 3
-    error_message = "nat_gateways=3 で AZ ごとに NAT Gateway が作られない"
-  }
-}
-
-run "nat_gateways_other_than_1_or_az_count_is_rejected" {
-  command = plan
-
-  variables {
-    nat_gateways = 2
-  }
-
-  expect_failures = [var.nat_gateways]
-}
-
-run "s3_gateway_endpoint_is_attached_to_all_route_tables" {
-  command = apply
-
-  assert {
-    condition     = aws_vpc_endpoint.s3.vpc_endpoint_type == "Gateway" && aws_vpc_endpoint.s3.service_name == "com.amazonaws.ap-northeast-1.s3"
-    error_message = "S3 Gateway Endpoint ではない"
-  }
-
-  assert {
-    condition = aws_vpc_endpoint.s3.route_table_ids == toset(concat(
-      module.vpc.private_route_table_ids,
-      module.vpc.public_route_table_ids,
-    ))
-    error_message = "S3 Gateway Endpoint が private / public 双方の route table に紐付いていない"
-  }
 }
 
 run "interface_endpoints_are_disabled_by_default" {
@@ -213,7 +149,7 @@ run "interface_endpoints_cover_sensitive_apis" {
   }
 
   assert {
-    condition     = alltrue([for e in aws_vpc_endpoint.interface : e.subnet_ids == toset(module.vpc.private_subnets)])
+    condition     = alltrue([for e in aws_vpc_endpoint.interface : e.subnet_ids == toset(var.private_subnet_ids)])
     error_message = "Interface Endpoint が全 private subnet に配置されていない"
   }
 
@@ -296,7 +232,10 @@ run "kafka_nlb_security_group_allows_each_listener_port_from_vpc" {
   }
 }
 
-run "kafka_nlb_is_internal_and_single_az_in_dev" {
+# Kafka・system のノード、NLB、ESM は、EKS のコントロールプレーン用 subnet の中から選んだ 1 つに揃える。
+# NLB が複数 AZ のままターゲットだけ 1 AZ に寄ると、他 AZ の NLB ノードからターゲットへ到達するのに
+# cross-zone が必須になり、AZ 跨ぎのデータ転送料が発生するため、cross-zone は無効にする。
+run "kafka_nlb_is_internal_and_pinned_to_the_node_subnet" {
   command = apply
 
   assert {
@@ -315,24 +254,10 @@ run "kafka_nlb_is_internal_and_single_az_in_dev" {
   }
 
   assert {
-    condition     = aws_lb.kafka.subnets == toset([module.vpc.private_subnets[0]]) && !aws_lb.kafka.enable_cross_zone_load_balancing
-    error_message = "kafka_single_az=true で NLB が 1 AZ 目のみ・cross-zone 無効になっていない"
+    condition     = aws_lb.kafka.subnets == toset(["subnet-bbbb"]) && !aws_lb.kafka.enable_cross_zone_load_balancing
+    error_message = "NLB が node_subnet_id の subnet だけに置かれ、cross-zone が無効になっていない"
   }
 }
-
-run "kafka_nlb_spans_all_azs_when_multi_az" {
-  command = apply
-
-  variables {
-    kafka_single_az = false
-  }
-
-  assert {
-    condition     = aws_lb.kafka.subnets == toset(module.vpc.private_subnets) && aws_lb.kafka.enable_cross_zone_load_balancing
-    error_message = "kafka_single_az=false で NLB が全 private subnet・cross-zone 有効になっていない"
-  }
-}
-
 run "kafka_target_groups_use_ip_targets_with_client_ip_preserved" {
   command = apply
 
@@ -416,7 +341,7 @@ run "kafka_private_hosted_zone_resolves_to_nlb" {
   command = apply
 
   assert {
-    condition     = aws_route53_zone.kafka.name == "kafka.local" && one(aws_route53_zone.kafka.vpc).vpc_id == module.vpc.vpc_id
+    condition     = aws_route53_zone.kafka.name == "kafka.local" && one(aws_route53_zone.kafka.vpc).vpc_id == var.vpc_id
     error_message = "kafka.local の Private Hosted Zone が VPC に紐付いていない"
   }
 
@@ -463,28 +388,14 @@ run "network_settings_come_from_variables" {
   command = apply
 
   variables {
-    vpc_cidr                    = "10.1.0.0/16"
-    public_subnet_cidrs         = ["10.1.0.0/24", "10.1.1.0/24"]
-    private_subnet_cidrs        = ["10.1.2.0/24", "10.1.3.0/24"]
     enable_interface_endpoints  = true
     interface_endpoint_services = ["logs"]
     nlb_name                    = "custom-kafka-nlb"
-    nat_gateways                = 2
     target_group_health_check = {
       interval            = 30
       healthy_threshold   = 3
       unhealthy_threshold = 4
     }
-  }
-
-  assert {
-    condition     = module.vpc.vpc_cidr_block == "10.1.0.0/16" && length(module.vpc.private_subnets) == 2 && length(module.vpc.public_subnets) == 2
-    error_message = "vpc_cidr と subnet の CIDR 数（= AZ 数）が variables から決まっていない"
-  }
-
-  assert {
-    condition     = length(module.vpc.natgw_ids) == 2
-    error_message = "NAT Gateway が AZ ごと（AZ 数と同数）に作られていない"
   }
 
   assert {
@@ -515,12 +426,60 @@ run "network_settings_come_from_variables" {
   }
 }
 
-run "public_and_private_subnets_must_pair_up_per_az" {
+# VPC と Subnet は Terraform の管理外。ID を受け取り、CIDR や AZ は data source で読むだけで、作成・変更しない
+run "existing_vpc_and_subnets_are_referenced_by_id" {
+  command = apply
+
+  assert {
+    condition = (
+      output.vpc_id == "vpc-0123456789abcdef0"
+      && output.vpc_cidr_block == "10.0.0.0/16"
+      && output.private_subnet_ids == tolist(["subnet-aaaa", "subnet-bbbb", "subnet-cccc"])
+    )
+    error_message = "既存の VPC / Subnet の ID と CIDR が出力されていない"
+  }
+}
+
+# 別の VPC の Subnet が混ざると、NLB や EKS の作成で失敗する（または意図しない VPC に作られる）
+run "subnets_in_another_vpc_are_rejected" {
+  command = plan
+
+  override_data {
+    target = data.aws_subnet.private["subnet-bbbb"]
+    values = { vpc_id = "vpc-other", availability_zone = "ap-northeast-1c" }
+  }
+
+  expect_failures = [output.private_subnet_ids]
+}
+
+# EKS のコントロールプレーンは 2 つ以上の AZ の subnet を要求する
+run "subnets_in_a_single_az_are_rejected" {
   command = plan
 
   variables {
-    public_subnet_cidrs = ["10.0.0.0/24"]
+    private_subnet_ids = ["subnet-aaaa"]
+    node_subnet_id     = "subnet-aaaa"
   }
 
-  expect_failures = [var.public_subnet_cidrs]
+  expect_failures = [output.private_subnet_ids]
+}
+
+# ノードを置く subnet は、EKS のコントロールプレーン用に渡した subnet の中から選ぶ
+run "node_subnet_must_be_one_of_the_private_subnets" {
+  command = plan
+
+  variables {
+    node_subnet_id = "subnet-zzzz"
+  }
+
+  expect_failures = [var.node_subnet_id]
+}
+
+run "node_subnet_is_exposed_for_other_modules" {
+  command = apply
+
+  assert {
+    condition     = output.node_subnet_id == "subnet-bbbb"
+    error_message = "node_subnet_id が出力されていない"
+  }
 }

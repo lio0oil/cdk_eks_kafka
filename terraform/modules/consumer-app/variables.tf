@@ -5,7 +5,7 @@ variable "cluster_name" {
 
 variable "subnet_ids" {
   type        = list(string)
-  description = "ESM のポーラー ENI を置く subnet。kafka_single_az=true の環境では NLB・nodegroup と同じ 1 AZ だけを渡す"
+  description = "ESM のポーラー ENI を置く subnet。AZ 跨ぎのデータ転送料を避けるため、NLB・nodegroup と同じ subnet を渡す"
 }
 
 variable "esm_security_group_id" {

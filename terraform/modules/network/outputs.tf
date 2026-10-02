@@ -1,14 +1,31 @@
 output "vpc_id" {
-  value = module.vpc.vpc_id
+  value = var.vpc_id
 }
 
 output "vpc_cidr_block" {
-  value = module.vpc.vpc_cidr_block
+  value = data.aws_vpc.this.cidr_block
+}
+
+output "node_subnet_id" {
+  description = "Kafka・system のノード、NLB、ESM を置く subnet"
+  value       = var.node_subnet_id
 }
 
 output "private_subnet_ids" {
-  description = "AZ 順の private subnet ID。先頭が kafka_single_az=true のときに使う 1 AZ 目"
-  value       = module.vpc.private_subnets
+  description = "EKS のコントロールプレーン用の private subnet ID"
+  value       = var.private_subnet_ids
+
+  # 別の VPC の Subnet が混ざると NLB や EKS の作成が失敗する（または意図しない VPC に作られる）
+  precondition {
+    condition     = alltrue([for s in data.aws_subnet.private : s.vpc_id == var.vpc_id])
+    error_message = "private_subnet_ids に、vpc_id の VPC に属さない subnet が含まれています。"
+  }
+
+  # EKS のコントロールプレーンは 2 つ以上の AZ の subnet を要求する
+  precondition {
+    condition     = length(distinct([for s in data.aws_subnet.private : s.availability_zone])) >= 2
+    error_message = "private_subnet_ids は 2 つ以上の AZ にまたがる必要があります。"
+  }
 }
 
 output "kafka_nlb_dns_name" {

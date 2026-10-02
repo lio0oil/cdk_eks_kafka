@@ -8,8 +8,6 @@ admin_role_name    = "eks-cluster-admin-eks-cluster-dev"
 # 管理者として追加登録する IAM Role（SSO など）。CDK の `-c console-role-arns` に相当
 console_role_arns = []
 
-nat_gateways               = 1
-kafka_single_az            = true
 enable_interface_endpoints = false
 enable_vpc_flow_logs       = false
 log_force_destroy          = true
@@ -51,10 +49,13 @@ kafka_broker_instance_type = "t4g.large"
 kafka_controller_instance_type = "t4g.medium"
 kafka_controller_count         = 3
 
-# ネットワーク。private subnet の数が使う AZ の数になる
-vpc_cidr             = "10.0.0.0/16"
-public_subnet_cidrs  = ["10.0.0.0/24", "10.0.1.0/24", "10.0.2.0/24"]
-private_subnet_cidrs = ["10.0.3.0/24", "10.0.4.0/24", "10.0.5.0/24"]
+# 既存の VPC と subnet の ID（Terraform の管理外）。下の値は仮のもので、適用前に VPC の管理側から受け取った値へ置き換える。
+# NAT Gateway・ルートテーブル・S3 Gateway Endpoint も VPC の管理側が用意する。
+vpc_id = "vpc-00000000000000000"
+# EKS のコントロールプレーン用の private subnet。2 つ以上の AZ にまたがること
+private_subnet_ids = ["subnet-0aaaaaaaaaaaaaaaa", "subnet-0bbbbbbbbbbbbbbbb", "subnet-0cccccccccccccccc"]
+# Kafka・system のノード、NLB、ESM を置く subnet。上の private_subnet_ids の中から 1 つ選ぶ
+node_subnet_id = "subnet-0aaaaaaaaaaaaaaaa"
 
 # 機微データやクレデンシャルを運ぶ API だけを PrivateLink に固定する（enable_interface_endpoints=true のとき）
 interface_endpoint_services = ["ecr.api", "ecr.dkr", "logs", "eks-auth"]

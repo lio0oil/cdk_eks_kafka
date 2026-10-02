@@ -49,7 +49,7 @@ module "flow_log_bucket" {
 resource "aws_flow_log" "vpc" {
   count = var.enable_vpc_flow_logs ? 1 : 0
 
-  vpc_id               = module.vpc.vpc_id
+  vpc_id               = var.vpc_id
   traffic_type         = "ALL"
   log_destination_type = "s3"
   log_destination      = module.flow_log_bucket[0].arn

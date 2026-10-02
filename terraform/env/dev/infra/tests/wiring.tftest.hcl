@@ -4,9 +4,9 @@
 # command = apply は mock provider に対する適用で、実 AWS には触れない。
 
 mock_provider "aws" {
-  mock_data "aws_availability_zones" {
+  mock_data "aws_vpc" {
     defaults = {
-      names = ["ap-northeast-1a", "ap-northeast-1c", "ap-northeast-1d"]
+      cidr_block = "10.0.0.0/16"
     }
   }
 
@@ -69,6 +69,28 @@ mock_provider "aws" {
   }
 }
 
+# VPC と Subnet は Terraform の管理外。tfvars には環境固有の ID を書かないため、テストでは固定の値を与える
+variables {
+  vpc_id             = "vpc-0123456789abcdef0"
+  private_subnet_ids = ["subnet-aaaa", "subnet-bbbb", "subnet-cccc"]
+  node_subnet_id     = "subnet-bbbb"
+}
+
+override_data {
+  target = module.network.data.aws_subnet.private["subnet-aaaa"]
+  values = { vpc_id = "vpc-0123456789abcdef0", availability_zone = "ap-northeast-1a" }
+}
+
+override_data {
+  target = module.network.data.aws_subnet.private["subnet-bbbb"]
+  values = { vpc_id = "vpc-0123456789abcdef0", availability_zone = "ap-northeast-1c" }
+}
+
+override_data {
+  target = module.network.data.aws_subnet.private["subnet-cccc"]
+  values = { vpc_id = "vpc-0123456789abcdef0", availability_zone = "ap-northeast-1d" }
+}
+
 run "dev_tfvars_flow_into_every_module" {
   command = apply
 
@@ -111,13 +133,13 @@ run "values_shared_with_the_other_layers_are_exposed" {
   }
 }
 
-# kafka_single_az=true では nodegroup・NLB・ESM を 1 AZ 目に固定し、false では全 AZ に置く
-run "kafka_subnets_follow_kafka_single_az" {
+# Kafka・system のノード、NLB、ESM は、tfvars で選んだ 1 つの subnet に揃える
+run "kafka_subnets_follow_the_node_subnet" {
   command = apply
 
   assert {
-    condition     = length(output.kafka_subnet_ids) == (var.kafka_single_az ? 1 : length(var.private_subnet_cidrs))
-    error_message = "kafka_single_az に応じて Kafka 系の subnet が 1 AZ / 全 AZ にならない"
+    condition     = output.kafka_subnet_ids == [var.node_subnet_id]
+    error_message = "Kafka 系（nodegroup / NLB / ESM）の subnet が node_subnet_id の 1 つに揃っていない"
   }
 }
 
@@ -134,12 +156,10 @@ run "broker_count_flows_into_the_nlb" {
   }
 }
 
-run "multi_az_settings_are_accepted" {
+run "hardened_settings_are_accepted" {
   command = apply
 
   variables {
-    kafka_single_az            = false
-    nat_gateways               = 3
     enable_interface_endpoints = true
     enable_vpc_flow_logs       = true
     log_force_destroy          = false
@@ -148,7 +168,7 @@ run "multi_az_settings_are_accepted" {
   }
 
   assert {
-    condition     = length(output.kafka_subnet_ids) == 3
-    error_message = "kafka_single_az=false で Kafka 系の subnet が全 AZ にならない"
+    condition     = output.cluster_name == var.cluster_name
+    error_message = "Interface Endpoint・Flow Logs・削除保護・ログを有効にした設定で apply が通らない"
   }
 }

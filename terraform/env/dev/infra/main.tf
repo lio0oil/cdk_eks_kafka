@@ -22,11 +22,9 @@ module "network" {
   source = "../../../modules/network"
 
   cluster_name                = var.cluster_name
-  vpc_cidr                    = var.vpc_cidr
-  public_subnet_cidrs         = var.public_subnet_cidrs
-  private_subnet_cidrs        = var.private_subnet_cidrs
-  nat_gateways                = var.nat_gateways
-  kafka_single_az             = var.kafka_single_az
+  vpc_id                      = var.vpc_id
+  private_subnet_ids          = var.private_subnet_ids
+  node_subnet_id              = var.node_subnet_id
   enable_interface_endpoints  = var.enable_interface_endpoints
   interface_endpoint_services = var.interface_endpoint_services
   enable_vpc_flow_logs        = var.enable_vpc_flow_logs
@@ -45,9 +43,9 @@ module "eks" {
   kubernetes_version = var.kubernetes_version
   subnet_ids         = module.network.private_subnet_ids
 
-  # kafka_single_az=true では nodegroup も NLB と同じ 1 AZ 目に固定する。コントロールプレーンの
-  # ENI には複数 AZ の subnet が必須なため、VPC 自体は 3 AZ のまま nodegroup の配置先だけ絞る。
-  nodegroup_subnet_ids = var.kafka_single_az ? slice(module.network.private_subnet_ids, 0, 1) : module.network.private_subnet_ids
+  # Kafka・system の nodegroup は、コントロールプレーン用の subnet の中から選んだ 1 つ（NLB・ESM と同じ）に置く。
+  # コントロールプレーンの ENI には複数 AZ の subnet が必須なため、subnet_ids は全 AZ のまま渡す。
+  nodegroup_subnet_ids = [var.node_subnet_id]
 
   admin_role_arn            = module.admin_role.role_arn
   console_role_arns         = var.console_role_arns
@@ -91,7 +89,7 @@ module "test_ec2" {
   source = "../../../modules/test-ec2"
 
   vpc_id             = module.network.vpc_id
-  subnet_id          = module.network.private_subnet_ids[0]
+  subnet_id          = module.network.node_subnet_id
   kubernetes_version = var.kubernetes_version
   instance_type      = var.test_ec2_instance_type
 }

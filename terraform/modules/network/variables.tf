@@ -3,39 +3,24 @@ variable "cluster_name" {
   description = "リソース名の接頭辞に使うクラスター名"
 }
 
-variable "vpc_cidr" {
+variable "vpc_id" {
   type        = string
-  description = "VPC の CIDR"
+  description = "既存の VPC の ID（Terraform の管理外）"
 }
 
-variable "public_subnet_cidrs" {
+variable "private_subnet_ids" {
   type        = list(string)
-  description = "public subnet の CIDR。AZ ごとに 1 つ"
+  description = "EKS のコントロールプレーン用の既存の private subnet の ID（Terraform の管理外）。2 つ以上の AZ にまたがること。ノードを置く subnet は node_subnet_id で、この中から 1 つ選ぶ"
+}
+
+variable "node_subnet_id" {
+  type        = string
+  description = "Kafka・system のノード、NLB、ESM を置く subnet。private_subnet_ids（EKS のコントロールプレーン用）の中から 1 つ選ぶ。1 AZ に揃えるため cross-zone は無効にする"
 
   validation {
-    condition     = length(var.public_subnet_cidrs) == length(var.private_subnet_cidrs)
-    error_message = "public_subnet_cidrs と private_subnet_cidrs は AZ ごとに 1 つずつ、同じ数を指定してください。"
+    condition     = contains(var.private_subnet_ids, var.node_subnet_id)
+    error_message = "node_subnet_id は private_subnet_ids のいずれかを指定してください。"
   }
-}
-
-variable "private_subnet_cidrs" {
-  type        = list(string)
-  description = "private subnet の CIDR。AZ ごとに 1 つ。この数が使う AZ の数になる"
-}
-
-variable "nat_gateways" {
-  type        = number
-  description = "NAT Gateway の台数。1 なら 1 台を共有し、AZ 数と同じなら AZ ごとに配置する"
-
-  validation {
-    condition     = var.nat_gateways == 1 || var.nat_gateways == length(var.private_subnet_cidrs)
-    error_message = "nat_gateways は 1（共有）か AZ 数（private_subnet_cidrs の数、AZ ごと）のいずれかを指定してください。"
-  }
-}
-
-variable "kafka_single_az" {
-  type        = bool
-  description = "Kafka NLB を 1 AZ 目の private subnet だけに置くか。true の場合 cross-zone は無効にする"
 }
 
 variable "enable_interface_endpoints" {

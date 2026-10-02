@@ -19,8 +19,8 @@ output "vpc_id" {
 }
 
 output "kafka_subnet_ids" {
-  description = "Kafka 系（nodegroup / NLB / ESM）を置く subnet。kafka_single_az=true では 1 AZ 目だけ"
-  value       = var.kafka_single_az ? slice(module.network.private_subnet_ids, 0, 1) : module.network.private_subnet_ids
+  description = "Kafka 系（nodegroup / NLB / ESM）を置く subnet。node_subnet_id の 1 つだけ"
+  value       = [var.node_subnet_id]
 }
 
 output "broker_count" {

@@ -15,7 +15,7 @@ variable "subnet_ids" {
 
 variable "nodegroup_subnet_ids" {
   type        = list(string)
-  description = "nodegroup を置く subnet。kafka_single_az=true の環境では 1 AZ 目だけを渡す"
+  description = "Kafka・system の nodegroup を置く subnet。コントロールプレーン用の subnet の中から選んだものを渡す"
 }
 
 variable "admin_role_arn" {

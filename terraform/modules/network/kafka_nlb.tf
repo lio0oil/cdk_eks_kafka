@@ -5,15 +5,15 @@ locals {
 resource "aws_security_group" "kafka_nlb" {
   name        = "${var.cluster_name}-kafka-nlb"
   description = "Kafka shared NLB"
-  vpc_id      = module.vpc.vpc_id
+  vpc_id      = var.vpc_id
 }
 
 resource "aws_vpc_security_group_ingress_rule" "kafka_nlb" {
   for_each = local.nlb_ports_by_name
 
   security_group_id = aws_security_group.kafka_nlb.id
-  description       = "from ${module.vpc.vpc_cidr_block}:${each.value.listener_port}"
-  cidr_ipv4         = module.vpc.vpc_cidr_block
+  description       = "from ${data.aws_vpc.this.cidr_block}:${each.value.listener_port}"
+  cidr_ipv4         = data.aws_vpc.this.cidr_block
   ip_protocol       = "tcp"
   from_port         = each.value.listener_port
   to_port           = each.value.listener_port
@@ -27,16 +27,16 @@ resource "aws_vpc_security_group_egress_rule" "kafka_nlb_all" {
 }
 
 # 再作成すると ARN が変わり PrivateLink が壊れるため、この NLB の変更は慎重に行う。
-# kafka_single_az=true では NLB も Kafka nodegroup と同じ 1 AZ に揃える。NLB が multi-AZ のまま
-# ターゲットだけ 1 AZ に寄ると他 AZ の NLB ノードから到達するのに cross-zone が必須になり、
-# AZ 跨ぎのデータ転送料が発生するため。
+# NLB は Kafka のノードと同じ subnet（node_subnet_id）だけに置く。NLB が複数 AZ のままターゲットだけ
+# 1 AZ に寄ると、他 AZ の NLB ノードからターゲットへ到達するのに cross-zone が必須になり、
+# AZ 跨ぎのデータ転送料が発生するため、cross-zone は無効にする。
 resource "aws_lb" "kafka" {
   name                             = var.nlb_name
   load_balancer_type               = "network"
   internal                         = true
   security_groups                  = [aws_security_group.kafka_nlb.id]
-  subnets                          = var.kafka_single_az ? slice(module.vpc.private_subnets, 0, 1) : module.vpc.private_subnets
-  enable_cross_zone_load_balancing = !var.kafka_single_az
+  subnets                          = [var.node_subnet_id]
+  enable_cross_zone_load_balancing = false
   enable_deletion_protection       = false
 }
 
@@ -52,7 +52,7 @@ resource "aws_lb_target_group" "kafka" {
   port               = var.kafka_target_port
   protocol           = "TCP"
   target_type        = "ip"
-  vpc_id             = module.vpc.vpc_id
+  vpc_id             = var.vpc_id
   preserve_client_ip = "true"
 
   health_check {

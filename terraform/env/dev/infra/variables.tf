@@ -28,14 +28,19 @@ variable "console_role_arns" {
   description = "管理者として追加登録する IAM Role の ARN（SSO など）"
 }
 
-variable "nat_gateways" {
-  type        = number
-  description = "NAT Gateway の台数（1 または 3）"
+variable "vpc_id" {
+  type        = string
+  description = "既存の VPC の ID。VPC・Subnet・NAT Gateway・ルートテーブル・S3 Gateway Endpoint は Terraform の管理外（VPC の管理側が用意する）"
 }
 
-variable "kafka_single_az" {
-  type        = bool
-  description = "Kafka 系の nodegroup と NLB を 1 AZ 目に固定するか"
+variable "private_subnet_ids" {
+  type        = list(string)
+  description = "EKS のコントロールプレーン用の既存の private subnet の ID。2 つ以上の AZ にまたがること"
+}
+
+variable "node_subnet_id" {
+  type        = string
+  description = "Kafka・system のノード、NLB、ESM を置く subnet。private_subnet_ids の中から 1 つ選ぶ"
 }
 
 variable "enable_interface_endpoints" {
@@ -101,21 +106,6 @@ variable "kafka_controller_instance_type" {
 variable "kafka_controller_count" {
   type        = number
   description = "KRaft controller の replica 数（奇数推奨、通常 3）"
-}
-
-variable "vpc_cidr" {
-  type        = string
-  description = "VPC の CIDR"
-}
-
-variable "public_subnet_cidrs" {
-  type        = list(string)
-  description = "public subnet の CIDR。AZ ごとに 1 つ"
-}
-
-variable "private_subnet_cidrs" {
-  type        = list(string)
-  description = "private subnet の CIDR。AZ ごとに 1 つ。この数が使う AZ の数になる"
 }
 
 variable "interface_endpoint_services" {

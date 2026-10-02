@@ -1,10 +1,3 @@
-resource "aws_vpc_endpoint" "s3" {
-  vpc_id            = module.vpc.vpc_id
-  service_name      = "com.amazonaws.${data.aws_region.current.region}.s3"
-  vpc_endpoint_type = "Gateway"
-  route_table_ids   = concat(module.vpc.private_route_table_ids, module.vpc.public_route_table_ids)
-}
-
 # 機微データやクレデンシャルを運ぶ API だけを PrivateLink に固定する（NAT は残す）。
 # 制御メタデータしか流れない API（elb / ec2 / sns 等）は固定費に見合わないため対象外。
 locals {
@@ -16,15 +9,15 @@ resource "aws_security_group" "interface_endpoint" {
 
   name        = "${var.cluster_name}-vpc-endpoints"
   description = "Interface VPC Endpoints (HTTPS from within the VPC)"
-  vpc_id      = module.vpc.vpc_id
+  vpc_id      = var.vpc_id
 }
 
 resource "aws_vpc_security_group_ingress_rule" "interface_endpoint_https" {
   count = var.enable_interface_endpoints ? 1 : 0
 
   security_group_id = aws_security_group.interface_endpoint[0].id
-  description       = "from ${module.vpc.vpc_cidr_block}:443"
-  cidr_ipv4         = module.vpc.vpc_cidr_block
+  description       = "from ${data.aws_vpc.this.cidr_block}:443"
+  cidr_ipv4         = data.aws_vpc.this.cidr_block
   ip_protocol       = "tcp"
   from_port         = 443
   to_port           = 443
@@ -42,10 +35,10 @@ resource "aws_vpc_security_group_egress_rule" "interface_endpoint_all" {
 resource "aws_vpc_endpoint" "interface" {
   for_each = local.interface_endpoint_services
 
-  vpc_id              = module.vpc.vpc_id
+  vpc_id              = var.vpc_id
   service_name        = "com.amazonaws.${data.aws_region.current.region}.${each.key}"
   vpc_endpoint_type   = "Interface"
   private_dns_enabled = true
-  subnet_ids          = module.vpc.private_subnets
+  subnet_ids          = var.private_subnet_ids
   security_group_ids  = [aws_security_group.interface_endpoint[0].id]
 }
