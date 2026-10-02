@@ -64,38 +64,38 @@ locals {
 # Kafka broker 用と Cruise Control 用は別 ConfigMap（名前・key が異なる）のため 1 つに統合しない。
 # ファイル自体は公式 examples/metrics/ の配置に合わせ monitoring/ 側にあるが、Kafka CR が
 # この ConfigMap に依存するため、apply の所有権は kafka module が持つ。
-resource "kubectl_manifest" "kafka_metrics" {
-  yaml_body = file("${var.monitoring_manifest_dir}/kafka-metrics.yaml")
+resource "kubernetes_manifest" "kafka_metrics" {
+  manifest = yamldecode(file("${var.monitoring_manifest_dir}/kafka-metrics.yaml"))
 }
 
-resource "kubectl_manifest" "cruise_control_metrics" {
-  yaml_body = file("${var.monitoring_manifest_dir}/kafka-cruise-control-metrics.yaml")
+resource "kubernetes_manifest" "cruise_control_metrics" {
+  manifest = yamldecode(file("${var.monitoring_manifest_dir}/kafka-cruise-control-metrics.yaml"))
 }
 
 # broker/controller の I/O 特性は Prometheus/Alertmanager と異なるため、default の gp3 を共有せず
 # 専用の StorageClass を用意する（IOPS/throughput を監視系と切り離して個別にチューニングできる）。
-resource "kubectl_manifest" "gp3_kafka_storage_class" {
-  yaml_body = file("${var.kafka_manifest_dir}/gp3-kafka-storageclass.yaml")
+resource "kubernetes_manifest" "gp3_kafka_storage_class" {
+  manifest = yamldecode(file("${var.kafka_manifest_dir}/gp3-kafka-storageclass.yaml"))
 }
 
 # KafkaNodePool の CRD は Strimzi Operator chart が導入する。chart 未導入のクラスタに apply すると
 # CRD 未登録で失敗するため、呼び出し側で addons module への依存を張る。
-resource "kubectl_manifest" "controller_pool" {
-  yaml_body = local.controller_pool_yaml
+resource "kubernetes_manifest" "controller_pool" {
+  manifest = yamldecode(local.controller_pool_yaml)
 }
 
-resource "kubectl_manifest" "broker_pool" {
-  yaml_body = local.broker_pool_yaml
+resource "kubernetes_manifest" "broker_pool" {
+  manifest = yamldecode(local.broker_pool_yaml)
 }
 
-resource "kubectl_manifest" "kafka_cluster" {
-  yaml_body = yamlencode(local.kafka_cluster)
+resource "kubernetes_manifest" "kafka_cluster" {
+  manifest = local.kafka_cluster
 
   depends_on = [
-    kubectl_manifest.kafka_metrics,
-    kubectl_manifest.cruise_control_metrics,
-    kubectl_manifest.controller_pool,
-    kubectl_manifest.broker_pool,
+    kubernetes_manifest.kafka_metrics,
+    kubernetes_manifest.cruise_control_metrics,
+    kubernetes_manifest.controller_pool,
+    kubernetes_manifest.broker_pool,
   ]
 }
 
@@ -106,10 +106,10 @@ resource "kubectl_manifest" "kafka_cluster" {
 # この非対称は意図的であり統一しない。TargetGroup は ip 型のため、LBC は Pod IP を直接 target
 # 登録し、ローリング更新による Pod の移動にも追従する。
 # Service の port は number ではなく name（tcp-<listener>）で参照する。
-resource "kubectl_manifest" "target_group_binding" {
+resource "kubernetes_manifest" "target_group_binding" {
   for_each = var.target_group_arns
 
-  yaml_body = templatestring(
+  manifest = yamldecode(templatestring(
     local.target_group_binding_template,
     {
       BINDING_NAME     = each.key == "Bootstrap" ? "kafka-${var.external_listener_name}-bootstrap" : "kafka-broker-${trimprefix(each.key, "Broker")}"
@@ -120,18 +120,18 @@ resource "kubectl_manifest" "target_group_binding" {
       TARGET_PORT      = tostring(var.target_port)
       VPC_ID           = var.vpc_id
     },
-  )
+  ))
 
-  depends_on = [kubectl_manifest.kafka_cluster]
+  depends_on = [kubernetes_manifest.kafka_cluster]
 }
 
 # Strimzi Topic Operator（entityOperator）が KafkaTopic CR を監視して実 Kafka に Topic を作成する。
 # Operator は Kafka CR より後に起動するため、kafka_cluster への依存だけで apply 順序は十分。
-resource "kubectl_manifest" "test_topic" {
-  yaml_body = templatestring(
+resource "kubernetes_manifest" "test_topic" {
+  manifest = yamldecode(templatestring(
     local.test_topic_template,
     { RETENTION_MS = var.topic_retention_ms },
-  )
+  ))
 
-  depends_on = [kubectl_manifest.kafka_cluster]
+  depends_on = [kubernetes_manifest.kafka_cluster]
 }

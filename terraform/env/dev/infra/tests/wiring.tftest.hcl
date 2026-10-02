@@ -83,7 +83,7 @@ run "dev_tfvars_flow_into_every_module" {
   }
 }
 
-# k8s 層は broker 数・controller 数を infra の出力から受け取る（2 つの tfvars に重ねて持たない）
+# k8s-workloads 層は broker 数・controller 数を infra の出力から受け取る（複数の tfvars に重ねて持たない）
 run "values_shared_with_the_other_layers_are_exposed" {
   command = apply
 

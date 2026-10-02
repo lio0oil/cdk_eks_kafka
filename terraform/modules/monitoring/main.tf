@@ -125,8 +125,8 @@ resource "aws_sns_topic_subscription" "alertmanager_log_forwarder" {
 # Pod Identity の紐付け先 ServiceAccount は、Namespace が存在しないと作れない。
 # chart 側では ServiceAccount を作らない（create: false）ため、ここで作っておく。
 
-resource "kubectl_manifest" "namespace" {
-  yaml_body = file("${var.manifest_dir}/namespace.yaml")
+resource "kubernetes_manifest" "namespace" {
+  manifest = yamldecode(file("${var.manifest_dir}/namespace.yaml"))
 }
 
 resource "kubernetes_service_account_v1" "fluent_bit" {
@@ -135,7 +135,7 @@ resource "kubernetes_service_account_v1" "fluent_bit" {
     namespace = "monitoring"
   }
 
-  depends_on = [kubectl_manifest.namespace]
+  depends_on = [kubernetes_manifest.namespace]
 }
 
 resource "kubernetes_service_account_v1" "grafana" {
@@ -144,7 +144,7 @@ resource "kubernetes_service_account_v1" "grafana" {
     namespace = "monitoring"
   }
 
-  depends_on = [kubectl_manifest.namespace]
+  depends_on = [kubernetes_manifest.namespace]
 }
 
 resource "kubernetes_service_account_v1" "alertmanager" {
@@ -153,7 +153,7 @@ resource "kubernetes_service_account_v1" "alertmanager" {
     namespace = "monitoring"
   }
 
-  depends_on = [kubectl_manifest.namespace]
+  depends_on = [kubernetes_manifest.namespace]
 }
 
 # ── Pod Identity ───────────────────────────────────────────────────────────
@@ -239,79 +239,12 @@ resource "helm_release" "kube_prometheus_stack" {
   })]
 
   depends_on = [
-    kubectl_manifest.namespace,
+    kubernetes_manifest.namespace,
     kubernetes_service_account_v1.grafana,
     kubernetes_service_account_v1.alertmanager,
     module.grafana_identity,
     module.alertmanager_identity,
   ]
-}
-
-# ── Strimzi の監視設定 ─────────────────────────────────────────────────────
-# Prometheus Operator が CRD（PodMonitor / PrometheusRule）を提供するため、いずれも chart の Ready 後に
-# apply する。公式 examples/metrics/ のアラート名・閾値・メトリクス定義は編集せず、稼働コンポーネント
-# 分のみを採用している。
-
-locals {
-  pod_monitor_files = { for f in fileset(var.manifest_dir, "prometheus-install/pod-monitors/*.yaml") : trimsuffix(basename(f), ".yaml") => f }
-  dashboard_files   = { for f in fileset(var.manifest_dir, "grafana-dashboards/*.yaml") : trimsuffix(basename(f), ".yaml") => f }
-  rule_files        = { for f in fileset(var.manifest_dir, "prometheus-install/prometheus-rules/*.yaml") : trimsuffix(basename(f), ".yaml") => f }
-
-  # ksm.yaml は `---` 区切りの複数ドキュメント。先頭の `---` も拾えるよう改行を前置してから分割する
-  ksm_documents = {
-    for d in [for doc in split("\n---\n", "\n${file("${var.manifest_dir}/kube-state-metrics/ksm.yaml")}") : doc if trimspace(doc) != ""] :
-    "${yamldecode(d).kind}-${yamldecode(d).metadata.name}" => d
-  }
-}
-
-# broker / controller / cruise-control / kafka-exporter を kafka と entity-operator、cluster-operator の
-# PodMonitor で収集する。strimzi-system namespace は Strimzi chart が作るため、呼び出し側で addons module に
-# 依存させる。
-resource "kubectl_manifest" "pod_monitor" {
-  for_each = local.pod_monitor_files
-
-  yaml_body  = file("${var.manifest_dir}/${each.value}")
-  depends_on = [helm_release.kube_prometheus_stack]
-}
-
-# kube-prometheus-stack の sidecar が monitoring namespace の grafana_dashboard=1 ラベルの ConfigMap を
-# 自動で取り込む。
-resource "kubectl_manifest" "grafana_dashboard" {
-  for_each = local.dashboard_files
-
-  yaml_body  = file("${var.manifest_dir}/${each.value}")
-  depends_on = [helm_release.kube_prometheus_stack]
-}
-
-resource "kubectl_manifest" "prometheus_rule" {
-  for_each = local.rule_files
-
-  yaml_body  = file("${var.manifest_dir}/${each.value}")
-  depends_on = [helm_release.kube_prometheus_stack]
-}
-
-# kube-prometheus-stack 同梱の kube-state-metrics は Strimzi の CRD を知らないため、Strimzi 公式の専用
-# インスタンスを別途 apply する。Kafka / KafkaTopic / KafkaUser 等の .status.conditions を
-# メトリクス化し、対応する PrometheusRule でアラートする。ClusterRole が Strimzi の CRD を参照するため、
-# 呼び出し側で addons module（Strimzi chart）に依存させる。
-resource "kubectl_manifest" "strimzi_ksm_config_map" {
-  yaml_body  = file("${var.manifest_dir}/kube-state-metrics/configmap.yaml")
-  depends_on = [kubectl_manifest.namespace]
-}
-
-resource "kubectl_manifest" "strimzi_kube_state_metrics" {
-  for_each = local.ksm_documents
-
-  yaml_body = each.value
-  depends_on = [
-    kubectl_manifest.strimzi_ksm_config_map,
-    helm_release.kube_prometheus_stack,
-  ]
-}
-
-resource "kubectl_manifest" "strimzi_ksm_prometheus_rule" {
-  yaml_body  = file("${var.manifest_dir}/kube-state-metrics/prometheus-rules.yaml")
-  depends_on = [helm_release.kube_prometheus_stack]
 }
 
 # ── Fluent Bit（ログ → CloudWatch Logs）──────────────────────────────────────

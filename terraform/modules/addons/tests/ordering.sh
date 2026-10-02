@@ -6,7 +6,7 @@ cd "$(dirname "$0")/.."
 source ../../scripts/graph.sh
 
 # watchNamespaces の対象 namespace が無いと Strimzi の RoleBinding 作成で Helm install が失敗する
-expect_dependency helm_release.strimzi kubectl_manifest.kafka_namespace
+expect_dependency helm_release.strimzi kubernetes_manifest.kafka_namespace
 
 # Pod Identity の Role と紐付け、紐付け先の ServiceAccount が無いうちに LBC の Pod が起動すると
 # クレデンシャルを取得できない

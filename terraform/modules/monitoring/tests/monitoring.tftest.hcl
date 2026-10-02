@@ -33,7 +33,6 @@ mock_provider "aws" {
 mock_provider "archive" {}
 mock_provider "helm" {}
 mock_provider "kubernetes" {}
-mock_provider "kubectl" {}
 
 variables {
   cluster_name                               = "eks-cluster-dev"
@@ -107,7 +106,7 @@ run "monitoring_namespace_and_service_accounts" {
   command = apply
 
   assert {
-    condition     = yamldecode(kubectl_manifest.namespace.yaml_body).metadata.name == "monitoring"
+    condition     = kubernetes_manifest.namespace.manifest.metadata.name == "monitoring"
     error_message = "monitoring Namespace が適用されていない"
   }
 
@@ -235,68 +234,6 @@ run "alertmanager_notifies_through_the_sns_topic_with_sigv4" {
       && yamldecode(helm_release.kube_prometheus_stack.values[0]).alertmanager.config.receivers[1].sns_configs[0].sigv4.region == "ap-northeast-1"
     )
     error_message = "Alertmanager の receiver が SNS Topic へ sigv4 で送る設定になっていない"
-  }
-}
-
-run "strimzi_pod_monitors_scrape_kafka_and_operators" {
-  command = apply
-
-  assert {
-    condition = (
-      toset(keys(kubectl_manifest.pod_monitor)) == toset(["kafka-pod-monitor", "cluster-operator-pod-monitor", "entity-operator-pod-monitor"])
-      && alltrue([for m in values(kubectl_manifest.pod_monitor) : yamldecode(m.yaml_body).kind == "PodMonitor"])
-    )
-    error_message = "Kafka / Cluster Operator / Entity Operator の PodMonitor 3 件になっていない"
-  }
-}
-
-run "grafana_dashboards_are_picked_up_by_the_sidecar" {
-  command = apply
-
-  assert {
-    condition     = length(kubectl_manifest.grafana_dashboard) == 5
-    error_message = "Grafana dashboard が 5 件（kafka / exporter / operators / cruise-control / kraft）になっていない"
-  }
-
-  assert {
-    condition = alltrue([
-      for d in values(kubectl_manifest.grafana_dashboard) :
-      yamldecode(d.yaml_body).kind == "ConfigMap" && yamldecode(d.yaml_body).metadata.labels["grafana_dashboard"] == "1"
-    ])
-    error_message = "dashboard が grafana_dashboard=1 ラベルの ConfigMap になっていない（sidecar が取り込めない）"
-  }
-}
-
-run "strimzi_prometheus_rules_are_applied_unmodified" {
-  command = apply
-
-  assert {
-    condition = (
-      length(kubectl_manifest.prometheus_rule) == 5
-      && alltrue([for r in values(kubectl_manifest.prometheus_rule) : yamldecode(r.yaml_body).kind == "PrometheusRule"])
-    )
-    error_message = "Strimzi の PrometheusRule 5 件が適用されていない"
-  }
-}
-
-# kube-prometheus-stack 同梱の kube-state-metrics は Strimzi の CRD を知らないため、
-# Strimzi 公式の専用インスタンスを別途 apply して CR のステータスを監視する
-run "strimzi_kube_state_metrics_has_its_own_instance" {
-  command = apply
-
-  assert {
-    condition = toset([for d in values(kubectl_manifest.strimzi_kube_state_metrics) : yamldecode(d.yaml_body).kind]) == toset([
-      "ServiceAccount", "ClusterRole", "ClusterRoleBinding", "Service", "Deployment", "ServiceMonitor",
-    ]) && length(kubectl_manifest.strimzi_kube_state_metrics) == 6
-    error_message = "Strimzi kube-state-metrics の 6 ドキュメントが分割して適用されていない"
-  }
-
-  assert {
-    condition = (
-      yamldecode(kubectl_manifest.strimzi_ksm_config_map.yaml_body).kind == "ConfigMap"
-      && yamldecode(kubectl_manifest.strimzi_ksm_prometheus_rule.yaml_body).kind == "PrometheusRule"
-    )
-    error_message = "Strimzi kube-state-metrics の ConfigMap / PrometheusRule が適用されていない"
   }
 }
 

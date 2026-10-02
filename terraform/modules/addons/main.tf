@@ -1,13 +1,13 @@
 # Kafka broker/controller と Prometheus/Alertmanager が共有する default StorageClass。
 # Kafka 専用の StorageClass（gp3-kafka）は単一消費者のため kafka module 側で管理する。
-resource "kubectl_manifest" "gp3_storage_class" {
-  yaml_body = file("${var.addons_manifest_dir}/gp3-storageclass.yaml")
+resource "kubernetes_manifest" "gp3_storage_class" {
+  manifest = yamldecode(file("${var.addons_manifest_dir}/gp3-storageclass.yaml"))
 }
 
 # Strimzi chart に watchNamespaces: ["kafka"] を渡すため、対象 namespace が事前に存在しないと
 # RoleBinding の作成時に Helm install が失敗する（namespaces "kafka" not found）。
-resource "kubectl_manifest" "kafka_namespace" {
-  yaml_body = file("${var.kafka_manifest_dir}/namespace.yaml")
+resource "kubernetes_manifest" "kafka_namespace" {
+  manifest = yamldecode(file("${var.kafka_manifest_dir}/namespace.yaml"))
 }
 
 resource "helm_release" "strimzi" {
@@ -37,7 +37,7 @@ resource "helm_release" "strimzi" {
     podDisruptionBudget = { enabled = true }
   })]
 
-  depends_on = [kubectl_manifest.kafka_namespace]
+  depends_on = [kubernetes_manifest.kafka_namespace]
 }
 
 # Strimzi の per-broker Service を NLB の TargetGroup に TargetGroupBinding 経由で動的にバインドする。

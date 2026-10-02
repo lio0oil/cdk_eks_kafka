@@ -18,18 +18,11 @@ locals {
   manifests_dir = "${path.module}/../../../../cdk/manifests"
 }
 
-# external listener の名前・port と brokers[] の注入設定を kafka-cluster.yaml から導出する。
-# infra の NLB と同じ入力（manifest と broker_count）から作るため、port の採番が一致する。
-module "kafka_config" {
-  source = "../../../modules/kafka-config"
-
-  manifest_dir    = "${local.manifests_dir}/kafka"
-  broker_count    = local.infra.broker_count
-  advertised_host = local.infra.kafka_private_dns_name
-}
-
 # infra の適用（nodegroup と、coredns / eks-pod-identity-agent を含む全 Managed Addon）が完了してから
 # 実行する。Pod は名前解決（coredns）と Pod Identity のクレデンシャル取得（agent）を要するため。
+# この層は CRD を提供する Helm（Strimzi・AWS LBC・kube-prometheus-stack）までを管理し、CRD に依存する
+# manifest（Kafka CR・TargetGroupBinding・PodMonitor など）は次の k8s-workloads 層が管理する。
+# kubernetes_manifest は plan 時に CRD のスキーマを要求するため、CRD を作る層と使う層を分けている。
 module "addons" {
   source = "../../../modules/addons"
 
@@ -49,31 +42,7 @@ module "addons" {
   kafka_manifest_dir           = "${local.manifests_dir}/kafka"
 }
 
-# KafkaNodePool の CRD は Strimzi chart、TargetGroupBinding の CRD と mutating webhook は AWS LBC が
-# 提供する。いずれも addons module の chart（wait=true）の Ready を待ってから apply する。
-module "kafka" {
-  source = "../../../modules/kafka"
-
-  kafka_manifest_dir      = "${local.manifests_dir}/kafka"
-  monitoring_manifest_dir = "${local.manifests_dir}/monitoring"
-  broker_count            = local.infra.broker_count
-  controller_count        = local.infra.kafka_controller_count
-  delete_claim            = var.kafka_delete_claim
-  broker_resources        = var.kafka_broker_resources
-  controller_resources    = var.kafka_controller_resources
-  external_listener_name  = module.kafka_config.external_listener_name
-  broker_configs          = module.kafka_config.broker_configs
-  target_group_arns       = local.infra.kafka_target_group_arns
-  target_port             = module.kafka_config.external_listener_port
-  nlb_security_group_id   = local.infra.kafka_nlb_security_group_id
-  vpc_id                  = local.infra.vpc_id
-  topic_retention_ms      = var.kafka_topic_retention_ms
-
-  depends_on = [module.addons]
-}
-
-# gp3 StorageClass（Prometheus / Alertmanager の PVC が要求）、kafka / strimzi-system の Namespace と
-# Strimzi の CRD（PodMonitor の対象 Namespace、kube-state-metrics の ClusterRole）は addons module が用意する。
+# gp3 StorageClass（Prometheus / Alertmanager の PVC が要求）は addons module が用意する。
 module "monitoring" {
   source = "../../../modules/monitoring"
 

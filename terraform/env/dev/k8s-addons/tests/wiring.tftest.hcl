@@ -1,4 +1,4 @@
-# infra の出力（remote state）と tfvars が各 module に渡ること、module 間の配線を mock で検証する。
+# infra の出力（remote state）と tfvars が各 module に渡ることを mock で検証する。
 # command = apply は mock provider に対する適用で、実 AWS・実クラスターには触れない。
 
 mock_provider "aws" {
@@ -55,7 +55,6 @@ mock_provider "aws" {
 mock_provider "archive" {}
 mock_provider "helm" {}
 mock_provider "kubernetes" {}
-mock_provider "kubectl" {}
 
 override_data {
   target = data.terraform_remote_state.infra
@@ -83,12 +82,9 @@ override_data {
   }
 }
 
-run "infra_outputs_flow_into_every_module" {
+# infra の出力（クラスター名・VPC）と tfvars が各 module に渡り、全リソースが apply できることを確認する。
+# module はいずれも出力を持たないため、apply の成功（for_each のキーが確定すること、各 provider の組み合わせ）
+# そのものが検証になる。
+run "infra_outputs_and_tfvars_flow_into_every_module" {
   command = apply
-
-  # broker_count は infra の出力が単一の真実の源。Bootstrap + broker 3 件の port が導出される
-  assert {
-    condition     = length(module.kafka_config.nlb_ports) == 4 && module.kafka_config.external_listener_port == 9094
-    error_message = "infra の broker_count から kafka-cluster.yaml 由来の port が導出されていない"
-  }
 }

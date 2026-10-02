@@ -4,7 +4,7 @@
 terraform {
   backend "s3" {
     bucket       = "ekscdk-tfstate-9025850b"
-    key          = "dev/k8s.tfstate"
+    key          = "dev/k8s-addons.tfstate"
     region       = "ap-northeast-1"
     encrypt      = true
     use_lockfile = true

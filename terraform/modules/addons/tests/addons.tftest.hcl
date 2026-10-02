@@ -8,7 +8,6 @@ mock_provider "aws" {
 
 mock_provider "helm" {}
 mock_provider "kubernetes" {}
-mock_provider "kubectl" {}
 
 variables {
   cluster_name          = "eks-cluster-dev"
@@ -32,8 +31,8 @@ run "gp3_is_the_default_storage_class" {
 
   assert {
     condition = (
-      yamldecode(kubectl_manifest.gp3_storage_class.yaml_body).metadata.name == "gp3"
-      && yamldecode(kubectl_manifest.gp3_storage_class.yaml_body).metadata.annotations["storageclass.kubernetes.io/is-default-class"] == "true"
+      kubernetes_manifest.gp3_storage_class.manifest.metadata.name == "gp3"
+      && kubernetes_manifest.gp3_storage_class.manifest.metadata.annotations["storageclass.kubernetes.io/is-default-class"] == "true"
     )
     error_message = "gp3 が default StorageClass として適用されていない"
   }
@@ -43,7 +42,7 @@ run "kafka_namespace_exists_before_strimzi_watches_it" {
   command = apply
 
   assert {
-    condition     = yamldecode(kubectl_manifest.kafka_namespace.yaml_body).metadata.name == "kafka"
+    condition     = kubernetes_manifest.kafka_namespace.manifest.metadata.name == "kafka"
     error_message = "kafka Namespace が適用されていない"
   }
 }

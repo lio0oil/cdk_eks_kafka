@@ -17,9 +17,9 @@ locals {
   manifests_dir = "${path.module}/../../../../cdk/manifests"
 }
 
-# 適用の順序は infra -> k8s -> app。ESM のポーラーは Kafka broker への到達性（k8s 層が NLB の
-# TargetGroup に broker を登録すること）が前提だが、層をまたぐ依存は値の受け渡しでは表せないため、
-# この順に適用する運用とする。
+# 適用の順序は infra -> k8s-addons -> k8s-workloads -> app。ESM のポーラーは Kafka broker への到達性
+# （k8s-workloads 層が NLB の TargetGroup に broker を登録すること）が前提だが、層をまたぐ依存は
+# 値の受け渡しでは表せないため、この順に適用する運用とする。
 module "consumer_app" {
   source = "../../../modules/consumer-app"
 

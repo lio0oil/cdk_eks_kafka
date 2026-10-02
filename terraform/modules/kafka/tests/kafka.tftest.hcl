@@ -1,4 +1,4 @@
-mock_provider "kubectl" {}
+mock_provider "kubernetes" {}
 
 variables {
   kafka_manifest_dir      = "../../../cdk/manifests/kafka"
@@ -48,8 +48,8 @@ run "jmx_metrics_config_maps_are_separate" {
 
   assert {
     condition = (
-      yamldecode(kubectl_manifest.kafka_metrics.yaml_body).metadata.name == "kafka-metrics"
-      && yamldecode(kubectl_manifest.cruise_control_metrics.yaml_body).metadata.name == "cruise-control-metrics"
+      kubernetes_manifest.kafka_metrics.manifest.metadata.name == "kafka-metrics"
+      && kubernetes_manifest.cruise_control_metrics.manifest.metadata.name == "cruise-control-metrics"
     )
     error_message = "Kafka / Cruise Control の JMX メトリクス ConfigMap が別々に適用されていない"
   }
@@ -59,7 +59,7 @@ run "kafka_has_its_own_storage_class" {
   command = apply
 
   assert {
-    condition     = yamldecode(kubectl_manifest.gp3_kafka_storage_class.yaml_body).metadata.name == "gp3-kafka"
+    condition     = kubernetes_manifest.gp3_kafka_storage_class.manifest.metadata.name == "gp3-kafka"
     error_message = "broker/controller 専用の gp3-kafka StorageClass が適用されていない"
   }
 }
@@ -69,20 +69,20 @@ run "controller_pool_gets_its_settings" {
 
   assert {
     condition = (
-      yamldecode(kubectl_manifest.controller_pool.yaml_body).metadata.name == "controller"
-      && yamldecode(kubectl_manifest.controller_pool.yaml_body).spec.replicas == 3
-      && yamldecode(kubectl_manifest.controller_pool.yaml_body).spec.storage.volumes[0].deleteClaim == true
-      && yamldecode(kubectl_manifest.controller_pool.yaml_body).spec.storage.volumes[0].size == "20Gi"
+      kubernetes_manifest.controller_pool.manifest.metadata.name == "controller"
+      && kubernetes_manifest.controller_pool.manifest.spec.replicas == 3
+      && kubernetes_manifest.controller_pool.manifest.spec.storage.volumes[0].deleteClaim == true
+      && kubernetes_manifest.controller_pool.manifest.spec.storage.volumes[0].size == "20Gi"
     )
     error_message = "controller pool の replicas / deleteClaim / storage が期待と異なる"
   }
 
   assert {
     condition = (
-      yamldecode(kubectl_manifest.controller_pool.yaml_body).spec.resources.requests.memory == "1Gi"
-      && yamldecode(kubectl_manifest.controller_pool.yaml_body).spec.resources.limits.memory == "2Gi"
-      && yamldecode(kubectl_manifest.controller_pool.yaml_body).spec.resources.requests.cpu == "250m"
-      && yamldecode(kubectl_manifest.controller_pool.yaml_body).spec.jvmOptions["-Xmx"] == "1024m"
+      kubernetes_manifest.controller_pool.manifest.spec.resources.requests.memory == "1Gi"
+      && kubernetes_manifest.controller_pool.manifest.spec.resources.limits.memory == "2Gi"
+      && kubernetes_manifest.controller_pool.manifest.spec.resources.requests.cpu == "250m"
+      && kubernetes_manifest.controller_pool.manifest.spec.jvmOptions["-Xmx"] == "1024m"
     )
     error_message = "controller pool の resources / jvmOptions が期待と異なる"
   }
@@ -106,18 +106,18 @@ run "broker_pool_follows_broker_count_and_settings" {
 
   assert {
     condition = (
-      yamldecode(kubectl_manifest.broker_pool.yaml_body).metadata.name == "broker"
-      && yamldecode(kubectl_manifest.broker_pool.yaml_body).spec.replicas == 5
-      && yamldecode(kubectl_manifest.broker_pool.yaml_body).spec.storage.volumes[0].deleteClaim == false
+      kubernetes_manifest.broker_pool.manifest.metadata.name == "broker"
+      && kubernetes_manifest.broker_pool.manifest.spec.replicas == 5
+      && kubernetes_manifest.broker_pool.manifest.spec.storage.volumes[0].deleteClaim == false
     )
     error_message = "broker_count / delete_claim が broker pool に反映されていない"
   }
 
   assert {
     condition = (
-      yamldecode(kubectl_manifest.broker_pool.yaml_body).spec.resources.requests.memory == "2Gi"
-      && yamldecode(kubectl_manifest.broker_pool.yaml_body).spec.resources.limits.cpu == "500m"
-      && yamldecode(kubectl_manifest.broker_pool.yaml_body).spec.jvmOptions["-Xms"] == "1024m"
+      kubernetes_manifest.broker_pool.manifest.spec.resources.requests.memory == "2Gi"
+      && kubernetes_manifest.broker_pool.manifest.spec.resources.limits.cpu == "500m"
+      && kubernetes_manifest.broker_pool.manifest.spec.jvmOptions["-Xms"] == "1024m"
     )
     error_message = "broker pool の resources / jvmOptions が期待と異なる"
   }
@@ -129,7 +129,7 @@ run "external_listener_gets_the_generated_brokers" {
 
   assert {
     condition = jsonencode([
-      for l in yamldecode(kubectl_manifest.kafka_cluster.yaml_body).spec.kafka.listeners : l.configuration.brokers if l.name == "external"
+      for l in kubernetes_manifest.kafka_cluster.manifest.spec.kafka.listeners : l.configuration.brokers if l.name == "external"
     ][0]) == jsonencode(var.broker_configs)
     error_message = "external listener の configuration.brokers が broker_configs と一致しない"
   }
@@ -137,9 +137,9 @@ run "external_listener_gets_the_generated_brokers" {
   # 注入は external listener だけに行い、他の listener や bootstrap の設定は壊さない
   assert {
     condition = (
-      [for l in yamldecode(kubectl_manifest.kafka_cluster.yaml_body).spec.kafka.listeners : l.port if l.name == "plain"][0] == 9092
-      && [for l in yamldecode(kubectl_manifest.kafka_cluster.yaml_body).spec.kafka.listeners : l.configuration.bootstrap.nodePort if l.name == "external"][0] == 30094
-      && yamldecode(kubectl_manifest.kafka_cluster.yaml_body).metadata.name == "kafka-cluster"
+      [for l in kubernetes_manifest.kafka_cluster.manifest.spec.kafka.listeners : l.port if l.name == "plain"][0] == 9092
+      && [for l in kubernetes_manifest.kafka_cluster.manifest.spec.kafka.listeners : l.configuration.bootstrap.nodePort if l.name == "external"][0] == 30094
+      && kubernetes_manifest.kafka_cluster.manifest.metadata.name == "kafka-cluster"
     )
     error_message = "external 以外の listener や bootstrap の設定が保持されていない"
   }
@@ -152,23 +152,23 @@ run "target_group_bindings_use_the_right_service_names" {
   # （kafka-cluster-kafka-<listener>-bootstrap）。broker 個別 Service だけが pool 名（broker）に依存する。
   assert {
     condition = (
-      yamldecode(kubectl_manifest.target_group_binding["Bootstrap"].yaml_body).metadata.name == "kafka-external-bootstrap"
-      && yamldecode(kubectl_manifest.target_group_binding["Bootstrap"].yaml_body).spec.serviceRef.name == "kafka-cluster-kafka-external-bootstrap"
-      && yamldecode(kubectl_manifest.target_group_binding["Broker1"].yaml_body).metadata.name == "kafka-broker-1"
-      && yamldecode(kubectl_manifest.target_group_binding["Broker1"].yaml_body).spec.serviceRef.name == "kafka-cluster-broker-1"
+      kubernetes_manifest.target_group_binding["Bootstrap"].manifest.metadata.name == "kafka-external-bootstrap"
+      && kubernetes_manifest.target_group_binding["Bootstrap"].manifest.spec.serviceRef.name == "kafka-cluster-kafka-external-bootstrap"
+      && kubernetes_manifest.target_group_binding["Broker1"].manifest.metadata.name == "kafka-broker-1"
+      && kubernetes_manifest.target_group_binding["Broker1"].manifest.spec.serviceRef.name == "kafka-cluster-broker-1"
     )
     error_message = "TargetGroupBinding の名前 / serviceRef.name が bootstrap と broker で期待どおりに非対称になっていない"
   }
 
   assert {
     condition = alltrue([
-      for k, b in kubectl_manifest.target_group_binding :
-      yamldecode(b.yaml_body).spec.serviceRef.port == "tcp-external"
-      && yamldecode(b.yaml_body).spec.targetGroupARN == var.target_group_arns[k]
-      && yamldecode(b.yaml_body).spec.targetType == "ip"
-      && yamldecode(b.yaml_body).spec.vpcID == "vpc-0123456789abcdef0"
-      && yamldecode(b.yaml_body).spec.networking.ingress[0].from[0].securityGroup.groupID == "sg-0123456789abcdef0"
-      && yamldecode(b.yaml_body).spec.networking.ingress[0].ports[0].port == 9094
+      for k, b in kubernetes_manifest.target_group_binding :
+      b.manifest.spec.serviceRef.port == "tcp-external"
+      && b.manifest.spec.targetGroupARN == var.target_group_arns[k]
+      && b.manifest.spec.targetType == "ip"
+      && b.manifest.spec.vpcID == "vpc-0123456789abcdef0"
+      && b.manifest.spec.networking.ingress[0].from[0].securityGroup.groupID == "sg-0123456789abcdef0"
+      && b.manifest.spec.networking.ingress[0].ports[0].port == 9094
     ])
     error_message = "TargetGroupBinding の port 名 / TargetGroup ARN / targetType / VPC / SG / port が期待と異なる"
   }
@@ -189,7 +189,7 @@ run "target_group_bindings_follow_target_groups" {
   }
 
   assert {
-    condition     = length(kubectl_manifest.target_group_binding) == 5
+    condition     = length(kubernetes_manifest.target_group_binding) == 5
     error_message = "broker 追加時に TargetGroupBinding が連動して増えない"
   }
 }
@@ -199,8 +199,8 @@ run "test_topic_gets_the_retention" {
 
   assert {
     condition = (
-      yamldecode(kubectl_manifest.test_topic.yaml_body).metadata.name == "test-topic"
-      && tostring(yamldecode(kubectl_manifest.test_topic.yaml_body).spec.config["retention.ms"]) == "604800000"
+      kubernetes_manifest.test_topic.manifest.metadata.name == "test-topic"
+      && tostring(kubernetes_manifest.test_topic.manifest.spec.config["retention.ms"]) == "604800000"
     )
     error_message = "test-topic の retention.ms が反映されていない"
   }
