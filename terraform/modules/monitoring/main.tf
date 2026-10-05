@@ -1,16 +1,6 @@
 data "aws_partition" "current" {}
 
 locals {
-  # マニフェストの <PLACEHOLDER> を ${PLACEHOLDER} に変換して templatestring で置換する。
-  # 値が渡されていないプレースホルダーは templatestring がエラーにするため、置換漏れが黙って残らない。
-  # Grafana dashboard など ${ を含むファイルには使わない。
-  placeholder_pattern     = "/<([A-Z][A-Z0-9_]*)>/"
-  placeholder_replacement = "$$${$1}"
-
-  # templatestring の第 1 引数は式ではなく文字列への直接参照でなければならないため、変換後の文字列を local に置く
-  kube_prometheus_stack_template = replace(file("${var.manifest_dir}/kube-prometheus-stack-values.yaml"), local.placeholder_pattern, local.placeholder_replacement)
-  fluent_bit_template            = replace(file("${var.manifest_dir}/fluent-bit-values.yaml"), local.placeholder_pattern, local.placeholder_replacement)
-
   application_log_group_name = "/aws/eks/${var.cluster_name}/application"
 }
 
@@ -219,7 +209,7 @@ resource "helm_release" "kube_prometheus_stack" {
   wait    = true
   timeout = var.kube_prometheus_stack_wait_timeout_seconds
 
-  values = [templatestring(local.kube_prometheus_stack_template, {
+  values = [templatefile("${var.manifest_dir}/kube-prometheus-stack-values.yaml.tftpl", {
     REGION                      = var.region
     SNS_TOPIC_ARN               = aws_sns_topic.alertmanager.arn
     PROMETHEUS_RETENTION        = var.prometheus_resources.retention
@@ -256,7 +246,7 @@ resource "helm_release" "fluent_bit" {
   version    = var.fluent_bit_chart_version
   namespace  = "monitoring"
 
-  values = [templatestring(local.fluent_bit_template, {
+  values = [templatefile("${var.manifest_dir}/fluent-bit-values.yaml.tftpl", {
     REGION                    = var.region
     LOG_GROUP_NAME            = aws_cloudwatch_log_group.application.name
     FLUENT_BIT_MEMORY_REQUEST = var.fluent_bit_resources.memory_request

@@ -1,0 +1,83 @@
+apiVersion: kafka.strimzi.io/v1
+kind: Kafka
+metadata:
+  name: kafka-cluster
+  namespace: kafka
+  annotations:
+    strimzi.io/node-pools: enabled
+    strimzi.io/kraft: enabled
+spec:
+  kafka:
+    version: "4.2.0"
+    metadataVersion: "4.2-IV1"
+    listeners:
+      - name: plain
+        port: 9092
+        type: internal
+        tls: false
+      - name: tls
+        port: 9093
+        type: internal
+        tls: true
+      - name: external
+        port: 9094
+        type: nodeport # LoadBalancer から NodePort に変更（共有NLBを使用するため）
+        tls: false
+        configuration:
+          # externalTrafficPolicy は明示しない（デフォルトの Cluster のまま）: NLB の
+          # TargetGroupBinding が targetType=ip（network.py）で Pod IP に直接トラフィックを
+          # 届けるため、Service / kube-proxy を経由する経路自体を通らない。クライアント
+          # 送信元 IP の保持は NLB TargetGroup 側の preserve_client_ip 属性で行う。
+          bootstrap:
+            nodePort: 30094
+          # brokers[] は CDK 側で ClusterConfig.broker_count から動的に生成・注入する。
+          # 採番ルールと注入処理は ekscdk.constructs._manifest.build_kafka_broker_configs を参照。
+    config:
+      # 存在しない Topic に接続した際に自動作成させず、UNKNOWN_TOPIC_OR_PARTITION エラーにする。
+      auto.create.topics.enable: false
+      offsets.topic.replication.factor: 3
+      transaction.state.log.replication.factor: 3
+      transaction.state.log.min.isr: 2
+      default.replication.factor: 3
+      min.insync.replicas: 2
+    rack:
+      topologyKey: topology.kubernetes.io/zone
+    metricsConfig:
+      type: jmxPrometheusExporter
+      valueFrom:
+        configMapKeyRef:
+          name: kafka-metrics
+          key: kafka-metrics-config.yml
+    logging:
+      type: inline
+      loggers:
+        rootLogger.level: INFO
+        logger.eventperf.name: org.apache.kafka.controller.EventPerformanceMonitor
+        logger.eventperf.level: WARN
+        logger.periodtask.name: org.apache.kafka.controller.PeriodTaskControlManager
+        logger.periodtask.level: WARN
+  kafkaExporter:
+    topicRegex: ".*"
+    groupRegex: ".*"
+  cruiseControl:
+    metricsConfig:
+      type: jmxPrometheusExporter
+      valueFrom:
+        configMapKeyRef:
+          name: cruise-control-metrics
+          key: metrics-config.yml
+    logging:
+      type: inline
+      loggers:
+        rootLogger.level: WARN
+  entityOperator:
+    topicOperator:
+      logging:
+        type: inline
+        loggers:
+          rootLogger.level: WARN
+    userOperator:
+      logging:
+        type: inline
+        loggers:
+          rootLogger.level: WARN

@@ -6,8 +6,7 @@ locals {
 module "kafka_config" {
   source = "../../../modules/kafka-config"
 
-  # 移行期間中は CDK 側の manifests/ を参照する。cdk/ を削除する時点で terraform/ 配下へ移す
-  manifest_dir    = "${path.module}/../../../../cdk/manifests/kafka"
+  manifest_dir    = "${path.module}/../../../manifests/kafka"
   broker_count    = var.broker_count
   advertised_host = local.kafka_private_dns_name
 }

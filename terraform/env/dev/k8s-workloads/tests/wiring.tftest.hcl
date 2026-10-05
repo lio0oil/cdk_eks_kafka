@@ -34,4 +34,9 @@ run "infra_outputs_flow_into_kafka_and_monitoring_resources" {
     condition     = length(module.kafka_config.nlb_ports) == 4 && module.kafka_config.external_listener_port == 9094
     error_message = "infra の broker_count から kafka-cluster.yaml 由来の port が導出されていない"
   }
+
+  assert {
+    condition     = output.test_topic_name == "test-topic"
+    error_message = "app 層が購読する topic 名が出力されていない"
+  }
 }

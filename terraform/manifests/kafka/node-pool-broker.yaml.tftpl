@@ -1,0 +1,66 @@
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaNodePool
+metadata:
+  name: broker
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: kafka-cluster
+  annotations:
+    strimzi.io/next-node-ids: "[0-999999]"
+spec:
+  replicas: ${BROKER_REPLICAS}
+  roles:
+    - broker
+  storage:
+    type: jbod
+    volumes:
+      - id: 0
+        type: persistent-claim
+        size: ${BROKER_STORAGE_SIZE}
+        class: gp3-kafka
+        kraftMetadata: shared
+        deleteClaim: ${DELETE_CLAIM}
+  resources:
+    requests:
+      memory: ${BROKER_MEMORY_REQUEST}
+      cpu: "${BROKER_CPU_REQUEST}"
+    limits:
+      memory: ${BROKER_MEMORY_LIMIT}
+      cpu: "${BROKER_CPU_LIMIT}"
+  jvmOptions:
+    -Xms: "${BROKER_JVM_XMS}"
+    -Xmx: "${BROKER_JVM_XMX}"
+  template:
+    pod:
+      tolerations:
+        - key: "DedicatedKafka"
+          operator: "Equal"
+          value: "true"
+          effect: "NoSchedule"
+      affinity:
+        nodeAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            nodeSelectorTerms:
+              - matchExpressions:
+                  - key: role
+                    operator: In
+                    values:
+                      - kafka-broker
+        podAntiAffinity:
+          requiredDuringSchedulingIgnoredDuringExecution:
+            # broker pod 同士を同一ノードに同居させない（HA 確保）。
+            # broker と controller の分離は別 nodegroup の nodeAffinity で物理的に保証済み。
+            - labelSelector:
+                matchExpressions:
+                  - key: strimzi.io/pool-name
+                    operator: In
+                    values:
+                      - broker
+              topologyKey: kubernetes.io/hostname
+      topologySpreadConstraints:
+        - maxSkew: 1
+          topologyKey: topology.kubernetes.io/zone
+          whenUnsatisfiable: ScheduleAnyway
+          labelSelector:
+            matchLabels:
+              strimzi.io/name: kafka-cluster-broker

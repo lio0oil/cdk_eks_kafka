@@ -1,5 +1,5 @@
 variables {
-  manifest_dir    = "../../../cdk/manifests/kafka"
+  manifest_dir    = "../../manifests/kafka"
   advertised_host = "my-nlb.example.com"
   broker_count    = 3
 }

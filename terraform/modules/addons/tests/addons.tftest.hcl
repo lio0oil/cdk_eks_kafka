@@ -17,8 +17,8 @@ variables {
   strimzi_chart_repo    = "https://strimzi.io/charts/"
   aws_lbc_chart_version = "3.3.0"
   aws_lbc_chart_repo    = "https://aws.github.io/eks-charts"
-  addons_manifest_dir   = "../../../cdk/manifests/addons"
-  kafka_manifest_dir    = "../../../cdk/manifests/kafka"
+  addons_manifest_dir   = "../../manifests/addons"
+  kafka_manifest_dir    = "../../manifests/kafka"
 
   strimzi_replicas             = 2
   strimzi_log_level            = "WARN"

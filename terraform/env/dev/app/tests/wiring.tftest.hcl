@@ -48,6 +48,15 @@ override_data {
   }
 }
 
+override_data {
+  target = data.terraform_remote_state.k8s_workloads
+  values = {
+    outputs = {
+      test_topic_name = "test-topic"
+    }
+  }
+}
+
 variables {
   kafka_consumer_code_object_version = "3HL4kqtJlcpXroDTDmJ.rmSpXd3dIbrHY"
 }

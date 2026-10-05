@@ -1,0 +1,33 @@
+# このファイルは CDK 管理対象外。スケールアウト（ブローカー増設）後に
+# `kubectl apply -f manifests/kafka/kafka-rebalance-add-brokers.yaml` で手動 apply する運用 manifest。
+# add-brokers モードは新規ブローカーへ必要分だけレプリカを移動する（既存ブローカー間の
+# 不要な移動を避けるため、full rebalance より移動量が小さい）。
+# apply すると Cruise Control が status.optimizationResult にプランを生成し、
+# strimzi.io/rebalance=approve annotation を付けると実行に移る。
+#
+# brokers は増設で追加されたブローカー ID に合わせて編集する。
+# broker_count を 3 -> 6 に増やした場合、追加されるのは 3,4,5。
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaRebalance
+metadata:
+  name: kafka-rebalance-add-brokers
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: kafka-cluster
+spec:
+  mode: add-brokers
+  brokers: [3, 4, 5]
+  goals:
+    - RackAwareGoal
+    - ReplicaCapacityGoal
+    - DiskCapacityGoal
+    - NetworkInboundCapacityGoal
+    - NetworkOutboundCapacityGoal
+    - CpuCapacityGoal
+    - ReplicaDistributionGoal
+    - DiskUsageDistributionGoal
+    - NetworkInboundUsageDistributionGoal
+    - NetworkOutboundUsageDistributionGoal
+    - TopicReplicaDistributionGoal
+    - LeaderReplicaDistributionGoal
+    - LeaderBytesInDistributionGoal

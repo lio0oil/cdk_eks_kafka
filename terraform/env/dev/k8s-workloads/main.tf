@@ -14,8 +14,7 @@ data "terraform_remote_state" "infra" {
 locals {
   infra = data.terraform_remote_state.infra.outputs
 
-  # 移行期間中は CDK 側の manifests/ を参照する。cdk/ を削除する時点で terraform/ 配下へ移す
-  manifests_dir = "${path.module}/../../../../cdk/manifests"
+  manifests_dir = "${path.module}/../../../manifests"
 }
 
 # この層は CRD に依存する manifest（Kafka CR・TargetGroupBinding・PodMonitor など）を管理する。

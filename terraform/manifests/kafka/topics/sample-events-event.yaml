@@ -1,0 +1,15 @@
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaTopic
+metadata:
+  # producer (kafka/producer/constants.py の PRODUCERS) と consumer
+  # (kafka/consumer/constants.py の SCHEMAS) が使う本番トピック。auto-create 任せにせず
+  # CR 化して partitions を宣言下に置く。パーティションは増加のみ可（減少は Strimzi が拒否）。
+  name: sample-events-event
+  namespace: kafka
+  labels:
+    # Strimzi Topic Operator が担当クラスターを識別するラベル。
+    # kafka-cluster.yaml の metadata.name と一致させる。
+    strimzi.io/cluster: kafka-cluster
+spec:
+  partitions: 3
+  replicas: 3

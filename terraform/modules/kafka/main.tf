@@ -1,22 +1,12 @@
+# マニフェストの *.yaml.tftpl は templatefile で値を埋め込む。値が渡されていない変数はエラーになる
+# （CDK では置換漏れが黙って残った）。
 locals {
-  # マニフェストの <PLACEHOLDER> を ${PLACEHOLDER} に変換して templatestring で置換する。
-  # 値が渡されていないプレースホルダーは templatestring がエラーにするため、置換漏れが黙って残らない。
-  # Grafana dashboard など ${ を含むファイルには使わない。
-  placeholder_pattern     = "/<([A-Z][A-Z0-9_]*)>/"
-  placeholder_replacement = "$$${$1}"
-
-  # templatestring の第 1 引数は式ではなく文字列への直接参照でなければならないため、変換後の文字列を local に置く
-  controller_pool_template      = replace(file("${var.kafka_manifest_dir}/node-pool-controller.yaml"), local.placeholder_pattern, local.placeholder_replacement)
-  broker_pool_template          = replace(file("${var.kafka_manifest_dir}/node-pool-broker.yaml"), local.placeholder_pattern, local.placeholder_replacement)
-  target_group_binding_template = replace(file("${var.kafka_manifest_dir}/target-group-binding.yaml"), local.placeholder_pattern, local.placeholder_replacement)
-  test_topic_template           = replace(file("${var.kafka_manifest_dir}/topics/test-topic.yaml"), local.placeholder_pattern, local.placeholder_replacement)
-
   node_pool_template_vars = {
     DELETE_CLAIM = tostring(var.delete_claim)
   }
 
-  controller_pool_yaml = templatestring(
-    local.controller_pool_template,
+  controller_pool_yaml = templatefile(
+    "${var.kafka_manifest_dir}/node-pool-controller.yaml.tftpl",
     merge(local.node_pool_template_vars, {
       CONTROLLER_REPLICAS       = tostring(var.controller_count)
       CONTROLLER_MEMORY_REQUEST = var.controller_resources.memory_request
@@ -29,8 +19,8 @@ locals {
     }),
   )
 
-  broker_pool_yaml = templatestring(
-    local.broker_pool_template,
+  broker_pool_yaml = templatefile(
+    "${var.kafka_manifest_dir}/node-pool-broker.yaml.tftpl",
     merge(local.node_pool_template_vars, {
       BROKER_REPLICAS       = tostring(var.broker_count)
       BROKER_MEMORY_REQUEST = var.broker_resources.memory_request
@@ -109,8 +99,8 @@ resource "kubernetes_manifest" "kafka_cluster" {
 resource "kubernetes_manifest" "target_group_binding" {
   for_each = var.target_group_arns
 
-  manifest = yamldecode(templatestring(
-    local.target_group_binding_template,
+  manifest = yamldecode(templatefile(
+    "${var.kafka_manifest_dir}/target-group-binding.yaml.tftpl",
     {
       BINDING_NAME     = each.key == "Bootstrap" ? "kafka-${var.external_listener_name}-bootstrap" : "kafka-broker-${trimprefix(each.key, "Broker")}"
       SERVICE_NAME     = each.key == "Bootstrap" ? "kafka-cluster-kafka-${var.external_listener_name}-bootstrap" : "kafka-cluster-broker-${trimprefix(each.key, "Broker")}"
@@ -128,8 +118,8 @@ resource "kubernetes_manifest" "target_group_binding" {
 # Strimzi Topic Operator（entityOperator）が KafkaTopic CR を監視して実 Kafka に Topic を作成する。
 # Operator は Kafka CR より後に起動するため、kafka_cluster への依存だけで apply 順序は十分。
 resource "kubernetes_manifest" "test_topic" {
-  manifest = yamldecode(templatestring(
-    local.test_topic_template,
+  manifest = yamldecode(templatefile(
+    "${var.kafka_manifest_dir}/topics/test-topic.yaml.tftpl",
     { RETENTION_MS = var.topic_retention_ms },
   ))
 

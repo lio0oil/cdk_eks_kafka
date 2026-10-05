@@ -10,16 +10,26 @@ data "terraform_remote_state" "infra" {
   }
 }
 
-locals {
-  infra = data.terraform_remote_state.infra.outputs
+# topic 名は、topic を作る k8s-workloads 層の出力を単一の真実の源にする（manifest を二重に読まない）。
+data "terraform_remote_state" "k8s_workloads" {
+  backend = "s3"
 
-  # 移行期間中は CDK 側の manifests/ を参照する。cdk/ を削除する時点で terraform/ 配下へ移す
-  manifests_dir = "${path.module}/../../../../cdk/manifests"
+  config = {
+    bucket = "ekscdk-tfstate-9025850b"
+    key    = "dev/k8s-workloads.tfstate"
+    region = "ap-northeast-1"
+  }
 }
 
-# 適用の順序は infra -> k8s-addons -> k8s-workloads -> app。ESM のポーラーは Kafka broker への到達性
-# （k8s-workloads 層が NLB の TargetGroup に broker を登録すること）が前提だが、層をまたぐ依存は
-# 値の受け渡しでは表せないため、この順に適用する運用とする。
+locals {
+  infra         = data.terraform_remote_state.infra.outputs
+  k8s_workloads = data.terraform_remote_state.k8s_workloads.outputs
+}
+
+# 適用の順序は infra -> k8s-addons -> k8s-workloads -> app。topic 名は k8s-workloads の state から読むため、
+# その適用が済んでいないと plan が止まる。ESM のポーラーは Kafka broker への到達性（k8s-workloads 層が
+# NLB の TargetGroup に broker を登録すること）も前提だが、これは値の受け渡しでは表せないため、
+# この順に適用する運用とする。
 module "consumer_app" {
   source = "../../../modules/consumer-app"
 
@@ -31,7 +41,7 @@ module "consumer_app" {
   code_object_version   = var.kafka_consumer_code_object_version
   bootstrap_dns_name    = local.infra.kafka_private_dns_name
   bootstrap_port        = local.infra.kafka_external_listener_port
-  topic_name            = yamldecode(file("${local.manifests_dir}/kafka/topics/test-topic.yaml")).metadata.name
+  topic_name            = local.k8s_workloads.test_topic_name
   table_bucket_name     = var.s3_table_bucket_name
   log_retention_days    = var.log_retention_days
   force_destroy         = var.log_force_destroy

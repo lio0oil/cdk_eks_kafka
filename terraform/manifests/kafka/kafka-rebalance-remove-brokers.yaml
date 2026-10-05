@@ -1,0 +1,34 @@
+# このファイルは CDK 管理対象外。スケールイン（ブローカー縮退）の「前」に
+# `kubectl apply -f manifests/kafka/kafka-rebalance-remove-brokers.yaml` で手動 apply する運用 manifest。
+# remove-brokers モードは指定ブローカーを空にして残りのブローカーへレプリカを退避する。
+# このリバランスが Ready になってから broker_count を減らして cdk deploy すること。
+# 退避前にブローカーを削除するとデータロス／under-replicated になる。
+# apply すると Cruise Control が status.optimizationResult にプランを生成し、
+# strimzi.io/rebalance=approve annotation を付けると実行に移る。
+#
+# brokers は取り外すブローカー ID に合わせて編集する。
+# broker_count を 6 -> 3 に戻す場合、取り外すのは 3,4,5。
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaRebalance
+metadata:
+  name: kafka-rebalance-remove-brokers
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: kafka-cluster
+spec:
+  mode: remove-brokers
+  brokers: [3, 4, 5]
+  goals:
+    - RackAwareGoal
+    - ReplicaCapacityGoal
+    - DiskCapacityGoal
+    - NetworkInboundCapacityGoal
+    - NetworkOutboundCapacityGoal
+    - CpuCapacityGoal
+    - ReplicaDistributionGoal
+    - DiskUsageDistributionGoal
+    - NetworkInboundUsageDistributionGoal
+    - NetworkOutboundUsageDistributionGoal
+    - TopicReplicaDistributionGoal
+    - LeaderReplicaDistributionGoal
+    - LeaderBytesInDistributionGoal

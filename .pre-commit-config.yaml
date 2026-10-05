@@ -52,7 +52,7 @@ repos:
         name: terraform / validate + test
         entry: bash terraform/scripts/check.sh
         language: system
-        files: ^(terraform/|cdk/manifests/)
+        files: ^terraform/
         pass_filenames: false
         stages: [pre-commit]
       - id: terraform-tflint

@@ -1,0 +1,34 @@
+apiVersion: elbv2.k8s.aws/v1beta1
+kind: TargetGroupBinding
+metadata:
+  name: ${BINDING_NAME}
+  namespace: kafka
+spec:
+  serviceRef:
+    name: ${SERVICE_NAME}
+    port: ${SERVICE_PORT}
+  targetGroupARN: ${TARGET_GROUP_ARN}
+  # targetType=instance + nodeSelector（Node label での絞り込み）では、broker nodegroup
+  # 内に該当 Pod のいない他ノードまで target 登録されてしまう（nodeSelector は Node 単位
+  # までしか絞れず、特定 Pod が乗っているノードだけに絞ることはできない）。ip なら
+  # AWS LBC が Service の EndpointSlice から Pod IP を直接 target 登録するため、
+  # per-broker Service が選択する 1 Pod だけが正確に 1 target になる。
+  targetType: ip
+  # targetType / vpcID を省略すると AWS LBC の mutating webhook が値を埋めるために
+  # DescribeTargetGroups を呼ぶ。その AWS 呼び出しには Pod Identity のクレデンシャルと
+  # CoreDNS による名前解決が必要で、どちらかが間に合わないと webhook が 10s deadline を
+  # 超過して apply が失敗する。両方明示して webhook に AWS 参照の理由を残さない。
+  vpcID: ${VPC_ID}
+  # AWS LBC が Pod の ENI に紐づく SG（デフォルト EKS ネットワーキングでは Node の SG と
+  # 同一）に NLB SG からの受け入れルールを自動追加する。明示することで何の通信を許可する
+  # かが透明になり、AWS LBC の auto-detect 動作に依存せずに済む。
+  # port は broker ごとの NodePort ではなく、Pod が実際に bind する container port
+  # （kafka-cluster.yaml の external listener の port、全 broker 共通の固定値）を渡す。
+  networking:
+    ingress:
+      - from:
+          - securityGroup:
+              groupID: ${NLB_SG_ID}
+        ports:
+          - protocol: TCP
+            port: ${TARGET_PORT}

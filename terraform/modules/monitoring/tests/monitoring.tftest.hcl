@@ -37,7 +37,7 @@ mock_provider "kubernetes" {}
 variables {
   cluster_name                               = "eks-cluster-dev"
   region                                     = "ap-northeast-1"
-  manifest_dir                               = "../../../cdk/manifests/monitoring"
+  manifest_dir                               = "../../manifests/monitoring"
   kube_prometheus_stack_chart_version        = "84.5.0"
   kube_prometheus_stack_chart_repo           = "https://prometheus-community.github.io/helm-charts"
   fluent_bit_chart_version                   = "0.57.3"

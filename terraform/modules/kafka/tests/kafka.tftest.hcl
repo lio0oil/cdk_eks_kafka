@@ -1,8 +1,8 @@
 mock_provider "kubernetes" {}
 
 variables {
-  kafka_manifest_dir      = "../../../cdk/manifests/kafka"
-  monitoring_manifest_dir = "../../../cdk/manifests/monitoring"
+  kafka_manifest_dir      = "../../manifests/kafka"
+  monitoring_manifest_dir = "../../manifests/monitoring"
   broker_count            = 3
   controller_count        = 3
   delete_claim            = true
@@ -216,4 +216,14 @@ run "target_groups_must_match_broker_count" {
   }
 
   expect_failures = [var.target_group_arns]
+}
+
+# app 層（Lambda の ESM）が購読する topic 名は、topic を作る側の出力を単一の真実の源にする
+run "topic_name_is_exposed_for_consumers" {
+  command = apply
+
+  assert {
+    condition     = output.test_topic_name == "test-topic"
+    error_message = "購読側が使う topic 名が出力されていない"
+  }
 }

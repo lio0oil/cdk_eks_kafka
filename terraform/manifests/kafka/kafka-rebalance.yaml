@@ -1,0 +1,26 @@
+# このファイルは CDK 管理対象外。リバランスを実行したいときに
+# `kubectl apply -f manifests/kafka/kafka-rebalance.yaml` で手動 apply する運用 manifest。
+# apply すると Cruise Control が status.optimizationResult にプランを生成し、
+# strimzi.io/rebalance=approve annotation を付けると実行に移る。
+apiVersion: kafka.strimzi.io/v1
+kind: KafkaRebalance
+metadata:
+  name: kafka-rebalance
+  namespace: kafka
+  labels:
+    strimzi.io/cluster: kafka-cluster
+spec:
+  goals:
+    - RackAwareGoal
+    - ReplicaCapacityGoal
+    - DiskCapacityGoal
+    - NetworkInboundCapacityGoal
+    - NetworkOutboundCapacityGoal
+    - CpuCapacityGoal
+    - ReplicaDistributionGoal
+    - DiskUsageDistributionGoal
+    - NetworkInboundUsageDistributionGoal
+    - NetworkOutboundUsageDistributionGoal
+    - TopicReplicaDistributionGoal
+    - LeaderReplicaDistributionGoal
+    - LeaderBytesInDistributionGoal

@@ -1,7 +1,7 @@
 mock_provider "kubernetes" {}
 
 variables {
-  manifest_dir = "../../../cdk/manifests/monitoring"
+  manifest_dir = "../../manifests/monitoring"
 }
 
 run "strimzi_pod_monitors_scrape_kafka_and_operators" {
