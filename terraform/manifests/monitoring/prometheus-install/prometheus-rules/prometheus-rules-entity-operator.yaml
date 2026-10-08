@@ -5,6 +5,7 @@ metadata:
     role: alert-rules
     app: strimzi
   name: strimzi-entity-operator
+  namespace: monitoring
 spec:
   groups:
   - name: strimzi-entity-operator

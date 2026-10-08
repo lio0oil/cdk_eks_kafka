@@ -45,6 +45,19 @@ run "strimzi_prometheus_rules_are_applied_unmodified" {
   }
 }
 
+# ruleNamespaceSelector 未指定の Prometheus は自身の namespace（monitoring）の PrometheusRule しか
+# 評価しない。namespace 未指定だと default に作られ、アラートが評価されない
+run "strimzi_prometheus_rules_live_in_the_monitoring_namespace" {
+  command = apply
+
+  assert {
+    condition = alltrue([
+      for r in values(kubernetes_manifest.prometheus_rule) : r.manifest.metadata.namespace == "monitoring"
+    ])
+    error_message = "PrometheusRule が monitoring namespace に作られていない（Prometheus に評価されない）"
+  }
+}
+
 # kube-prometheus-stack 同梱の kube-state-metrics は Strimzi の CRD を知らないため、
 # Strimzi 公式の専用インスタンスを別途 apply して CR のステータスを監視する
 run "strimzi_kube_state_metrics_has_its_own_instance" {
