@@ -224,6 +224,18 @@ run "prometheus_and_alertmanager_get_their_settings" {
   }
 }
 
+run "operator_also_publishes_kubelet_endpointslice" {
+  command = apply
+
+  assert {
+    condition = (
+      yamldecode(helm_release.kube_prometheus_stack.values[0]).prometheusOperator.kubeletEndpointSliceEnabled == true
+      && yamldecode(helm_release.kube_prometheus_stack.values[0]).prometheusOperator.kubeletEndpointsEnabled == true
+    )
+    error_message = "kubelet 用に EndpointSlice を併せて作る設定（Endpoints は移行確認まで残す）になっていない"
+  }
+}
+
 run "alertmanager_notifies_through_the_sns_topic_with_sigv4" {
   command = apply
 

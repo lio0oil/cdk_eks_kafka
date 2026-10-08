@@ -76,6 +76,11 @@ prometheus:
 
 prometheusOperator:
   enabled: true
+  # K8s 1.33+ で v1 Endpoints が非推奨になり、Operator が kubelet 用 Endpoints を書くたびに
+  # 警告が出る。kubelet 用 EndpointSlice を併せて作り、Prometheus 側の探索を EndpointSlice へ
+  # 切り替えて Targets が UP のまま移れると確認してから kubeletEndpointsEnabled を false にする。
+  kubeletEndpointsEnabled: true
+  kubeletEndpointSliceEnabled: true
 
 alertmanager:
   enabled: true
