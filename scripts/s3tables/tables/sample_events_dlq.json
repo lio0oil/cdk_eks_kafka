@@ -1,0 +1,23 @@
+{
+  "iceberg": {
+    "schema": {
+      "fields": [
+        { "id": 1, "name": "failed_at", "type": "timestamp", "required": true },
+        { "id": 2, "name": "schema_name", "type": "string", "required": false },
+        { "id": 3, "name": "rawdata", "type": "binary", "required": true },
+        { "id": 4, "name": "reason", "type": "string", "required": true }
+      ]
+    },
+    "partitionSpec": {
+      "fields": [
+        { "sourceId": 2, "transform": "identity", "name": "schema_name", "fieldId": 1000 },
+        { "sourceId": 1, "transform": "day", "name": "failed_at_day", "fieldId": 1001 }
+      ]
+    },
+    "properties": {
+      "write.merge.mode": "copy-on-write",
+      "write.update.mode": "copy-on-write",
+      "write.delete.mode": "copy-on-write"
+    }
+  }
+}

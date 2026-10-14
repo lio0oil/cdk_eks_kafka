@@ -1,0 +1,23 @@
+{
+  "iceberg": {
+    "schema": {
+      "fields": [
+        { "id": 1, "name": "event_id", "type": "long", "required": true },
+        { "id": 2, "name": "event_datetime", "type": "timestamp", "required": true },
+        { "id": 3, "name": "extra_type", "type": "string", "required": true },
+        { "id": 4, "name": "rawdata", "type": "binary", "required": true }
+      ]
+    },
+    "partitionSpec": {
+      "fields": [
+        { "sourceId": 3, "transform": "identity", "name": "extra_type", "fieldId": 1000 },
+        { "sourceId": 2, "transform": "day", "name": "event_datetime_day", "fieldId": 1001 }
+      ]
+    },
+    "properties": {
+      "write.merge.mode": "copy-on-write",
+      "write.update.mode": "copy-on-write",
+      "write.delete.mode": "copy-on-write"
+    }
+  }
+}
