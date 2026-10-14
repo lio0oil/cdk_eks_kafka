@@ -43,9 +43,9 @@ variable "topic_name" {
   description = "購読する Kafka topic 名"
 }
 
-variable "table_bucket_name" {
+variable "table_bucket_arn" {
   type        = string
-  description = "書き込み先の S3 Tables の table bucket 名。別 state のため ARN は名前から組み立てる"
+  description = "書き込み先の S3 Tables の table bucket の ARN"
 }
 
 variable "log_retention_days" {

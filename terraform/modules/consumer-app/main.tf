@@ -1,14 +1,7 @@
 data "aws_partition" "current" {}
 
-data "aws_region" "current" {}
-
-data "aws_caller_identity" "current" {}
-
 locals {
   function_name = "kafka-lambda-consumer-${var.cluster_name}"
-
-  # S3 Tables は別 state の管理（EMR consumer 用の別ライフサイクル）のため、名前から ARN を組み立てる
-  table_bucket_arn = "arn:${data.aws_partition.current.partition}:s3tables:${data.aws_region.current.region}:${data.aws_caller_identity.current.account_id}:bucket/${var.table_bucket_name}"
 }
 
 resource "aws_cloudwatch_log_group" "consumer" {
@@ -80,7 +73,7 @@ resource "aws_iam_role_policy" "consumer" {
           "s3tables:GetTableMetadataLocation",
           "s3tables:UpdateTableMetadataLocation",
         ]
-        Resource = [local.table_bucket_arn, "${local.table_bucket_arn}/table/*"]
+        Resource = [var.table_bucket_arn, "${var.table_bucket_arn}/table/*"]
       },
       {
         Sid      = "WriteDlqBucket"

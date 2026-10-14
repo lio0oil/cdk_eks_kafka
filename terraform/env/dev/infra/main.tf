@@ -82,6 +82,32 @@ module "consumer_infra" {
   force_destroy               = var.log_force_destroy
 }
 
+data "aws_caller_identity" "current" {}
+
+# consumer (EMR Spark) の書き込み先の table bucket と namespace、暗号鍵。テーブルは Terraform の管理外で、
+# scripts/s3tables が作る。table bucket・namespace・鍵は prevent_destroy で保護しており、環境を作り直す
+# ときは外してから destroy する。
+module "s3tables" {
+  source = "../../../modules/s3tables"
+
+  table_bucket_name = var.s3_table_bucket_name
+  force_destroy     = var.s3_force_destroy
+  kms_key_alias     = var.s3_kms_key_alias
+}
+
+# consumer の writeStream.option("checkpointLocation", ...) 用バケット。各 StreamingQuery は
+# <schema_name>/ のようにプレフィックスで分割して使う。S3 Tables とは別の S3 バケットで、table bucket と
+# 同じ信頼境界のため鍵だけ共有する。
+# secure-bucket は他のバケット（Flow Logs 等）も使う共通部品で、module 呼び出しに lifecycle は書けないため、
+# prevent_destroy は付けない。
+module "checkpoint_bucket" {
+  source = "../../../modules/secure-bucket"
+
+  bucket_name   = "kafka-consumer-checkpoint-${data.aws_caller_identity.current.account_id}-${var.s3_checkpoint_bucket_suffix}"
+  force_destroy = var.s3_force_destroy
+  kms_key_arn   = module.s3tables.kms_key_arn
+}
+
 # Session Manager で接続して EKS / Kafka NLB を検証する踏み台。stg/prd には残さない
 # （恒久の踏み台が必要になった時点で別途検討する）。
 module "test_ec2" {

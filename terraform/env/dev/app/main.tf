@@ -42,7 +42,7 @@ module "consumer_app" {
   bootstrap_dns_name    = local.infra.kafka_private_dns_name
   bootstrap_port        = local.infra.kafka_external_listener_port
   topic_name            = local.k8s_workloads.test_topic_name
-  table_bucket_name     = var.s3_table_bucket_name
+  table_bucket_arn      = local.infra.table_bucket_arn
   log_retention_days    = var.log_retention_days
   force_destroy         = var.log_force_destroy
 

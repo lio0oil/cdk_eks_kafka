@@ -2,18 +2,6 @@
 # command = apply は mock provider に対する適用で、実 AWS には触れない。
 
 mock_provider "aws" {
-  mock_data "aws_region" {
-    defaults = {
-      region = "ap-northeast-1"
-    }
-  }
-
-  mock_data "aws_caller_identity" {
-    defaults = {
-      account_id = "111111111111"
-    }
-  }
-
   mock_data "aws_partition" {
     defaults = {
       partition = "aws"
@@ -44,6 +32,7 @@ override_data {
       esm_security_group_id               = "sg-0fedcba9876543210"
       data_bucket_arn                     = "arn:aws:s3:::mock-data-bucket"
       kafka_consumer_artifact_bucket_name = "mock-artifact-bucket"
+      table_bucket_arn                    = "arn:aws:s3tables:ap-northeast-1:111111111111:bucket/kafka-events-dev"
     }
   }
 }

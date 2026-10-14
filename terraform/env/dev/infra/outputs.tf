@@ -60,6 +60,20 @@ output "kafka_consumer_artifact_bucket_name" {
   value       = module.consumer_infra.artifact_bucket_name
 }
 
+output "table_bucket_arn" {
+  description = "scripts/s3tables/create-tables.sh に渡す。app 層の consumer の書き込み権限の対象にもなる"
+  value       = module.s3tables.table_bucket_arn
+}
+
+output "namespace_name" {
+  description = "scripts/s3tables/create-tables.sh に渡す"
+  value       = module.s3tables.namespace_name
+}
+
+output "checkpoint_bucket_name" {
+  value = module.checkpoint_bucket.bucket
+}
+
 # ── 利用者向け ───────────────────────────────────────────────────────────
 
 output "kafka_nlb_dns_name" {

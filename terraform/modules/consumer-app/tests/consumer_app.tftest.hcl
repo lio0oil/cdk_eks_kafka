@@ -5,18 +5,6 @@ mock_provider "aws" {
     }
   }
 
-  mock_data "aws_region" {
-    defaults = {
-      region = "ap-northeast-1"
-    }
-  }
-
-  mock_data "aws_caller_identity" {
-    defaults = {
-      account_id = "111111111111"
-    }
-  }
-
   mock_resource "aws_iam_role" {
     defaults = {
       arn = "arn:aws:iam::111111111111:role/mock"
@@ -40,7 +28,7 @@ variables {
   bootstrap_dns_name    = "kafka.local"
   bootstrap_port        = 9094
   topic_name            = "test-topic"
-  table_bucket_name     = "kafka-events-dev"
+  table_bucket_arn      = "arn:aws:s3tables:ap-northeast-1:111111111111:bucket/kafka-events-dev"
   log_retention_days    = 7
   force_destroy         = true
 

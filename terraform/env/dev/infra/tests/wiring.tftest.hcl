@@ -55,6 +55,18 @@ mock_provider "aws" {
     }
   }
 
+  mock_resource "aws_kms_key" {
+    defaults = {
+      arn = "arn:aws:kms:ap-northeast-1:111111111111:key/00000000-0000-0000-0000-000000000000"
+    }
+  }
+
+  mock_resource "aws_s3tables_table_bucket" {
+    defaults = {
+      arn = "arn:aws:s3tables:ap-northeast-1:111111111111:bucket/mock-table-bucket"
+    }
+  }
+
   mock_resource "aws_lb_target_group" {
     defaults = {
       arn = "arn:aws:elasticloadbalancing:ap-northeast-1:111111111111:targetgroup/mock/0123456789abcdef"
@@ -130,6 +142,22 @@ run "values_shared_with_the_other_layers_are_exposed" {
       && output.kafka_consumer_artifact_bucket_name != null
     )
     error_message = "k8s / app 層がクラスターへ接続し、リソースを参照するための出力が揃っていない"
+  }
+}
+
+# テーブルは Terraform の管理外。scripts/s3tables がこの出力から table bucket と namespace を受け取り、
+# app 層は table bucket の ARN から consumer の書き込み権限を作る。checkpoint バケットは S3 Tables とは別の
+# S3 バケットで、infra が同じ鍵を渡して作る
+run "s3tables_outputs_feed_the_table_script_and_the_app_layer" {
+  command = apply
+
+  assert {
+    condition = (
+      output.table_bucket_arn != null
+      && output.namespace_name == "events"
+      && output.checkpoint_bucket_name == "kafka-consumer-checkpoint-111111111111-${var.s3_checkpoint_bucket_suffix}"
+    )
+    error_message = "テーブル作成スクリプトと app 層が使う table bucket / namespace / checkpoint バケットが出力されていない"
   }
 }
 

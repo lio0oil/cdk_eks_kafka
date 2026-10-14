@@ -1,9 +1,6 @@
 region      = "ap-northeast-1"
 environment = "dev"
 
-# 書き込み先（env/dev/s3tables が作る table bucket）
-s3_table_bucket_name = "kafka-events-dev"
-
 log_retention_days = 7
 # dev は環境破棄を容易にする。stg/prd は false で DLQ とロググループを残す
 log_force_destroy = true

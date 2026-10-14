@@ -13,11 +13,6 @@ variable "kafka_consumer_code_object_version" {
   description = "Lambda コンシューマの function.zip の S3 VersionId。zip のアップロード（cdk/scripts/upload-kafka-consumer-lambda.sh）は Terraform の外で行うため、アップロードして VersionId を得てから terraform.tfvars に書いて適用する。ロールバックは、書き戻して適用する"
 }
 
-variable "s3_table_bucket_name" {
-  type        = string
-  description = "書き込み先 S3 Tables の table bucket 名。別 state（env/<env>/s3tables）の管理のため名前から ARN を組み立てる"
-}
-
 variable "log_retention_days" {
   type        = number
   description = "CloudWatch Logs の保持日数"
