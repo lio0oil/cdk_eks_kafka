@@ -61,3 +61,80 @@ repos:
         language: system
         files: ^terraform/.*\.(tf|tfvars)$
         pass_filenames: false
+      - id: parquet-merge-writer-ruff-check
+        name: parquet-merge writer / ruff check
+        entry: uv run --project parquet-merge/writer ruff check --fix
+        language: system
+        types: [python]
+        files: ^parquet-merge/writer/
+        exclude: _pb2\.pyi?$
+        require_serial: true
+      - id: parquet-merge-writer-ruff-format
+        name: parquet-merge writer / ruff format
+        entry: uv run --project parquet-merge/writer ruff format
+        language: system
+        types: [python]
+        files: ^parquet-merge/writer/
+        exclude: _pb2\.pyi?$
+        require_serial: true
+      - id: parquet-merge-writer-pyright
+        name: parquet-merge writer / pyright
+        entry: uv run --directory parquet-merge/writer pyright
+        language: system
+        types: [python]
+        files: ^parquet-merge/writer/
+        pass_filenames: false
+      - id: parquet-merge-writer-pytest
+        name: parquet-merge writer / pytest
+        entry: uv run --directory parquet-merge/writer pytest
+        language: system
+        files: ^parquet-merge/(writer|contract)/
+        pass_filenames: false
+        stages: [pre-commit]
+      - id: parquet-merge-merger-ruff-check
+        name: parquet-merge merger / ruff check
+        entry: uv run --project parquet-merge/merger ruff check --fix
+        language: system
+        types: [python]
+        files: ^parquet-merge/merger/
+        require_serial: true
+      - id: parquet-merge-merger-ruff-format
+        name: parquet-merge merger / ruff format
+        entry: uv run --project parquet-merge/merger ruff format
+        language: system
+        types: [python]
+        files: ^parquet-merge/merger/
+        require_serial: true
+      - id: parquet-merge-merger-pyright
+        name: parquet-merge merger / pyright
+        entry: uv run --directory parquet-merge/merger pyright
+        language: system
+        types: [python]
+        files: ^parquet-merge/merger/
+        pass_filenames: false
+      - id: parquet-merge-merger-pytest
+        name: parquet-merge merger / pytest
+        entry: uv run --directory parquet-merge/merger pytest
+        language: system
+        files: ^parquet-merge/(merger|contract|tables)/
+        pass_filenames: false
+        stages: [pre-commit]
+      - id: parquet-merge-terraform-fmt
+        name: parquet-merge terraform / fmt
+        entry: terraform fmt -check -recursive -diff parquet-merge/terraform
+        language: system
+        files: ^parquet-merge/terraform/.*\.(tf|tfvars|tftest\.hcl)$
+        pass_filenames: false
+      - id: parquet-merge-terraform-test
+        name: parquet-merge terraform / validate + test
+        entry: bash parquet-merge/terraform/scripts/check.sh
+        language: system
+        files: ^parquet-merge/terraform/
+        pass_filenames: false
+        stages: [pre-commit]
+      - id: parquet-merge-terraform-tflint
+        name: parquet-merge terraform / tflint
+        entry: tflint --recursive --chdir=parquet-merge/terraform
+        language: system
+        files: ^parquet-merge/terraform/.*\.(tf|tfvars)$
+        pass_filenames: false
