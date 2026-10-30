@@ -77,13 +77,18 @@ def merge_files(
     target: str,
     paths: list[str],
     merge_run_id: str,
+    merged_at: datetime,
     contract_path: Path = CONTRACT_PATH,
 ) -> None:
     source = read_deduplicated(spark, paths, contract_path).persist()
     try:
         condition, parameters = match_condition(sorted(_utc_hours(source)))
         columns = [f.name for f in staging_schema(contract_path).fields]
-        source.select(*columns, F.lit(merge_run_id).alias("merge_run_id")).createOrReplaceTempView(SOURCE_VIEW)
+        source.select(
+            *columns,
+            F.lit(merge_run_id).alias("merge_run_id"),
+            F.lit(merged_at).alias("merged_at"),
+        ).createOrReplaceTempView(SOURCE_VIEW)
         spark.sql(
             f"MERGE INTO {target} t USING {SOURCE_VIEW} s ON {condition} WHEN NOT MATCHED THEN INSERT *",
             args=parameters,

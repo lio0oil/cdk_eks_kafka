@@ -40,7 +40,7 @@ def main(argv: Sequence[str] | None = None) -> None:
     run_id = new_run_id(now)
 
     def merge(paths: list[str]) -> None:
-        merge_files(spark, args.target, paths, run_id, contract_path=Path(args.contract))
+        merge_files(spark, args.target, paths, run_id, now, contract_path=Path(args.contract))
 
     run(boto3.client("s3"), args.staging_bucket, now, args.margin_seconds, merge)
 

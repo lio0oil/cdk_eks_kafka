@@ -4,14 +4,25 @@ from pathlib import Path
 
 import pytest
 from pyspark.sql import SparkSession
+from pyspark.sql import functions as F
 
 from merge import match_condition, merge_files, new_run_id
-from tests.staged import reading, utc, write_staged
+from tests.staged import MERGED_AT, reading, utc, write_staged
 
 
 def table_rows(spark: SparkSession, table: str) -> list[tuple[str, str, float]]:
     rows = spark.table(table).collect()
     return sorted((r["message_id"], r["metric"], r["value"]) for r in rows)
+
+
+def seconds(instant: datetime) -> int:
+    return int(instant.timestamp())
+
+
+def merged_at_by_message(spark: SparkSession, table: str) -> list[tuple[str, int]]:
+    # collect() returns naive local-zone datetimes, so the instants are compared as epoch seconds.
+    rows = spark.table(table).select("message_id", F.unix_seconds("merged_at").alias("merged_at")).collect()
+    return sorted((r["message_id"], r["merged_at"]) for r in rows)
 
 
 def test_copies_in_different_files_keep_only_the_rows_of_one_file(spark: SparkSession, table: str, tmp_path: Path):
@@ -30,7 +41,7 @@ def test_copies_in_different_files_keep_only_the_rows_of_one_file(spark: SparkSe
         ],
     )
 
-    merge_files(spark, table, [resent, original], "run-1")
+    merge_files(spark, table, [resent, original], "run-1", MERGED_AT)
 
     assert table_rows(spark, table) == [("msg-1", "humidity", 2.0), ("msg-1", "temperature", 1.0)]
 
@@ -41,7 +52,7 @@ def test_copy_with_earliest_written_at_wins_even_if_its_path_sorts_later(
     early = write_staged(spark, tmp_path / "z-early", [reading(value=1.0, written_at=utc(12, 0))])
     late = write_staged(spark, tmp_path / "a-late", [reading(value=2.0, written_at=utc(12, 5))])
 
-    merge_files(spark, table, [late, early], "run-1")
+    merge_files(spark, table, [late, early], "run-1", MERGED_AT)
 
     assert table_rows(spark, table) == [("msg-1", "temperature", 1.0)]
 
@@ -50,21 +61,21 @@ def test_ties_on_written_at_are_broken_by_source_file_path(spark: SparkSession, 
     second = write_staged(spark, tmp_path / "b", [reading(value=2.0)])
     first = write_staged(spark, tmp_path / "a", [reading(value=1.0)])
 
-    merge_files(spark, table, [second, first], "run-1")
+    merge_files(spark, table, [second, first], "run-1", MERGED_AT)
 
     assert table_rows(spark, table) == [("msg-1", "temperature", 1.0)]
 
 
 def test_message_already_in_table_is_not_inserted(spark: SparkSession, table: str, tmp_path: Path):
     first = write_staged(spark, tmp_path / "a", [reading(message_id="msg-1", value=1.0)])
-    merge_files(spark, table, [first], "run-1")
+    merge_files(spark, table, [first], "run-1", MERGED_AT)
     resent = write_staged(
         spark,
         tmp_path / "b",
         [reading(message_id="msg-1", value=9.0, written_at=utc(12, 5)), reading(message_id="msg-2", value=2.0)],
     )
 
-    merge_files(spark, table, [resent], "run-2")
+    merge_files(spark, table, [resent], "run-2", MERGED_AT)
 
     assert table_rows(spark, table) == [("msg-1", "temperature", 1.0), ("msg-2", "temperature", 2.0)]
 
@@ -76,8 +87,8 @@ def test_processing_the_same_files_twice_does_not_change_row_count(spark: SparkS
         [reading(message_id="msg-1"), reading(message_id="msg-1", metric="humidity"), reading(message_id="msg-2")],
     )
 
-    merge_files(spark, table, [path], "run-1")
-    merge_files(spark, table, [path], "run-2")
+    merge_files(spark, table, [path], "run-1", MERGED_AT)
+    merge_files(spark, table, [path], "run-2", MERGED_AT)
 
     assert spark.table(table).count() == 3
     assert {r["merge_run_id"] for r in spark.table(table).collect()} == {"run-1"}
@@ -93,7 +104,7 @@ def test_late_data_with_old_measured_at_is_matched_against_its_own_partition(
         tmp_path / "a",
         [reading(message_id="old-1", measured_at=old), reading(message_id="recent-1", measured_at=recent)],
     )
-    merge_files(spark, table, [first], "run-1")
+    merge_files(spark, table, [first], "run-1", MERGED_AT)
     late = write_staged(
         spark,
         tmp_path / "b",
@@ -103,7 +114,7 @@ def test_late_data_with_old_measured_at_is_matched_against_its_own_partition(
         ],
     )
 
-    merge_files(spark, table, [late], "run-2")
+    merge_files(spark, table, [late], "run-2", MERGED_AT)
 
     assert table_rows(spark, table) == [
         ("old-1", "temperature", 1.0),
@@ -114,20 +125,20 @@ def test_late_data_with_old_measured_at_is_matched_against_its_own_partition(
 
 def test_same_key_in_another_hour_is_outside_the_matching_range(spark: SparkSession, table: str, tmp_path: Path):
     first = write_staged(spark, tmp_path / "a", [reading(device_code="code-a", measured_at=utc(11, 30), value=1.0)])
-    merge_files(spark, table, [first], "run-1")
+    merge_files(spark, table, [first], "run-1", MERGED_AT)
     moved = write_staged(spark, tmp_path / "b", [reading(device_code="code-a", measured_at=utc(14, 30), value=2.0)])
 
-    merge_files(spark, table, [moved], "run-2")
+    merge_files(spark, table, [moved], "run-2", MERGED_AT)
 
     assert table_rows(spark, table) == [("msg-1", "temperature", 1.0), ("msg-1", "temperature", 2.0)]
 
 
 def test_same_key_in_another_device_code_is_outside_the_matching_range(spark: SparkSession, table: str, tmp_path: Path):
     first = write_staged(spark, tmp_path / "a", [reading(device_code="code-a", measured_at=utc(11, 30), value=1.0)])
-    merge_files(spark, table, [first], "run-1")
+    merge_files(spark, table, [first], "run-1", MERGED_AT)
     moved = write_staged(spark, tmp_path / "b", [reading(device_code="code-b", measured_at=utc(11, 30), value=2.0)])
 
-    merge_files(spark, table, [moved], "run-2")
+    merge_files(spark, table, [moved], "run-2", MERGED_AT)
 
     assert table_rows(spark, table) == [("msg-1", "temperature", 1.0), ("msg-1", "temperature", 2.0)]
 
@@ -139,7 +150,7 @@ def test_matching_range_pairs_each_device_code_with_its_own_hours_not_every_comb
     # (code-a, 11h) and (code-b, 14h) only; a cross product would also hold (code-a, 14h) and wrongly
     # match the stored row against the incoming (code-a, 11h) row.
     stored = write_staged(spark, tmp_path / "a", [reading(device_code="code-a", measured_at=utc(14, 30), value=1.0)])
-    merge_files(spark, table, [stored], "run-1")
+    merge_files(spark, table, [stored], "run-1", MERGED_AT)
     incoming = write_staged(
         spark,
         tmp_path / "b",
@@ -149,7 +160,7 @@ def test_matching_range_pairs_each_device_code_with_its_own_hours_not_every_comb
         ],
     )
 
-    merge_files(spark, table, [incoming], "run-2")
+    merge_files(spark, table, [incoming], "run-2", MERGED_AT)
 
     assert table_rows(spark, table) == [
         ("msg-1", "temperature", 1.0),
@@ -164,10 +175,10 @@ def test_message_spanning_hours_is_dropped_as_a_whole_when_resent(spark: SparkSe
         reading(metric="humidity", value=2.0, measured_at=utc(12, 1)),
     ]
     first = write_staged(spark, tmp_path / "a", spanning)
-    merge_files(spark, table, [first], "run-1")
+    merge_files(spark, table, [first], "run-1", MERGED_AT)
     resent = write_staged(spark, tmp_path / "b", [{**r, "written_at": utc(12, 5)} for r in spanning])
 
-    merge_files(spark, table, [resent], "run-2")
+    merge_files(spark, table, [resent], "run-2", MERGED_AT)
 
     assert table_rows(spark, table) == [("msg-1", "humidity", 2.0), ("msg-1", "temperature", 1.0)]
 
@@ -182,7 +193,7 @@ def test_message_spanning_hours_with_two_copies_in_one_run_keeps_one_copy(
     a = write_staged(spark, tmp_path / "a", spanning)
     b = write_staged(spark, tmp_path / "b", [{**r, "written_at": utc(12, 5)} for r in spanning])
 
-    merge_files(spark, table, [a, b], "run-1")
+    merge_files(spark, table, [a, b], "run-1", MERGED_AT)
 
     assert spark.table(table).count() == 2
 
@@ -194,9 +205,50 @@ def test_every_row_of_one_run_has_the_same_merge_run_id(spark: SparkSession, tab
         [reading(message_id="m1"), reading(message_id="m2", device_code="code-b"), reading(message_id="m3")],
     )
 
-    merge_files(spark, table, [path], "20261030T120500Z-1a2b3c4d")
+    merge_files(spark, table, [path], "20261030T120500Z-1a2b3c4d", MERGED_AT)
 
     assert {r["merge_run_id"] for r in spark.table(table).collect()} == {"20261030T120500Z-1a2b3c4d"}
+
+
+def test_every_row_of_one_run_has_the_merged_at_that_was_passed(spark: SparkSession, table: str, tmp_path: Path):
+    path = write_staged(
+        spark,
+        tmp_path / "a",
+        [reading(message_id="m1"), reading(message_id="m2", device_code="code-b"), reading(message_id="m3")],
+    )
+
+    merge_files(spark, table, [path], "run-1", MERGED_AT)
+
+    assert merged_at_by_message(spark, table) == [
+        ("m1", seconds(MERGED_AT)),
+        ("m2", seconds(MERGED_AT)),
+        ("m3", seconds(MERGED_AT)),
+    ]
+
+
+def test_each_run_stamps_its_own_merged_at_and_leaves_earlier_rows_alone(
+    spark: SparkSession, table: str, tmp_path: Path
+):
+    first = write_staged(spark, tmp_path / "a", [reading(message_id="m1")])
+    merge_files(spark, table, [first], "run-1", MERGED_AT)
+    second = write_staged(spark, tmp_path / "b", [reading(message_id="m2")])
+
+    merge_files(spark, table, [second], "run-2", utc(12, 10))
+
+    assert merged_at_by_message(spark, table) == [("m1", seconds(MERGED_AT)), ("m2", seconds(utc(12, 10)))]
+
+
+def test_merged_at_of_an_existing_row_is_not_rewritten_when_a_duplicate_copy_is_dropped(
+    spark: SparkSession, table: str, tmp_path: Path
+):
+    first = write_staged(spark, tmp_path / "a", [reading(message_id="m1", value=1.0)])
+    merge_files(spark, table, [first], "run-1", MERGED_AT)
+    resent = write_staged(spark, tmp_path / "b", [reading(message_id="m1", value=9.0, written_at=utc(12, 6))])
+
+    merge_files(spark, table, [resent], "run-2", utc(12, 10))
+
+    assert table_rows(spark, table) == [("m1", "temperature", 1.0)]
+    assert merged_at_by_message(spark, table) == [("m1", seconds(MERGED_AT))]
 
 
 def test_run_ids_have_the_documented_shape_and_sort_by_time():
@@ -215,11 +267,11 @@ def test_run_ids_of_the_same_instant_differ():
 
 def test_insert_only_merge_appends_without_rewriting_existing_files(spark: SparkSession, table: str, tmp_path: Path):
     first = write_staged(spark, tmp_path / "a", [reading(message_id="m1"), reading(message_id="m2")])
-    merge_files(spark, table, [first], "run-1")
+    merge_files(spark, table, [first], "run-1", MERGED_AT)
     files_before = {r["file_path"] for r in spark.sql(f"SELECT file_path FROM {table}.files").collect()}
     second = write_staged(spark, tmp_path / "b", [reading(message_id="m1"), reading(message_id="m3")])
 
-    merge_files(spark, table, [second], "run-2")
+    merge_files(spark, table, [second], "run-2", MERGED_AT)
 
     snapshots = spark.sql(f"SELECT operation, summary FROM {table}.snapshots ORDER BY committed_at").collect()
     files_after = {r["file_path"] for r in spark.sql(f"SELECT file_path FROM {table}.files").collect()}
@@ -231,7 +283,7 @@ def test_insert_only_merge_appends_without_rewriting_existing_files(spark: Spark
 def test_table_stays_format_version_2_after_merge(spark: SparkSession, table: str, tmp_path: Path):
     path = write_staged(spark, tmp_path / "a", [reading()])
 
-    merge_files(spark, table, [path], "run-1")
+    merge_files(spark, table, [path], "run-1", MERGED_AT)
 
     props = {row["key"]: row["value"] for row in spark.sql(f"SHOW TBLPROPERTIES {table}").collect()}
     assert props["format-version"] == "2"
@@ -255,21 +307,21 @@ def test_device_code_with_quote_and_backslash_cannot_break_out_of_the_literal(
 ):
     code = "it's\\a' OR 1=1 --"
     first = write_staged(spark, tmp_path / "a", [reading(device_code=code)])
-    merge_files(spark, table, [first], "run-1")
+    merge_files(spark, table, [first], "run-1", MERGED_AT)
     resent = write_staged(spark, tmp_path / "b", [reading(device_code=code, written_at=utc(12, 5))])
 
-    merge_files(spark, table, [resent], "run-2")
+    merge_files(spark, table, [resent], "run-2", MERGED_AT)
 
     assert [r["device_code"] for r in spark.table(table).collect()] == [code]
 
 
 def test_hours_are_aligned_to_utc_whatever_the_session_time_zone(spark: SparkSession, table: str, tmp_path: Path):
     first = write_staged(spark, tmp_path / "a", [reading(measured_at=utc(11, 30))])
-    merge_files(spark, table, [first], "run-1")
+    merge_files(spark, table, [first], "run-1", MERGED_AT)
     resent = write_staged(spark, tmp_path / "b", [reading(measured_at=utc(11, 30), written_at=utc(12, 5))])
     spark.conf.set("spark.sql.session.timeZone", "Asia/Kolkata")
     try:
-        merge_files(spark, table, [resent], "run-2")
+        merge_files(spark, table, [resent], "run-2", MERGED_AT)
     finally:
         spark.conf.set("spark.sql.session.timeZone", "UTC")
 
@@ -283,10 +335,10 @@ def test_variable_references_in_device_code_are_kept_literal(
     spark: SparkSession, table: str, tmp_path: Path, code: str
 ):
     first = write_staged(spark, tmp_path / "a", [reading(device_code=code)])
-    merge_files(spark, table, [first], "run-1")
+    merge_files(spark, table, [first], "run-1", MERGED_AT)
     resent = write_staged(spark, tmp_path / "b", [reading(device_code=code, written_at=utc(12, 5))])
 
-    merge_files(spark, table, [resent], "run-2")
+    merge_files(spark, table, [resent], "run-2", MERGED_AT)
 
     assert [r["device_code"] for r in spark.table(table).collect()] == [code]
 
@@ -295,6 +347,6 @@ def test_merge_leaves_variable_substitution_setting_as_it_was(spark: SparkSessio
     path = write_staged(spark, tmp_path / "a", [reading()])
     before = spark.conf.get("spark.sql.variable.substitute")
 
-    merge_files(spark, table, [path], "run-1")
+    merge_files(spark, table, [path], "run-1", MERGED_AT)
 
     assert spark.conf.get("spark.sql.variable.substitute") == before

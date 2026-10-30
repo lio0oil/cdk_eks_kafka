@@ -13,7 +13,7 @@ TABLE_DEFINITION_PATH = Path(__file__).resolve().parents[2] / "tables" / "sample
 # Spark's TimestampType is the UTC-adjusted Iceberg timestamptz; plain "timestamp" would be a different type.
 ICEBERG_TYPES = {"string": "string", "double": "double", "timestamp_us_utc": "timestamptz"}
 SPARK_TYPES: dict[str, DataType] = {"string": StringType(), "double": DoubleType(), "timestamptz": TimestampType()}
-ADDED_AFTER_STAGING = [("merge_run_id", "string")]
+ADDED_AFTER_STAGING = [("merge_run_id", "string"), ("merged_at", "timestamptz")]
 
 
 @pytest.fixture(scope="module")

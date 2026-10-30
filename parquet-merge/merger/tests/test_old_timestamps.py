@@ -7,6 +7,7 @@ from pyspark.sql import SparkSession
 from pyspark.sql import functions as F
 
 from merge import merge_files
+from tests.staged import MERGED_AT
 
 EPOCH = datetime(1970, 1, 1, tzinfo=timezone.utc)
 WRITTEN_AT = datetime(2026, 10, 30, 12, 0, 0, tzinfo=timezone.utc)
@@ -52,7 +53,7 @@ def test_pyarrow_written_extreme_timestamps_are_merged_and_read_back_unchanged(
 ):
     path = write_with_pyarrow(tmp_path / "staged.parquet")
 
-    merge_files(spark, table, [path], "run-1")
+    merge_files(spark, table, [path], "run-1", MERGED_AT)
 
     stored = (
         spark.table(table)
@@ -70,8 +71,8 @@ def test_resending_extreme_timestamps_is_matched_against_the_right_hour_range(
     spark: SparkSession, table: str, tmp_path: Path
 ):
     path = write_with_pyarrow(tmp_path / "staged.parquet")
-    merge_files(spark, table, [path], "run-1")
+    merge_files(spark, table, [path], "run-1", MERGED_AT)
 
-    merge_files(spark, table, [path], "run-2")
+    merge_files(spark, table, [path], "run-2", MERGED_AT)
 
     assert spark.table(table).count() == len(EXTREME_INSTANTS)

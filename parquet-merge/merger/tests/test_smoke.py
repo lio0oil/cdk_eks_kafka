@@ -26,7 +26,8 @@ def test_insert_and_read_back(spark: SparkSession, table: str) -> None:
             'dev-1', 'msg-1', 'code-a',
             TIMESTAMP '2026-10-30 12:00:00', TIMESTAMP '2026-10-30 11:59:30',
             'temperature', 21.5,
-            TIMESTAMP '2026-10-30 12:01:00', 'run-1'
+            TIMESTAMP '2026-10-30 12:01:00', 'run-1',
+            TIMESTAMP '2026-10-30 12:02:00'
         )
         """
     )
@@ -44,6 +45,7 @@ def test_insert_and_read_back(spark: SparkSession, table: str) -> None:
             value=21.5,
             written_at=rows[0]["written_at"],
             merge_run_id="run-1",
+            merged_at=rows[0]["merged_at"],
         )
     ]
 

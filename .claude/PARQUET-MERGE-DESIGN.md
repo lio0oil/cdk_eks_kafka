@@ -21,7 +21,7 @@ Kafka（既存の topic。今回の範囲外）
   → [間隔ごと] EventBridge Scheduler → EMR Serverless（maxConcurrentRuns=1）で MERGE ジョブ
        1. 前回より後に書き終わった分の Parquet を読む
        2. 入力の中でメッセージごとに 1 ファイルの行だけ残す
-       3. 本テーブルへ MERGE INTO（キーが無い行だけ INSERT）、merge_run_id を付ける
+       3. 本テーブルへ MERGE INTO（キーが無い行だけ INSERT）、merge_run_id と merged_at を付ける
        4. 処理済みの時刻（watermark）を S3 に記録
   → S3 Tables（Iceberg）  sample_readings
 ```
@@ -99,8 +99,9 @@ message Reading {
 | `measured_at` | timestamptz | Reading の `measured_at`（Unix time を変換）。partition 元 |
 | `metric` | string | Reading の `metric` |
 | `value` | double | Reading の `value` |
-| `written_at` | timestamptz | Lambda のバッチ書き込み時刻（登録日時）。同じバッチの全行で同じ値 |
+| `written_at` | timestamptz | Lambda が staging にバッチを書いた時刻。同じバッチの全行で同じ値 |
 | `merge_run_id` | string | MERGE の実行 ID。時刻順に並ぶ文字列（例: `20261030T120500Z-1a2b3c4d`）。読む側の差分抽出に使う |
+| `merged_at` | timestamptz | MERGE が本テーブルに INSERT した時刻（登録日時）。1 回の実行の全行で同じ値 |
 
 - **時刻列の型は `timestamptz`**（Spark の `TimestampType`、staging の `timestamp_us_utc` に対応）。値は UTC の瞬間（Unix time）で、Spark の `TimestampType` が瞬間を表す型であり、Iceberg では `timestamptz` に対応するため。
 - **partition**: `device_code`（identity）と `hour(measured_at)`。MERGE を数分間隔で回しても 1 回に読む量を抑えるため、時間は日単位ではなく時間単位（DEDUP-OPTIONS 5.2 節の表）。
@@ -163,7 +164,7 @@ message Reading {
    - 時間の切り出しは UTC の整数演算（エポックからのマイクロ秒を 1 時間で割る）。セッションの TZ に依存しない。
    - 時間範囲は `TIMESTAMP '...'` のリテラルではなく `timestamp_micros(<epoch マイクロ秒>)` で書く。9999 年 12 月 31 日 23 時台の次の時間は西暦 10000 年になり、リテラルも Python の `datetime` も表せないため。
    - 照合条件は、`(device_code, 時間範囲)` の組ごとの OR。`device_code` と時間範囲を別々に集めた直積にはしない（入力にない組の partition まで読むのを避ける）。
-4. `merge_run_id` を採番し、入力に付ける。
+4. `merge_run_id` を採番し、入力に付ける。あわせて `merged_at` も入力に付ける。`merge_run_id` と `merged_at` は、ジョブ起動時に 1 回だけ取る同じ現在時刻（`now`）から作る。`merge_run_id` の時刻部分は秒まで、`merged_at` はマイクロ秒まで持つ。
 5. 実行:
 
 ```sql
@@ -258,11 +259,12 @@ WHEN NOT MATCHED THEN INSERT *
 - 照合範囲: 古い `measured_at` で遅れて届いたデータが、該当する `(device_code, 時間)` の partition だけ照合して入る。
 - 1 メッセージの `readings` が複数の時間にまたがる場合（時間 partition をまたぐ場合）も、同じメッセージの別コピーが全行重複として落ちる。
 - `merge_run_id`: 1 回の実行で入った全行に同じ値が入り、実行ごとに時刻順に増える。
+- `merged_at`: 1 回の実行で入った全行が、呼び出し側から渡した時刻と同じ値になる。実行ごとに渡した値がそのまま入り、後の実行は前の実行の行を変えない。本テーブルに既にあるメッセージの重複コピーが落ちたときも、既存行の `merged_at` は書き換わらない。ジョブの起動処理では、同じ時刻から `merge_run_id` と `merged_at` が作られる。
 - 新しい snapshot の operation が `append` で、既存のデータファイルを書き直さないこと（insert のみの MERGE の挙動をテストで固定する）。
 
 **テーブル定義 JSON（`tables/sample_readings.json`、merger のプロジェクトのテストで静的に検査。モック不要）**
 
-- 列が `contract/staging_schema.json` と矛盾しない（MERGE が付ける `merge_run_id` を加えた形）。`sent_at`、`measured_at`、`written_at` の型が `timestamptz`（staging の `timestamp_us_utc` に対応）。
+- 列が `contract/staging_schema.json` と矛盾しない（MERGE が付ける `merge_run_id` と `merged_at` を加えた形）。`sent_at`、`measured_at`、`written_at` の型が `timestamptz`（staging の `timestamp_us_utc` に対応）。
 - partition の `sourceId` が、`device_code`（identity）と `measured_at`（hour）の列 ID を指している。
 - `format-version` が `"2"`。
 

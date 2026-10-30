@@ -10,7 +10,8 @@
         { "id": 6, "name": "metric", "type": "string" },
         { "id": 7, "name": "value", "type": "double" },
         { "id": 8, "name": "written_at", "type": "timestamptz" },
-        { "id": 9, "name": "merge_run_id", "type": "string" }
+        { "id": 9, "name": "merge_run_id", "type": "string" },
+        { "id": 10, "name": "merged_at", "type": "timestamptz" }
       ]
     },
     "partitionSpec": {

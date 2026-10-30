@@ -10,10 +10,10 @@ from pytest_mock import MockerFixture
 
 import job
 from incoming import read_watermark, write_watermark
-from job import parse_args, run
+from job import main, parse_args, run
 from merge import merge_files
 from tests.conftest import BUCKET
-from tests.staged import reading, utc, write_staged
+from tests.staged import MERGED_AT, reading, utc, write_staged
 
 
 def at(hour: int, minute: int, second: int = 0) -> datetime:
@@ -38,7 +38,7 @@ def merging_into(
             path = workdir / f"fetched-{i}-{key.replace('/', '_')}"
             path.write_bytes(s3.get_object(Bucket=BUCKET, Key=key)["Body"].read())
             local.append(str(path))
-        merge_files(spark, table, local, run_id)
+        merge_files(spark, table, local, run_id, MERGED_AT)
 
     return merge
 
@@ -165,3 +165,18 @@ def test_arguments_accept_a_margin():
     args = parse_args(["--staging-bucket", "b", "--target", "cat.db.t", "--margin-seconds", "300"])
 
     assert args.margin_seconds == 300
+
+
+def test_main_uses_one_instant_for_both_the_run_id_and_merged_at(mocker: MockerFixture):
+    mocker.patch.object(job, "boto3")
+    mocker.patch.object(job, "SparkSession")
+    run_mock = mocker.patch.object(job, "run")
+    merge_files_mock = mocker.patch.object(job, "merge_files")
+
+    main(["--staging-bucket", "b", "--target", "cat.db.t"])
+    _, _, now, _, merge = run_mock.call_args.args
+    merge(["s3://b/incoming/x.parquet"])
+
+    (_, _, _, run_id, merged_at), _ = merge_files_mock.call_args
+    assert merged_at == now
+    assert run_id.startswith(f"{now:%Y%m%dT%H%M%SZ}-")

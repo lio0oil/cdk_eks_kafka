@@ -50,7 +50,8 @@ def table(spark: SparkSession) -> Generator[str, None, None]:
             metric string,
             value double,
             written_at timestamp,
-            merge_run_id string
+            merge_run_id string,
+            merged_at timestamp
         )
         USING iceberg
         PARTITIONED BY (device_code, hour(measured_at))

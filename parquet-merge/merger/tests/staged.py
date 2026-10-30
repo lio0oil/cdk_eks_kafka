@@ -7,6 +7,7 @@ from pyspark.sql import SparkSession
 from staging_schema import staging_schema
 
 WRITTEN_AT = datetime(2026, 10, 30, 12, 0, 0, tzinfo=timezone.utc)
+MERGED_AT = datetime(2026, 10, 30, 12, 5, 0, tzinfo=timezone.utc)
 
 
 def utc(hour: int, minute: int = 0, day: int = 30) -> datetime:
