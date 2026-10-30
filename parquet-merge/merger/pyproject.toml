@@ -1,0 +1,41 @@
+[project]
+name = "merger"
+version = "0.1.0"
+description = "Periodic MERGE job from staging Parquet into an Iceberg table"
+# EMR Serverless 7.14.0 が Python 3.11 を採用しているため揃える
+requires-python = ">=3.11,<3.12"
+dependencies = ["boto3>=1.40,<2"]
+
+[dependency-groups]
+# PySpark は EMR Serverless に同梱されるため本番には含めない。7.14.0 同梱版に pin。
+dev = [
+    "moto[s3]>=5.2,<6",
+    "pyarrow>=26,<27",
+    "pyright>=1.1.414",
+    "pyspark==3.5.8",
+    "pytest>=9.2,<10",
+    "pytest-mock>=3.17,<4",
+    "ruff>=0.17,<0.18",
+]
+
+[tool.ruff]
+line-length = 120
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "TID"]
+
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"unittest.mock".msg = "Use pytest-mock (the mocker fixture) instead."
+
+[tool.pyright]
+venvPath = "."
+venv = ".venv"
+typeCheckingMode = "standard"
+include = ["*.py", "tests"]
+exclude = ["**/__pycache__", "**/.*", ".venv"]
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = ["-ra", "-q", "--strict-markers", "--strict-config"]
