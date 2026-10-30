@@ -23,6 +23,14 @@
     {
       "name": "kafka2/consumer",
       "path": "kafka2/consumer"
+    },
+    {
+      "name": "parquet-merge/writer",
+      "path": "parquet-merge/writer"
+    },
+    {
+      "name": "parquet-merge/merger",
+      "path": "parquet-merge/merger"
     }
   ],
   "settings": {
