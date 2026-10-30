@@ -1,0 +1,48 @@
+[project]
+name = "writer"
+version = "0.1.0"
+description = "Lambda that decodes Kafka readings and writes one Parquet file per batch to S3"
+# Lambda の Python 3.13 ランタイムに合わせる
+requires-python = ">=3.13,<3.14"
+dependencies = [
+    # boto3 は Lambda ランタイムが提供するため zip に含めず、ここでも宣言しない
+    # readings_pb2.py を protoc 35.x（Python gencode 7.35.0）で生成しているため、ランタイムも 7.35 以上に揃える
+    "protobuf>=7.35,<8",
+    "pyarrow>=26,<27",
+]
+
+[dependency-groups]
+dev = [
+    "moto[s3]>=5.2,<6",
+    "pyright>=1.1.414",
+    "pytest>=9.2,<10",
+    "pytest-mock>=3.17,<4",
+    "ruff>=0.17,<0.18",
+]
+
+[tool.pytest.ini_options]
+minversion = "8.0"
+testpaths = ["tests"]
+pythonpath = ["."]
+addopts = ["-ra", "-q", "--strict-markers", "--strict-config"]
+
+[tool.ruff]
+line-length = 120
+# protoc の生成物は整形・lint の対象にしない
+extend-exclude = ["readings_pb2.py", "readings_pb2.pyi"]
+# pre-commit はファイル名を明示して渡すため、これがないと extend-exclude が無視される
+force-exclude = true
+
+[tool.ruff.lint]
+select = ["E", "F", "I", "TID"]
+
+[tool.ruff.lint.flake8-tidy-imports.banned-api]
+"unittest.mock".msg = "Use pytest-mock (the mocker fixture) instead."
+
+[tool.pyright]
+venvPath = "."
+venv = ".venv"
+typeCheckingMode = "standard"
+include = ["*.py", "tests"]
+# protoc の生成物は動的属性が多く pyright と相性が悪い
+exclude = ["**/__pycache__", "**/.*", ".venv", "readings_pb2.py"]

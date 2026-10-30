@@ -1,0 +1,20 @@
+syntax = "proto3";
+
+package ekscdk.parquetmerge;
+
+// Kafka の value は、この ReadingsMessage をシリアライズして zlib 圧縮したもの。
+// 重複キーは (device_id, message_id)。1 メッセージは readings の件数だけ行に展開される。
+// 時間はすべて Unix time（UTC、マイクロ秒）の int64。
+message ReadingsMessage {
+  string device_id = 1;
+  string device_code = 2;  // テーブルの partition に使う。デバイスが再送しても変わらない
+  string message_id = 3;   // UUID。デバイスが再送しても同じ値
+  int64 sent_at = 4;       // デバイスの送信時刻
+  repeated Reading readings = 5;
+}
+
+message Reading {
+  string metric = 1;
+  double value = 2;
+  int64 measured_at = 3;   // 計測時刻。テーブルの partition に使う。デバイスが再送しても変わらない
+}

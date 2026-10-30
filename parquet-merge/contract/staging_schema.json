@@ -1,0 +1,12 @@
+{
+  "columns": [
+    {"name": "device_id", "type": "string"},
+    {"name": "message_id", "type": "string"},
+    {"name": "device_code", "type": "string"},
+    {"name": "sent_at", "type": "timestamp_us_utc"},
+    {"name": "measured_at", "type": "timestamp_us_utc"},
+    {"name": "metric", "type": "string"},
+    {"name": "value", "type": "double"},
+    {"name": "written_at", "type": "timestamp_us_utc"}
+  ]
+}
