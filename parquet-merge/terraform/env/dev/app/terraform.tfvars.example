@@ -1,0 +1,39 @@
+# このファイルを terraform.tfvars にコピーして実値を書く。terraform.tfvars はアカウント ID などを含むため
+# リポジトリには置かない（.gitignore 済み）。
+region      = "ap-northeast-1"
+environment = "dev"
+
+# Lambda・IAM ロール・Scheduler の名前の接頭辞
+name_prefix = "parquet-merge-dev"
+
+# 既存の Kafka。ESM のポーラー ENI を置く subnet と、Kafka に到達できる SG
+subnet_ids            = ["subnet-xxxxxxxxxxxxxxxxx"]
+esm_security_group_id = "sg-xxxxxxxxxxxxxxxxx"
+bootstrap_dns_name    = "<Kafka の bootstrap のホスト名>"
+bootstrap_port        = 9094
+# topic_name = "sample-readings"
+
+# 本テーブルを置く S3 Tables のテーブルバケットと namespace。ジョブ実行ロールはこのバケットだけに読み書きできる
+table_bucket_arn = "arn:aws:s3tables:ap-northeast-1:<アカウントID>:bucket/<テーブルバケット名>"
+namespace_name   = "<namespace>"
+# table_name = "sample_readings"
+
+# infra の適用後に scripts/build-artifacts.sh の手順で function.zip をアップロードして得た S3 VersionId
+function_object_version = "<VersionId>"
+
+lambda_timeout_seconds = 60
+lambda_memory_mb       = 512
+log_retention_days     = 14
+
+esm_starting_position           = "LATEST"
+esm_batch_size                  = 100
+esm_max_batching_window_seconds = 5
+
+# merge_margin_seconds は lambda_timeout_seconds + 30 以上にする
+schedule_expression  = "rate(5 minutes)"
+merge_margin_seconds = 120
+
+# S3 Tables の catalog の設定。EMR Serverless 7.14.0 での jar の渡し方は未確認で、以下は kafka/consumer の
+# README（ローカル PySpark と EMR 7.13.0 を想定）を元にした出発点にすぎない。実際のジョブで確かめてから使う。
+# Iceberg の jar は EMR に同梱されるため含めていない。catalog 名は module の catalog_name（既定 s3tablesbucket）と揃える。
+spark_submit_parameters = "--conf spark.jars.packages=software.amazon.s3tables:s3-tables-catalog-for-iceberg-runtime:0.1.5 --conf spark.sql.extensions=org.apache.iceberg.spark.extensions.IcebergSparkSessionExtensions --conf spark.sql.catalog.s3tablesbucket=org.apache.iceberg.spark.SparkCatalog --conf spark.sql.catalog.s3tablesbucket.catalog-impl=software.amazon.s3tables.iceberg.S3TablesCatalog"
